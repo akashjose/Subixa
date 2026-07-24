@@ -1,0 +1,125 @@
+# custom media player
+
+A desktop media player built on **Qt 6.9 + QML + libmpv**, with a first-class
+**subtitle browser** as its reason for existing.
+
+## Why
+
+Most players treat subtitles as something you *watch*, not something you *read or
+search*. PotPlayer is the exception, and its docked subtitle list is the feature worth
+rebuilding: every line of every subtitle track, timestamped, searchable, and clickable to
+jump straight to that moment.
+
+That is the goal. Playback is the necessary substrate; the subtitle browser is the point.
+
+## Target feature set
+
+**Subtitle browser** (the core)
+
+- One tab per subtitle track in the file
+- Every line as a timestamped row
+- Full-text search across the track
+- Click a row → seek there
+- Auto-follow: the current line highlights and scrolls into view as playback advances
+
+**Player** (enough to make the above usable)
+
+- Open/drag-drop, transport controls, seek bar, volume, playback speed
+- Audio/subtitle track selection
+- Keyboard shortcuts, fullscreen
+- Remembers position per file
+
+## Design decisions
+
+**Built from scratch, not forked.** VLC, Haruna, and SMPlayer all carry architecture
+shaped around their own UI goals. libmpv is a dependency here, not a base.
+
+**mpv render API, not `--wid`.** The video surface is a `QQuickFramebufferObject`: mpv
+renders into an FBO the app owns, so it is an ordinary scene-graph node and QML composites
+freely on top. `--wid` would put video in a separate native surface *above* the scene
+graph, which makes overlays and docked panels unreliable — fatal for this design.
+
+**Subtitle text is parsed independently of mpv.** mpv only exposes the *currently
+displayed* subtitle line, which cannot produce a browsable list. Subtitle streams are
+demuxed and decoded separately with libavformat/libavcodec.
+
+## Status
+
+Foundation complete and verified. Video renders inside the window via the render API,
+QML composites over it, transport controls track playback.
+
+The subtitle panel is a **static placeholder** — no parsing yet.
+
+## Roadmap
+
+### Milestone 1 — Subtitle extraction (next)
+
+- Enumerate `AVMEDIA_TYPE_SUBTITLE` streams with libavformat; expose track list + language
+  metadata
+- Decode packets to `AVSubtitle`, converting to `{startMs, endMs, text}` rows
+- Handle the text formats: SRT, ASS/SSA, `mov_text`. Strip ASS override tags for display
+  while keeping raw text around
+- Detect bitmap subtitles (PGS, VOBSUB) and mark them unsupported — they carry no text,
+  so a browser would need OCR. Out of scope for now
+- Load sidecar files (`.srt`/`.ass` next to the video) alongside embedded tracks
+- Run parsing off the GUI thread; large ASS tracks are slow enough to stutter the UI
+
+### Milestone 2 — Browser UI
+
+- `QAbstractListModel` of subtitle lines, one model per track, tabs across tracks
+- `QSortFilterProxyModel` for incremental search
+- Click-to-seek
+- Auto-follow with binary search on the current timestamp, plus a toggle so manual
+  scrolling does not fight playback
+
+### Milestone 3 — Player usability
+
+- File open dialog + drag-and-drop
+- Audio/subtitle track switching wired to mpv
+- Volume, playback speed, fullscreen
+- Keyboard shortcuts
+- Resume position per file
+
+### Milestone 4 — Polish
+
+- Settings persistence
+- Error surfaces for unsupported/corrupt files
+- Theming for the browser panel
+- Export a track to `.srt`
+
+## Build
+
+Requires Qt 6.9 (system Qt 6.4 on Ubuntu 24.04 is too old), libmpv, and FFmpeg dev
+libraries.
+
+```bash
+sudo apt install -y build-essential cmake ninja-build pkg-config \
+  libmpv-dev libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libswscale-dev
+
+export CMAKE_PREFIX_PATH="$HOME/Qt/6.9.3/gcc_64"
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+./build/custom_media_player /path/to/video.mkv
+```
+
+Qt itself is installed via [aqtinstall](https://github.com/miurahr/aqtinstall):
+
+```bash
+pipx install aqtinstall
+aqt install-qt linux desktop 6.9.3 linux_gcc_64 \
+  -m qtshadertools qtimageformats qtmultimedia qt5compat -O ~/Qt
+```
+
+Note `qtdeclarative` is **not** a valid module for Qt 6 — QML and Quick ship in the base
+package, and passing a bad module name aborts the whole install.
+
+## Development notes
+
+Running under WSLg means software video decode. That is expected and fine for
+development; it is not a bug to chase.
+
+`testclip.mp4` is a generated 15-second clip with a burned-in timecode, so a screenshot is
+enough to confirm the rendered frame matches the reported playback position.
+
+See `CLAUDE.md` for build gotchas that have already cost time — particularly `vo=libmpv`
+and render-context ordering.
