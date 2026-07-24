@@ -1,0 +1,7 @@
+build/
+.cache/
+compile_commands.json
+*.user
+*.autosave
+.qtc_clangd/
+CMakeLists.txt.user*
