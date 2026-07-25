@@ -70,10 +70,11 @@ deliberately, because a screenshot is the least reliable evidence available here
   creates a render context, so the queued `loadfile` never flushes and mpv loads
   nothing at all (trap 2).
 
-One `QEXPECT_FAIL` records a real gap rather than hiding it: search does not fold
-U+00A0 to a plain space, so a phrase spanning an ASS `\h` (which the extractor
-correctly keeps as a non-breaking space) matches nothing. Fixing
-`filterAcceptsRow()` flips it to an unexpected pass.
+The harness found one real bug on its first run, since fixed: search did not fold
+U+00A0 to a plain space, so a phrase spanning an ASS `\h` matched nothing. The
+extractor is right to keep the hard space — `SubtitleFilterModel` now folds it on
+both sides, and only when the pattern contains a space, so single-word searches
+keep the optimised `QString::contains()` path.
 
 Headless run of the app itself:
 

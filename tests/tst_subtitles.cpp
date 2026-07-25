@@ -79,7 +79,7 @@ private slots:
 
     void filterMatchesTextCaseInsensitively();
     void filterDoesNotSearchTimestamps();
-    void nonBreakingSpaceDefeatsSearch();
+    void searchFoldsHardSpaces();
     void rowAtMapsThroughTheFilter();
     void startMsAtRoundTripsThroughTheFilter();
 };
@@ -159,7 +159,7 @@ void TstSubtitles::assTagsAndEscapesAreResolved()
     // ASS \h is a *non-breaking* space and stays one: U+00A0, not U+0020. Built
     // from an explicit codepoint because the two are indistinguishable on sight
     // in this file -- and the difference has a consequence for search, pinned
-    // down by nonBreakingSpaceDefeatsSearch() below.
+    // down by searchFoldsHardSpaces() below.
     const QString nbsp(QChar(0x00A0));
     QCOMPARE(ass->lines[2].text,
              QStringLiteral("Italic then normal, plus a") + nbsp
@@ -325,7 +325,7 @@ void TstSubtitles::filterDoesNotSearchTimestamps()
              QStringLiteral("mentions 12 explicitly"));
 }
 
-void TstSubtitles::nonBreakingSpaceDefeatsSearch()
+void TstSubtitles::searchFoldsHardSpaces()
 {
     const QString nbsp(QChar(0x00A0));
     QVector<SubtitleLine> lines;
@@ -337,18 +337,27 @@ void TstSubtitles::nonBreakingSpaceDefeatsSearch()
     SubtitleFilterModel filter;
     filter.setSourceModel(&model);
 
-    // Known gap, recorded rather than fixed: the cue holds U+00A0 where the user
-    // typed U+0020, so a phrase spanning an ASS \h finds nothing. It hides well
-    // because searching either side of the hard space works fine, and the panel
-    // renders the two identically. Folding U+00A0 to a space in
-    // filterAcceptsRow() would close it; when that happens this test flips to
-    // an unexpected pass and says so.
+    // The cue holds U+00A0 where the user types U+0020, so a phrase spanning an
+    // ASS \h has to match anyway. This hid well before it was fixed: searching
+    // either side of the hard space works, and the panel renders both alike.
     filter.setPattern(QStringLiteral("a hard space"));
-    QEXPECT_FAIL("", "search does not fold U+00A0 to a plain space", Continue);
     QCOMPARE(filter.count(), 1);
 
     filter.setPattern(QStringLiteral("hard space"));
     QCOMPARE(filter.count(), 1);
+
+    // A hard space pasted out of the panel has to match too, which is why the
+    // pattern is folded rather than only the cue text.
+    filter.setPattern(QStringLiteral("a") + nbsp + QStringLiteral("hard"));
+    QCOMPARE(filter.count(), 1);
+
+    // Case folding still applies on the folded path.
+    filter.setPattern(QStringLiteral("A HARD SPACE"));
+    QCOMPARE(filter.count(), 1);
+
+    // And the folded path must not match across a gap that is not there.
+    filter.setPattern(QStringLiteral("plus  a"));
+    QCOMPARE(filter.count(), 0);
 }
 
 void TstSubtitles::rowAtMapsThroughTheFilter()

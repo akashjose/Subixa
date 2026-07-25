@@ -46,4 +46,9 @@ protected:
 
 private:
     QString m_pattern;
+    // m_pattern with U+00A0 folded to a space and case folded, so the per-row
+    // scan folds the cue text only. Used when m_foldSpaces says the pattern
+    // could span an ASS hard space; otherwise QString::contains() is faster.
+    QString m_needle;
+    bool m_foldSpaces = false;
 };
