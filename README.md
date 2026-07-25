@@ -102,7 +102,7 @@ The model shares each track's line buffer instead of copying it, so switching ta
 refcount bump — the 200k-cue fixture browses and follows without the ~600 ms GUI stall the
 milestone 1 snapshot cost.
 
-### Milestone 3 — Player usability (in progress)
+### Milestone 3 — Player usability ✅
 
 - ✅ Audio/subtitle track switching wired to mpv — the panel and the picture agree, in both
   directions. Tracks are matched by ffmpeg stream index through mpv's `ff-index`, since
@@ -111,10 +111,16 @@ milestone 1 snapshot cost.
 - ✅ Fullscreen + keyboard shortcuts — works, but see the renderer defect under Status
 - ✅ File open dialog + drag-and-drop
 - ✅ Volume, playback speed
-- Resume position per file
+- ✅ Resume position per file — kept per file with a deliberately conservative policy: a
+  clip under two minutes, the first thirty seconds, and the last minute are all left
+  unremembered, and finishing a film clears the position rather than dropping you back
+  into the credits next time
 
-Ahead of the last item: **cap the video framebuffer to the video's native size.** Fullscreen
-turned a known CPU cost into a correctness bug, and capping fixes both.
+Still open in the renderer: **cap the video framebuffer on the software rasterizer.**
+Fullscreen turned a known CPU cost into a correctness bug there. It needs to be
+`min(pane, native, safe area)` and gated on the software check — libass draws subtitles into
+the same framebuffer, so an unconditional cap would blur the one thing this player exists
+to show.
 
 ### Milestone 4 — Polish
 
@@ -173,13 +179,13 @@ visual checks return false negatives until the distro is restarted.
 cd build && ctest --output-on-failure
 ```
 
-Two headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
+Three headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
 layer underneath the browser — the cue binary search, the search filter, and the row mapping
 auto-follow depends on. `tst_mpvtracks` links libmpv with `vo=null` and checks that selecting
 a track changes what mpv would render, comparing its `sub-text` property rather than looking
-at pixels.
+at pixels. `tst_playbackhistory` covers the resume-position store and its policy.
 
-Both avoid needing a window on purpose: under WSLg a screenshot is the *least* reliable
+They avoid needing a window on purpose: under WSLg a screenshot is the *least* reliable
 evidence available, since the session can degrade into painting stale frames while mpv and
 the models keep working correctly.
 

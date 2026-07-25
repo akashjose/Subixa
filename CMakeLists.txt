@@ -34,6 +34,8 @@ qt_add_executable(custom_media_player
     src/SubtitleLineModel.h
     src/SubtitleFilterModel.cpp
     src/SubtitleFilterModel.h
+    src/PlaybackHistory.cpp
+    src/PlaybackHistory.h
 )
 
 qt_add_qml_module(custom_media_player
@@ -79,6 +81,12 @@ set(CMP_MODEL_SOURCES
     src/SubtitleFilterModel.cpp
 )
 
+# Resume-position store. Its policy is what the tests are really about, so it is
+# built as its own target rather than folded into the subtitle suite.
+qt_add_executable(tst_playbackhistory tests/tst_playbackhistory.cpp src/PlaybackHistory.cpp)
+target_include_directories(tst_playbackhistory PRIVATE src)
+target_link_libraries(tst_playbackhistory PRIVATE Qt6::Core Qt6::Qml Qt6::Test)
+
 qt_add_executable(tst_subtitles tests/tst_subtitles.cpp ${CMP_MODEL_SOURCES})
 target_include_directories(tst_subtitles PRIVATE src)
 target_compile_definitions(tst_subtitles PRIVATE
@@ -104,9 +112,10 @@ target_link_libraries(tst_mpvtracks PRIVATE
 
 add_test(NAME subtitles COMMAND tst_subtitles)
 add_test(NAME mpvtracks COMMAND tst_mpvtracks)
+add_test(NAME playbackhistory COMMAND tst_playbackhistory)
 
 # Neither test needs a display; make sure they never try to open one.
-set_tests_properties(subtitles mpvtracks PROPERTIES
+set_tests_properties(subtitles mpvtracks playbackhistory PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=minimal"
     TIMEOUT 120
 )

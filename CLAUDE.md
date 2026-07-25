@@ -82,7 +82,7 @@ Subtitle fixtures (`testclip.mp4` has no subtitle track):
 cd build && ctest --output-on-failure     # or run ./build/tst_subtitles directly
 ```
 
-Two headless suites, neither needing a window, a GL context, or a compositor —
+Three headless suites, none needing a window, a GL context, or a compositor —
 deliberately, because a screenshot is the least reliable evidence available here
 (see the degraded-state note below). Run these before reaching for the UI.
 
@@ -99,6 +99,12 @@ deliberately, because a screenshot is the least reliable evidence available here
   strings. Note `vo=null` rather than `QT_QPA_PLATFORM=offscreen`: offscreen never
   creates a render context, so the queued `loadfile` never flushes and mpv loads
   nothing at all (trap 2).
+- **`tst_playbackhistory`** — the resume-position store against a temporary ini file,
+  and mostly its policy: too short, barely started, and near-the-end all mean *do
+  not resume*, and finishing a file clears a position saved earlier. Also that two
+  films with the same basename in different directories do not collide — paths are
+  hashed because `QSettings` reads `/` as a group separator — and that the same file
+  named relatively and absolutely resolves to one entry.
 
 The harness found one real bug on its first run, since fixed: search did not fold
 U+00A0 to a plain space, so a phrase spanning an ASS `\h` matched nothing. The
@@ -456,26 +462,26 @@ on the same software-rasterizer check is the obvious follow-up.
 
 ## Next up
 
-Everything through milestone 2 is committed and the tree is clean. Milestones 1
-(extraction) and 2 (browser UI) are done: tracks parse off the GUI thread, and the docked
-panel has per-track tabs, a search box, click-to-seek, and auto-follow with a toggle, fed
-by `SubtitleLineModel` through `SubtitleFilterModel`. Verified against a real 3 GB AV1
-film with **65 subtitle tracks / 93 350 cues**, not just the fixtures.
+Milestones 1 (extraction), 2 (browser UI) and 3 (player usability) are all committed and
+the tree is clean. The panel and the picture agree in both directions, and the player has
+fullscreen, keyboard shortcuts, a file dialog, drag-and-drop, volume, speed and per-file
+resume. Verified against a real 3 GB AV1 film with **65 subtitle tracks / 93 350 cues**,
+not just the fixtures — including resuming it at 29:44 after a kill.
 
-**First thing in a new session:** play a fixture in a real window and confirm the picture
-appears. If it is black, the WSLg session is in the degraded state described above and
-every visual check will lie — reset it before trusting any render result.
+**First thing in a new session:** run with `GALLIUM_DRIVER=d3d12` (see Environment) and
+play a fixture in a real window to confirm the picture appears. On the software path a
+black or partial frame may be the degraded WSLg state rather than a real bug, and every
+visual check will lie until the distro is restarted.
 
-Immediate task is **Milestone 3: player usability**, in this order and for this reason:
+Next, in this order:
 
-1. **Audio/subtitle track switching wired to mpv** (`sid`/`aid` through `MpvObject`). Do
-   this first: it is the only item that is not generic player plumbing. Today the browser
-   panel and what mpv burns over the video are completely independent, so you can read the
-   Arabic track in the panel while English renders on screen, with no way to reconcile
-   them. This closes the loop on the feature the project exists for.
-2. **Fullscreen + keyboard shortcuts.** Only safe now that trap 10 is fixed.
-3. **File open dialog + drag-and-drop**, then volume, speed, and resume position per file.
-   All mechanical.
+1. **Cap the video FBO on the software rasterizer.** The only correctness bug still open,
+   and the one thing standing between the software fallback and usable fullscreen. Shape it
+   as `min(pane, native, safe area)` and gate it on `usingSoftwareRasterizer()` — see the
+   loose end below for why a blanket cap is wrong.
+2. **Milestone 4: polish.** Settings persistence beyond resume position, error surfaces for
+   unsupported or corrupt files, theming for the panel, and exporting a track to `.srt`.
+3. **A QML-level test harness**, if UI regressions start costing time — see the loose end.
 
 Loose ends worth folding into whatever touches them next:
 

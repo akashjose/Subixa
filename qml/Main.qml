@@ -51,13 +51,56 @@ ApplicationWindow {
         interval: 2500
     }
 
+    PlaybackHistory {
+        id: history
+    }
+
+    // The file currently open, tracked because mpv's own path is not what the
+    // history is keyed on and the outgoing file has to be saved before switching.
+    property string currentFile: ""
+    // Seconds to jump to once mpv reports the file loaded, or -1.
+    property double pendingResume: -1
+
     // One way in for every source of a file: argv[1], the dialog, and a drop.
     function openFile(path) {
         if (path === "")
             return
+        // Save where the outgoing file got to before its position is gone.
+        root.rememberPosition()
+        root.currentFile = path
+        root.pendingResume = history.resumeFor(path)
         mpv.loadFile(path)
         subs.load(path)
     }
+
+    function rememberPosition() {
+        if (root.currentFile !== "" && mpv.duration > 0)
+            history.remember(root.currentFile, mpv.position, mpv.duration)
+    }
+
+    Connections {
+        target: mpv
+        // Seeking has to wait for the file to be loaded; mpv has no position to
+        // seek within before that.
+        function onFileLoaded() {
+            if (root.pendingResume > 0) {
+                mpv.seek(root.pendingResume)
+                root.pendingResume = -1
+            }
+        }
+    }
+
+    // Periodic save, so a crash or a kill -9 loses seconds rather than the whole
+    // position. Only while playing: saving the same paused position repeatedly
+    // just rewrites the file for nothing.
+    Timer {
+        interval: 5000
+        repeat: true
+        running: !mpv.paused && mpv.duration > 0
+        onTriggered: root.rememberPosition()
+    }
+
+    onClosing: root.rememberPosition()
 
     function toggleFullscreen() {
         visibility = root.fullscreen ? Window.Windowed : Window.FullScreen
