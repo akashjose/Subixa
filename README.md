@@ -54,8 +54,14 @@ search box filters the track as you type, clicking a row seeks to it, and the li
 now is highlighted and scrolled into view — until you drag the list, which turns following
 off rather than fighting you for the viewport.
 
+Exercised on a real 3 GB AV1 film carrying **65 subtitle tracks and 93 350 cues**, with a
+matching sidecar `.srt` picked up as a 66th: tabs per language, search across the track,
+and follow landing on the correct cue after arbitrary seeks.
+
 Player controls are still minimal: playback comes from the file passed as `argv[1]`, and
-there is no open dialog, track switching, or volume yet.
+there is no open dialog, track switching, volume, or fullscreen yet. The panel is also
+independent of what mpv renders — selecting a tab changes what you *read*, not the
+subtitles burned over the video. Wiring those together is the next task.
 
 ## Roadmap
 
@@ -88,10 +94,11 @@ milestone 1 snapshot cost.
 
 ### Milestone 3 — Player usability (next)
 
+- Audio/subtitle track switching wired to mpv — first, since it is what makes the panel
+  and the picture agree
+- Fullscreen + keyboard shortcuts
 - File open dialog + drag-and-drop
-- Audio/subtitle track switching wired to mpv
-- Volume, playback speed, fullscreen
-- Keyboard shortcuts
+- Volume, playback speed
 - Resume position per file
 
 ### Milestone 4 — Polish
@@ -129,8 +136,21 @@ package, and passing a bad module name aborts the whole install.
 
 ## Development notes
 
-Running under WSLg means software video decode. That is expected and fine for
-development; it is not a bug to chase.
+Running under WSLg means software decode *and* software rendering. That is expected and
+fine for development; it is not a bug to chase. It does mean the renderer carries two
+workarounds for Mesa's software rasterizers, both switching themselves off on a real GPU:
+
+- 10-bit video (`yuv420p10`) renders black or striped, so it is converted to 8-bit first.
+- mpv's rendering has to be explicitly finished before Qt samples the framebuffer, or
+  anything wider than ~2048 px composites as a partially drawn frame.
+
+`CLAUDE.md` traps 9 and 10 record how each was diagnosed and what was ruled out. Neither
+should be removed without reading those; both look like arbitrary sledgehammers otherwise.
+
+Two other WSL-specific gotchas live in `CLAUDE.md`: screenshots have to be taken from the
+Windows side (`tools/wsl-screenshot.ps1`, with `tools/wsl-input.ps1` to drive the UI), and
+the WSLg session can degrade into painting black at every window size, at which point
+visual checks return false negatives until the distro is restarted.
 
 `testclip.mp4` is a generated 15-second clip with a burned-in timecode, so a screenshot is
 enough to confirm the rendered frame matches the reported playback position. It carries no

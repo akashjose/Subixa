@@ -87,7 +87,7 @@ Two things to know before believing a black window:
   that log `VO: [libmpv] ... yuv420p` and advance the clock normally paint black at *every*
   window size, including files and timestamps that rendered correctly minutes earlier in
   the same session. It sets in after many launch/kill cycles. What it is **not**: not the
-  sync bug in trap 12 (it reproduces with `CMP_NO_SYNC=1` and without, identically), not
+  sync bug in trap 10 (it reproduces with `CMP_NO_SYNC=1` and without, identically), not
   instance count (one process alone still fails), not memory (10 GB free), and weston.log
   shows nothing. Still unexplained.
 
@@ -127,6 +127,12 @@ tools/wsl-*.ps1               screenshot and input injection from the Windows si
 `MpvObject` owns an `mpv_handle`; the nested `MpvRenderer` (render thread) owns the
 `mpv_render_context` and draws into the FBO. mpv state reaches QML through observed
 properties (`time-pos`, `duration`, `pause`) surfaced as Qt properties.
+
+`MpvRenderer` also carries two workarounds for Mesa's software rasterizers, both keyed off
+`usingSoftwareRasterizer()` (a `GL_RENDERER` string check) so a real GPU is untouched:
+8-bit conversion for 10-bit video, and a `glFinish()` before Qt samples the FBO. Traps 9
+and 10 explain why each is needed and what was ruled out first — do not remove either
+without reading those.
 
 `SubtitleManager` runs a `SubtitleExtractor` on its own `QThread` and republishes results
 as bindable properties. Requests carry a monotonic id; bumping it makes an in-flight parse
@@ -195,9 +201,26 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
    (ffmpeg cannot transcode text to bitmap, so there is no way to *generate* a PGS/VOBSUB
    fixture locally — that path is verified against the codec table, not a file.)
 
-### Rendering
+### Rendering — both are software-rasterizer bugs, both fixed conditionally
 
-12. **mpv's render must be *finished*, not just issued, before Qt samples the FBO.**
+9. **Mesa's software rasterizers render 10-bit video wrong, and say nothing about it.**
+   A `yuv420p10` file comes out either fully black (synthetic 10-bit H.264) or heavily
+   vertically striped (a real AV1 film), while a byte-for-byte 8-bit twin of the same clip
+   renders perfectly in the same session. mpv logs no error at `-v`: it reports
+   `Texture for plane 0/1/2` and `Using FBO format rgba16f` identically for both depths,
+   so the log will not tell you. `MpvRenderer::usingSoftwareRasterizer()` checks
+   `GL_RENDERER` for llvmpipe/softpipe/swrast/"Software Rasterizer" and, when it matches,
+   applies `vf=format=yuv420p` — a no-op for 8-bit content, a CPU conversion for 10-bit.
+   It is deliberately conditional so a real GPU keeps the native path.
+
+   The workaround must be applied **before** the queued file starts playing, which is why
+   it is queued ahead of `onRenderContextReady()` — see trap 2.
+
+   Do not misread this as slow decode. AV1 1920x800 decodes at **25× realtime** here
+   (20 cores, measured with `ffmpeg -f null -`); software *decode* is not the bottleneck,
+   software *rendering* is.
+
+10. **mpv's render must be *finished*, not just issued, before Qt samples the FBO.**
     Symptom: above roughly **2048 px of video-pane width** the picture goes black, or
     streaked, or shows a fine mesh of unwritten pixels. Below it, everything looks fine.
     A conformant driver tracks the render-to-texture dependency itself; llvmpipe does not,
@@ -225,29 +248,15 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     real GPU is not stalled every frame for a bug it does not have. `CMP_NO_SYNC=1`
     disables the call, which is how to A/B it.
 
-11. **Mesa's software rasterizers render 10-bit video wrong, and say nothing about it.**
-    A `yuv420p10` file comes out either fully black (synthetic 10-bit H.264) or heavily
-    vertically striped (a real AV1 film), while a byte-for-byte 8-bit twin of the same clip
-    renders perfectly in the same session. mpv logs no error at `-v`: it reports
-    `Texture for plane 0/1/2` and `Using FBO format rgba16f` identically for both depths,
-    so the log will not tell you. `MpvRenderer::usingSoftwareRasterizer()` checks
-    `GL_RENDERER` for llvmpipe/softpipe/swrast and, when it matches, applies
-    `vf=format=yuv420p` — a no-op for 8-bit content, a CPU conversion for 10-bit. It is
-    deliberately conditional so a real GPU keeps the native path.
-
-    The workaround must be applied **before** the queued file starts playing, which is why
-    it is queued ahead of `onRenderContextReady()` — see trap 2.
-
-    Do not misread this as slow decode. AV1 1920x800 decodes at **25× realtime** here
-    (20 cores, measured with `ffmpeg -f null -`); software *decode* is not the bottleneck,
-    software *rendering* is.
+    **Fullscreen depends on this being right** — fullscreen is just a very wide window,
+    so it would have hit this immediately.
 
 ### Browser UI
 
-9. **A delegate cannot take `required property string text`.** `ItemDelegate` already has a
-   `text` property, and the role of the same name collides with it. Take
-   `required property var model` and read `model.text` instead.
-10. **Only the browser decodes entities, so mpv's own overlay disagrees with the panel.**
+11. **A delegate cannot take `required property string text`.** `ItemDelegate` already has
+    a `text` property, and the role of the same name collides with it. Take
+    `required property var model` and read `model.text` instead.
+12. **Only the browser decodes entities, so mpv's own overlay disagrees with the panel.**
     libass renders `&amp;` literally over the video while the same cue reads `&` in the
     list. Both are behaving as designed (trap 7) — it is not a parsing regression.
 
@@ -286,7 +295,7 @@ So the porting debt is deliberately kept small rather than paid early:
 Revisit when Windows becomes a release target, or when hwdec, 4K/HEVC or HDR playback
 needs judging — naturally after milestone 3.
 
-**Native Linux** needs no porting: the 10-bit workaround in trap 11 disables itself on a
+**Native Linux** needs no porting: the 10-bit workaround in trap 9 disables itself on a
 real GPU (`GL_RENDERER` stops matching), and the screenshot tooling is simply replaced by
 `grim`/`import`. The one thing left hardcoded for WSL's sake is `hwdec=no` — on a machine
 with a GPU that leaves vaapi/nvdec unused and burns CPU for nothing. Making it conditional
@@ -294,23 +303,43 @@ on the same software-rasterizer check is the obvious follow-up.
 
 ## Next up
 
-See `README.md` → Roadmap. Milestones 1 (extraction) and 2 (browser UI) are done: tracks
-parse off the GUI thread, and the docked panel has per-track tabs, a search box, click-to-
-seek, and auto-follow with a toggle, all fed by `SubtitleLineModel` through
-`SubtitleFilterModel`.
+Everything through milestone 2 is committed and the tree is clean. Milestones 1
+(extraction) and 2 (browser UI) are done: tracks parse off the GUI thread, and the docked
+panel has per-track tabs, a search box, click-to-seek, and auto-follow with a toggle, fed
+by `SubtitleLineModel` through `SubtitleFilterModel`. Verified against a real 3 GB AV1
+film with **65 subtitle tracks / 93 350 cues**, not just the fixtures.
 
-Immediate task is **Milestone 3: player usability** — file open dialog and drag-and-drop,
-audio/subtitle track switching wired to mpv, volume, playback speed, fullscreen, keyboard
-shortcuts, and resume position per file.
+**First thing in a new session:** play a fixture in a real window and confirm the picture
+appears. If it is black, the WSLg session is in the degraded state described above and
+every visual check will lie — reset it before trusting any render result.
 
-Two things milestone 2 left on the floor, worth folding into whatever touches them next:
+Immediate task is **Milestone 3: player usability**, in this order and for this reason:
+
+1. **Audio/subtitle track switching wired to mpv** (`sid`/`aid` through `MpvObject`). Do
+   this first: it is the only item that is not generic player plumbing. Today the browser
+   panel and what mpv burns over the video are completely independent, so you can read the
+   Arabic track in the panel while English renders on screen, with no way to reconcile
+   them. This closes the loop on the feature the project exists for.
+2. **Fullscreen + keyboard shortcuts.** Only safe now that trap 10 is fixed.
+3. **File open dialog + drag-and-drop**, then volume, speed, and resume position per file.
+   All mechanical.
+
+Loose ends worth folding into whatever touches them next:
 
 - **Nothing exercises the models below the scene graph.** `offscreen` runs cannot see UI,
-  so tabs, filtering and follow are currently verified by screenshotting a real window
+  so tabs, filtering and follow are verified by screenshotting a real window
   (`tools/wsl-*.ps1`). `SubtitleLineModel::indexAt()`, the filter, and `rowAt()` mapping
-  are all testable without a window and should get a harness before they grow.
+  are all testable without a window and should get a harness before milestone 3 piles more
+  state on top — especially with the degraded-black state able to invalidate visual checks.
+- **`hwdec=no` is hardcoded** in `MpvObject`'s constructor for WSL's sake. Conditional on
+  the same `usingSoftwareRasterizer()` check, native Linux would get vaapi/nvdec for about
+  five lines. See the platform section.
 - **Search is a linear scan per keystroke**, coalesced by a 150 ms timer in QML. Fine at
   the 200k-cue fixture; if it ever is not, the fix is an index, not a longer timer.
+- **The video pane is capped by nothing.** With trap 10 fixed this is no longer a
+  correctness issue, but software rendering still costs ~1000% CPU at 2560 px. Capping the
+  FBO to the video's native size and letting Qt scale would cut that ~6x, at the price of
+  a softer image when the window exceeds the video.
 
 ## Related context
 
