@@ -220,10 +220,24 @@ void SubtitleManager::rebuildTracksView()
     }
 }
 
+void SubtitleManager::setRowBackground(const QColor &background)
+{
+    if (m_rowBackground == background)
+        return;
+    m_rowBackground = background;
+    for (SubtitleLineModel *model : std::as_const(m_models))
+        model->setBackground(m_rowBackground);
+    emit rowBackgroundChanged();
+}
+
 void SubtitleManager::rebuildModels()
 {
-    while (m_models.size() < m_tracks.size())
-        m_models.append(new SubtitleLineModel(this));
+    while (m_models.size() < m_tracks.size()) {
+        auto *model = new SubtitleLineModel(this);
+        // Before it has rows, so the first paint is already themed.
+        model->setBackground(m_rowBackground);
+        m_models.append(model);
+    }
 
     // Surplus models from a previous, larger file are emptied rather than
     // deleted -- a QML binding may still hold one for an instant after the

@@ -1,5 +1,7 @@
 #include "SubtitleLineModel.h"
 
+#include "SubtitleStyle.h"
+
 #include <algorithm>
 
 SubtitleLineModel::SubtitleLineModel(QObject *parent) : QAbstractListModel(parent) {}
@@ -37,6 +39,12 @@ QVariant SubtitleLineModel::data(const QModelIndex &index, int role) const
         return line.text;
     case RawTextRole:
         return line.rawText;
+    case StyledTextRole:
+        // Built here rather than at parse time: it is derived from rawText, only
+        // visible rows ever ask for it, and storing a third string per cue would
+        // cost megabytes on a feature-length track for something the reader sees
+        // twenty rows of.
+        return SubtitleStyle::toStyledText(line.rawText, m_background);
     default:
         break;
     }
@@ -51,7 +59,20 @@ QHash<int, QByteArray> SubtitleLineModel::roleNames() const
         {StartTextRole, "start"},
         {TextRole, "text"},
         {RawTextRole, "rawText"},
+        {StyledTextRole, "styled"},
     };
+}
+
+void SubtitleLineModel::setBackground(const QColor &background)
+{
+    if (m_background == background)
+        return;
+    m_background = background;
+    if (m_lines.isEmpty())
+        return;
+    // Only the styled role changes, and every row's does: a theme switch has to
+    // repaint the list without touching the cues themselves.
+    emit dataChanged(index(0, 0), index(count() - 1, 0), {StyledTextRole});
 }
 
 int SubtitleLineModel::indexAt(qint64 positionMs) const

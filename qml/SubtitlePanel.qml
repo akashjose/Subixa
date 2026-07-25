@@ -129,6 +129,13 @@ Rectangle {
                         }
 
                         MenuItem {
+                            text: "Show subtitle styling"
+                            checkable: true
+                            checked: Theme.showStyling
+                            onTriggered: Theme.showStyling = checked
+                        }
+
+                        MenuItem {
                             text: "Larger text (Ctrl+=)"
                             enabled: Theme.rowFontSize < Theme.maximumRowFontSize
                             onTriggered: Theme.rowFontSize = Theme.rowFontSize + 1
@@ -357,7 +364,15 @@ Rectangle {
                         color: lineRow.current ? Theme.textStrong : Theme.text
                         font.pixelSize: Theme.rowFontSize
                         wrapMode: Text.WordWrap
-                        text: lineRow.model.text
+                        // StyledText renders the subtitler's own italics, bold
+                        // and speaker colours; PlainText is the escape hatch for
+                        // a track that overuses them. Either way `text` is what
+                        // search matches, so the two cannot disagree about which
+                        // rows are showing.
+                        textFormat: Theme.showStyling ? Text.StyledText
+                                                      : Text.PlainText
+                        text: Theme.showStyling ? lineRow.model.styled
+                                                : lineRow.model.text
                     }
                 }
             }

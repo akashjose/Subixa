@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QtCore/QAbstractListModel>
+#include <QtGui/QColor>
 #include <QtQml/qqmlregistration.h>
 
 #include "SubtitleTypes.h"
@@ -27,13 +28,20 @@ public:
         EndMsRole,
         StartTextRole,  // startMs as hh:mm:ss.mmm, formatted per visible row
         TextRole,       // display text: override tags stripped, entities decoded
-        RawTextRole,    // decoder payload, kept for styling work later
+        RawTextRole,    // decoder payload, exactly as the decoder gave it
+        StyledTextRole, // that payload as markup: italics, bold, speaker colours
     };
     Q_ENUM(Role)
 
     explicit SubtitleLineModel(QObject *parent = nullptr);
 
     void setLines(const QVector<SubtitleLine> &lines);
+
+    // The colour rows are drawn on, so a cue's own colour can be kept legible
+    // against it -- subtitle colours are chosen to sit over a picture, and white
+    // dialogue on a light theme would otherwise be invisible. Set by the manager
+    // from the theme; styling is computed per visible row, never stored.
+    void setBackground(const QColor &background);
 
     int count() const { return static_cast<int>(m_lines.size()); }
 
@@ -52,4 +60,5 @@ signals:
 
 private:
     QVector<SubtitleLine> m_lines;
+    QColor m_background;
 };

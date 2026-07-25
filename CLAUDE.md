@@ -128,6 +128,11 @@ deliberately, because a screenshot is the least reliable evidence available here
 - **`tst_subtitles`** — the extractor against the fixtures (the 8-comma ASS field
   layout, entity decoding, both halves of the rebase rule) plus
   `SubtitleLineModel::indexAt()`, the filter, and `rowAt()`/`startMsAt()` mapping.
+  Also the cue cache (a hit has to reproduce a parse exactly; a changed mtime, a
+  new sidecar or a truncated entry has to miss), the `.srt` export (checked by
+  parsing back what it wrote), and the styling: tag handling, escaping, dropped
+  vector drawings, and that an adjusted cue colour still clears 4.5:1 against the
+  row it lands on.
   Sources are compiled into the test target rather than shared via a static
   library: `qt_add_qml_module` registers the QML-exposed types from the sources
   listed in `qt_add_executable`, and moving them out breaks that registration.
@@ -270,7 +275,8 @@ clears the text instead.
 | Ctrl+= / Ctrl+- | subtitle row text size, remembered |
 
 The panel's per-session actions — detach/dock, export this track as `.srt`, light/dark
-theme, text size — live behind the **More** button in its header rather than as buttons.
+theme, subtitle styling on or off, text size — live behind the **More** button in its header
+rather than as buttons.
 The header has to survive a 240 px panel, and each of them is reached once a session.
 
 The transport bar drops controls as it narrows — speed first, then the volume slider, mute,
@@ -380,6 +386,7 @@ src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker t
 src/SubtitleCache.{h,cpp}     parsed cues on disk, so a reopen costs nothing
 src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed tracks
 src/SubtitleLineModel.{h,cpp} QAbstractListModel over one track's cues
+src/SubtitleStyle.{h,cpp}     ASS override tags -> markup the browser can show
 src/SubtitleFilterModel.{h,cpp} search proxy + the row mapping auto-follow needs
 src/PlaybackHistory.{h,cpp}   per-file resume positions in QSettings, and their policy
 src/Playlist.{h,cpp}          what plays next: the folder as a queue, in natural order
@@ -443,6 +450,29 @@ A new file with no entry of its own falls back to the language last chosen anywh
 to the first browsable track. Only an explicit choice is remembered — a tab click or the
 transport's Subs menu — never what the sync handlers do, or mpv's default would overwrite
 the reader's track on every open.
+
+**The browser shows the subtitler's own styling** (`SubtitleStyle`). `rawText` was kept per
+cue from the start for this: italics, bold and speaker colours carry meaning, and the list
+was the one place they were thrown away while the picture kept them. The payload becomes
+Qt's StyledText subset — `<i>`, `<b>`, `<u>`, `<font color>`, `<br>` — and everything that
+says *where* or *when* to draw (`\pos`, `\fad`, karaoke timing) is dropped, because a list
+of lines has no use for it.
+
+Three decisions worth keeping:
+
+- **Built per visible row, never stored.** It is derived from `rawText`, only the twenty
+  rows on screen ever ask for it, and a third string per cue would cost megabytes on a
+  93 350-cue film for something nobody is looking at.
+- **Cue colours are adjusted for the row they land on.** Subtitle colours are chosen to sit
+  over a picture, so white dialogue on the light theme would be invisible. `readableOn()`
+  keeps the hue and saturation — that is what says *which speaker* — and walks the lightness
+  until the WCAG contrast ratio against the row reaches 4.5. A plain brightness comparison
+  was tried first and called pure red on a near-black row unreadable, which it is not. The
+  manager pushes the theme's colour down to every model, so one binding in `Main.qml`
+  restyles the lot.
+- **Search still matches the plain text**, never the markup, so what is shown and what is
+  matched cannot disagree — and turning styling off in the More menu changes only the
+  rendering.
 
 **What plays next is a folder, not a playlist.** Opening any file makes its folder the
 queue with that file current; dropping several files makes exactly those the queue, in the
@@ -720,6 +750,18 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     the start and tab 65 off the end. The panel positions it explicitly after a 50 ms
     timer — `Qt.callLater` is too early, `contentWidth` is not final yet.
 
+14. **`{\p1}` is not text, it is a shape** — an extraction trap, numbered late because the
+    numbers are identities rather than an order. ASS switches to drawing mode with `\p1`
+    and back with `\p0`, and what sits between them is a path: `m 0 0 l 100 0 b 20 30`.
+    Flattened like any other payload it becomes a row of the browser reading exactly that,
+    and it is searchable, so a track full of signs fills the list with coordinates. Both
+    the plain and the styled paths drop drawing mode now.
+
+    This is also the case the cue cache's version bump exists for: the fix changed the
+    *extractor's output*, so every entry written before it holds coordinates as dialogue and
+    would have gone on serving them. `SubtitleCache::kFormatVersion` went to 2 in the same
+    commit — the remedy is easy and easy to forget.
+
 Known-harmless: Qt's fallback `FileDialog` will not prefill the name field for a
 `SaveFile`, whatever `selectedFile`/`currentFile` are set to and whenever they are set —
 the file being named does not exist yet, so nothing in the listing matches it. The export
@@ -819,13 +861,16 @@ one, so fullscreen works on the software path as well as on D3D12.
 
 Next, in this order:
 
-1. **Styling in the browser** — the raw ASS payload is already kept per cue (`rawText`),
-   so italics and speaker colours could be rendered in the list rather than stripped.
-   The nearest thing to a feature the browser is missing.
-2. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. See the platform section.
-3. **A visible queue**, if the folder-as-a-queue behaviour turns out to want one. It
+1. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. See the platform section.
+   It is now the only item on this list that is clearly worth doing.
+2. **A visible queue**, if the folder-as-a-queue behaviour turns out to want one. It
    deliberately has no panel — see the architecture note — so this is a decision to
    revisit rather than work that is pending.
+3. **Per-style defaults in the browser**, if a track turns out to need them. The styling
+   now rendered comes from the *override tags* in each cue; an ASS file's `[V4+ Styles]`
+   table, where a style can be italic or coloured for every line that uses it, never
+   reaches the extractor — ffmpeg hands over dialogue payloads, not the style block. A
+   track styled entirely that way will read plain in the list and italic on the picture.
 
 Loose ends worth folding into whatever touches them next:
 
@@ -849,7 +894,9 @@ Loose ends worth folding into whatever touches them next:
 - **The cue cache is never invalidated by anything but the files it was built from.** A
   format bump handles a layout change, but if the *extractor's* output changes — a fix to
   tag stripping, say — old entries stay valid and quietly serve the old text. Bumping
-  `kFormatVersion` alongside such a fix is the whole remedy, and it is easy to forget.
+  `kFormatVersion` alongside such a fix is the whole remedy, and it is easy to forget. It
+  has been needed once already (trap 14, version 2), and the bump was verified by watching
+  the film re-parse instead of loading in 110 ms.
 - **The QML harness cannot see anything that needs pixels.** It runs `offscreen`, so
   delegate geometry, the FBO cap, and whether the panel actually *scrolled* are all
   outside it — `tst_qmlpanel` asserts `currentIndex`, not `contentY`. The tab-strip

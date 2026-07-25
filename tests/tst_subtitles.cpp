@@ -24,6 +24,7 @@
 #include "SubtitleCache.h"
 #include "SubtitleExtractor.h"
 #include "SubtitleManager.h"
+#include "SubtitleStyle.h"
 #include "SubtitleFilterModel.h"
 #include "SubtitleLineModel.h"
 #include "SubtitleTypes.h"
@@ -140,6 +141,12 @@ private slots:
     void cacheMissesWhenTheMediaChanges();
     void cacheMissesWhenASidecarAppears();
     void corruptCacheEntryIsIgnored();
+
+    void stylingRendersItalicsAndColours();
+    void stylingEscapesAndBreaks();
+    void stylingDropsVectorDrawings();
+    void cueColoursStayLegibleOnEitherTheme();
+    void styledRoleFollowsTheRowBackground();
 
     void exportedSrtReparsesToTheSameCues();
     void exportRejectsWhatItCannotWrite();
@@ -433,6 +440,199 @@ void TstSubtitles::corruptCacheEntryIsIgnored()
     }
     parseCached(path, cache.path(), &hit);
     QVERIFY(!hit);
+}
+
+void TstSubtitles::stylingRendersItalicsAndColours()
+{
+    const QColor dark(QStringLiteral("#12121a"));
+
+    // What ffmpeg hands over for an italicised SRT line, and what libass would
+    // draw over the picture. The browser used to show it flat.
+    QCOMPARE(SubtitleStyle::toStyledText(
+                 QStringLiteral("{\\i1}Whispered.{\\i0} Then not."), dark),
+             QStringLiteral("<i>Whispered.</i> Then not."));
+
+    // Bold as a flag and as a weight; 500 and up reads as bold.
+    QCOMPARE(SubtitleStyle::toStyledText(QStringLiteral("{\\b1}Shout{\\b0}."), dark),
+             QStringLiteral("<b>Shout</b>."));
+    QCOMPARE(SubtitleStyle::toStyledText(QStringLiteral("{\\b700}Shout{\\b400}."), dark),
+             QStringLiteral("<b>Shout</b>."));
+
+    QCOMPARE(SubtitleStyle::toStyledText(QStringLiteral("{\\u1}Titled{\\u0}"), dark),
+             QStringLiteral("<u>Titled</u>"));
+
+    // ASS colours are &HBBGGRR&: this is pure red, not pure blue, and getting
+    // that backwards is the classic way to render every speaker wrong.
+    QCOMPARE(SubtitleStyle::parseAssColour(QStringLiteral("&H0000FF&")),
+             QColor(255, 0, 0));
+    QCOMPARE(SubtitleStyle::parseAssColour(QStringLiteral("&HFF0000&")),
+             QColor(0, 0, 255));
+    // With an alpha byte, which is transparency and is dropped.
+    QCOMPARE(SubtitleStyle::parseAssColour(QStringLiteral("&H8000FF00&")),
+             QColor(0, 255, 0));
+    QVERIFY(!SubtitleStyle::parseAssColour(QStringLiteral("&Hzzz&")).isValid());
+
+    const QString coloured =
+        SubtitleStyle::toStyledText(QStringLiteral("{\\c&H0000FF&}Red speaker"), dark);
+    QVERIFY2(coloured.contains(QStringLiteral("<font color=\"#ff0000\">")),
+             qPrintable(coloured));
+    QVERIFY(coloured.endsWith(QStringLiteral("</font>")));
+
+    // \r drops back to the line's own style, closing whatever was open.
+    QCOMPARE(SubtitleStyle::toStyledText(
+                 QStringLiteral("{\\i1}Aside{\\r} and back."), dark),
+             QStringLiteral("<i>Aside</i> and back."));
+
+    // Tags that place or animate a cue say nothing about how it reads.
+    QCOMPARE(SubtitleStyle::toStyledText(
+                 QStringLiteral("{\\pos(320,410)\\fad(200,200)}Plain."), dark),
+             QStringLiteral("Plain."));
+}
+
+void TstSubtitles::stylingEscapesAndBreaks()
+{
+    const QColor dark(QStringLiteral("#12121a"));
+
+    // The markup is generated, so anything in the cue that looks like markup has
+    // to stop being markup -- a subtitle saying <i> means the characters.
+    QCOMPARE(SubtitleStyle::toStyledText(QStringLiteral("5 < 6 & <i> stays"), dark),
+             QStringLiteral("5 &lt; 6 &amp; &lt;i&gt; stays"));
+
+    // Both ASS break escapes, and the real newline the extractor uses to join a
+    // cue's rects, all read as breaks in a list.
+    QCOMPARE(SubtitleStyle::toStyledText(QStringLiteral("One\\NTwo\\nThree\nFour"), dark),
+             QStringLiteral("One<br>Two<br>Three<br>Four"));
+
+    // \h is a hard space and stays one.
+    QCOMPARE(SubtitleStyle::toStyledText(QStringLiteral("a\\hb"), dark),
+             QStringLiteral("a&nbsp;b"));
+
+    // A break at either end is noise in a row.
+    QCOMPARE(SubtitleStyle::toStyledText(QStringLiteral("\\NHello\\N"), dark),
+             QStringLiteral("Hello"));
+}
+
+void TstSubtitles::stylingDropsVectorDrawings()
+{
+    const QColor dark(QStringLiteral("#12121a"));
+
+    // {\p1} switches to drawing mode: what follows is a path -- a shape, a
+    // censor bar, a karaoke box -- and rendering it as dialogue puts
+    // "m 0 0 l 100 0" in the browser.
+    QCOMPARE(SubtitleStyle::toStyledText(
+                 QStringLiteral("{\\p1}m 0 0 l 100 0 l 100 50{\\p0}"), dark),
+             QString());
+    QCOMPARE(SubtitleStyle::toStyledText(
+                 QStringLiteral("Look{\\p1}m 0 0 l 9 9{\\p0} there"), dark),
+             QStringLiteral("Look there"));
+
+    // And the same for the plain text the browser searches and shows when
+    // styling is off -- which is a change to the *extractor's* output, and so
+    // the reason the cue cache's format version was bumped. End to end, through
+    // a real .ass file, because that is where the coordinates come from.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString assPath = dir.filePath(QStringLiteral("drawings.ass"));
+    {
+        QFile file(assPath);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(
+            "[Script Info]\nScriptType: v4.00+\n\n"
+            "[V4+ Styles]\n"
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+            "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
+            "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+            "MarginL, MarginR, MarginV, Encoding\n"
+            "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+            "0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n\n"
+            "[Events]\n"
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
+            "Effect, Text\n"
+            "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Normal line.\n"
+            "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,"
+            "{\\p1}m 0 0 l 100 0 l 100 50{\\p0}\n"
+            "Dialogue: 0,0:00:07.00,0:00:09.00,Default,,0,0,0,,"
+            "Look{\\p1}m 0 0 l 9 9{\\p0} there\n");
+    }
+
+    const SubtitleTrackList tracks = parse(assPath);
+    QCOMPARE(tracks.size(), 1);
+    // The drawing-only cue decodes to nothing and drops out entirely, the way
+    // any other blank cue does; the mixed one keeps its words.
+    QCOMPARE(tracks[0].lines.size(), 2);
+    QCOMPARE(tracks[0].lines[0].text, QStringLiteral("Normal line."));
+    QCOMPARE(tracks[0].lines[1].text, QStringLiteral("Look there"));
+}
+
+void TstSubtitles::cueColoursStayLegibleOnEitherTheme()
+{
+    const QColor darkPanel(QStringLiteral("#12121a"));
+    const QColor lightPanel(QStringLiteral("#f6f7f9"));
+
+    // The guarantee is a contrast ratio, so that is what these assert rather
+    // than a lightness number that happens to satisfy it today.
+    auto legible = [](const QColor &c, const QColor &bg) {
+        return SubtitleStyle::contrastRatio(c, bg) >= 4.5;
+    };
+
+    // White dialogue is the common case, and on a light panel it would be
+    // invisible. On the dark panel nothing is wrong with it, so it must come
+    // back untouched -- adjusting a colour that reads perfectly well would be
+    // the player second-guessing the subtitler for no reason.
+    QCOMPARE(SubtitleStyle::readableOn(Qt::white, darkPanel), QColor(Qt::white));
+    QVERIFY(!legible(Qt::white, lightPanel));
+    QVERIFY(legible(SubtitleStyle::readableOn(Qt::white, lightPanel), lightPanel));
+
+    // Pure red on a nearly black row is one of the more legible things on it,
+    // and an earlier rule that compared plain brightness called it unreadable.
+    QCOMPARE(SubtitleStyle::readableOn(QColor(255, 0, 0), darkPanel), QColor(255, 0, 0));
+
+    // A coloured speaker keeps their hue -- that is the part carrying meaning --
+    // while moving far enough from the background to be read.
+    const QColor yellowOnLight =
+        SubtitleStyle::readableOn(QColor(255, 255, 0), lightPanel);
+    QVERIFY(legible(yellowOnLight, lightPanel));
+    QVERIFY2(qAbs(yellowOnLight.hue() - 60) < 12, qPrintable(yellowOnLight.name()));
+
+    // Dark cue text on the dark panel gets the same treatment the other way.
+    const QColor navyOnDark = SubtitleStyle::readableOn(QColor(10, 10, 40), darkPanel);
+    QVERIFY(legible(navyOnDark, darkPanel));
+    QVERIFY2(navyOnDark.lightness() > 100, qPrintable(navyOnDark.name()));
+}
+
+void TstSubtitles::styledRoleFollowsTheRowBackground()
+{
+    QVector<SubtitleLine> lines;
+    SubtitleLine line;
+    line.startMs = 1000;
+    line.endMs = 2000;
+    line.text = QStringLiteral("White words");
+    line.rawText = QStringLiteral("{\\c&HFFFFFF&}White words");
+    lines.append(line);
+
+    SubtitleLineModel model;
+    model.setLines(lines);
+    model.setBackground(QColor(QStringLiteral("#12121a")));
+
+    const QModelIndex index = model.index(0, 0);
+    const QString onDark =
+        model.data(index, SubtitleLineModel::StyledTextRole).toString();
+    QVERIFY2(onDark.contains(QStringLiteral("#ffffff")), qPrintable(onDark));
+
+    // The theme changes under the model, and the styling has to follow: the
+    // alternative is white on white the moment somebody picks the light theme.
+    QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+    model.setBackground(QColor(QStringLiteral("#f6f7f9")));
+    QCOMPARE(changed.size(), 1);
+
+    const QString onLight =
+        model.data(index, SubtitleLineModel::StyledTextRole).toString();
+    QVERIFY2(!onLight.contains(QStringLiteral("#ffffff")), qPrintable(onLight));
+
+    // The plain text is untouched by any of it -- search must not depend on the
+    // theme.
+    QCOMPARE(model.data(index, SubtitleLineModel::TextRole).toString(),
+             QStringLiteral("White words"));
 }
 
 void TstSubtitles::exportedSrtReparsesToTheSameCues()

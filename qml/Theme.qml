@@ -20,6 +20,11 @@ QtObject {
     // Row text in the browser. Someone reading along with a film wants this
     // larger than a UI font; someone scanning a whole track wants more rows.
     property int rowFontSize: 12
+    // Whether the browser renders the subtitler's own italics, bold and speaker
+    // colours, or flattens every row to plain text. On by default: those carry
+    // meaning, and throwing them away was the one thing the list did that the
+    // picture did not.
+    property bool showStyling: true
 
     readonly property int minimumRowFontSize: 9
     readonly property int maximumRowFontSize: 22

@@ -34,6 +34,8 @@ qt_add_executable(custom_media_player
     src/SubtitleManager.h
     src/SubtitleLineModel.cpp
     src/SubtitleLineModel.h
+    src/SubtitleStyle.cpp
+    src/SubtitleStyle.h
     src/SubtitleFilterModel.cpp
     src/SubtitleFilterModel.h
     src/PlaybackHistory.cpp
@@ -93,6 +95,7 @@ set(CMP_MODEL_SOURCES
     src/SubtitleManager.cpp
     src/SubtitleLineModel.cpp
     src/SubtitleFilterModel.cpp
+    src/SubtitleStyle.cpp
 )
 
 # Resume-position store. Its policy is what the tests are really about, so it is
@@ -114,6 +117,7 @@ target_compile_definitions(tst_subtitles PRIVATE
     CMP_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
 target_link_libraries(tst_subtitles PRIVATE
     Qt6::Core
+    Qt6::Gui
     Qt6::Qml
     Qt6::Test
     PkgConfig::FFMPEG

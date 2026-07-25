@@ -51,6 +51,7 @@ ApplicationWindow {
 
         property bool darkTheme: true
         property int rowFontSize: 12
+        property bool showStyling: true
     }
 
     // The theme is a singleton so both windows follow it; the saved value has to
@@ -59,11 +60,13 @@ ApplicationWindow {
         target: Theme
         function onDarkChanged() { prefs.darkTheme = Theme.dark }
         function onRowFontSizeChanged() { prefs.rowFontSize = Theme.rowFontSize }
+        function onShowStylingChanged() { prefs.showStyling = Theme.showStyling }
     }
 
     Component.onCompleted: {
         Theme.dark = prefs.darkTheme
         Theme.rowFontSize = prefs.rowFontSize
+        Theme.showStyling = prefs.showStyling
 
         root.width = prefs.windowWidth
         root.height = prefs.windowHeight
@@ -109,6 +112,10 @@ ApplicationWindow {
         // Named for the headless QML harness, which waits on loaded() and reads
         // the view state back. Nothing in the app looks these up.
         objectName: "subtitleManager"
+        // Cue colours are chosen to sit over a picture; against a light panel
+        // half of them would be invisible. The models adjust for this, and this
+        // is how they learn what they are being drawn on.
+        rowBackground: Theme.panelBackground
         onLoaded: {
             root.currentTrack = -1
             var index = root.preferredTrackIndex()

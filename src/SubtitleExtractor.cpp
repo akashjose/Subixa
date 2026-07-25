@@ -76,16 +76,31 @@ QString assDialogueText(const QString &ass)
 
 // Reduce an ASS payload to displayable text: drop {\...} override blocks, turn
 // the two line-break escapes into real newlines, and make \h a hard space.
+//
+// Vector drawings go entirely. `{\p1}m 0 0 l 100 0{\p0}` is a shape -- a logo, a
+// karaoke box, a censor bar -- and what sits between the tags is a path, not
+// words. Left in, a row of the browser reads "m 0 0 l 100 0 b 20 30".
 QString stripAssTags(const QString &in)
 {
     QString out;
     out.reserve(in.size());
 
     int depth = 0;
+    bool drawing = false;
     for (qsizetype i = 0; i < in.size(); ++i) {
         const QChar c = in.at(i);
         if (c == u'{') {
             ++depth;
+            // Scan the block for a drawing-mode switch before dropping it.
+            const qsizetype end = in.indexOf(u'}', i + 1);
+            const QStringView block =
+                QStringView(in).mid(i + 1, (end < 0 ? in.size() : end) - i - 1);
+            for (qsizetype j = 0; j + 2 < block.size(); ++j) {
+                if (block.at(j) == u'\\' && block.at(j + 1) == u'p'
+                    && block.at(j + 2).isDigit()) {
+                    drawing = block.at(j + 2) != u'0';
+                }
+            }
             continue;
         }
         if (c == u'}') {
@@ -93,7 +108,7 @@ QString stripAssTags(const QString &in)
                 --depth;
             continue;
         }
-        if (depth > 0)
+        if (depth > 0 || drawing)
             continue;
 
         if (c == u'\\' && i + 1 < in.size()) {

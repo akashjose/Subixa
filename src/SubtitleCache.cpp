@@ -16,10 +16,12 @@ namespace {
 // "CMPS". A file that does not start with this is not ours, whatever its name.
 constexpr quint32 kMagic = 0x434D5053;
 
-// Bumped whenever the layout below changes. An entry written by an older build
-// is dropped rather than misread -- the whole point of the cache is that the
-// cues are identical to a fresh parse.
-constexpr quint32 kFormatVersion = 1;
+// Bumped whenever the layout below changes -- and, just as importantly, whenever
+// the *extractor's output* changes: an entry written before a parsing fix is
+// still readable, and would quietly serve the old text forever. Version 2 is
+// exactly that case: `{\p1}` vector drawings stopped being flattened into the
+// cue text, so every entry written before it holds path coordinates as dialogue.
+constexpr quint32 kFormatVersion = 2;
 
 // Pinned so a Qt upgrade cannot silently change how the primitives below are
 // encoded and turn every existing entry into garbage.

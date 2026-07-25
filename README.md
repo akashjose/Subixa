@@ -19,6 +19,7 @@ That is the goal. Playback is the necessary substrate; the subtitle browser is t
 - One tab per subtitle track in the file
 - Every line as a timestamped row
 - Full-text search across the track
+- The subtitler's own italics, bold and speaker colours, rendered rather than stripped
 - Click a row → seek there
 - Auto-follow: the current line highlights and scrolls into view as playback advances
 
@@ -81,6 +82,15 @@ nothing about the result changes between opens, so the cues are cached on disk a
 size and mtime of the video *and every sidecar beside it*. The 3 GB film went from **15.7 s
 to about 110 ms**, and the panel says `cached` so a hit is not mistaken for a suspiciously
 quick parse.
+
+The list shows what the subtitler wrote, not a flattened version of it: a line spoken in
+italics is italic in the browser, and a second speaker's colour is their colour. Cue colours
+are chosen to sit over a picture, so they are adjusted where they would be illegible against
+the panel — the hue survives, since that is the part that says *which speaker*, while the
+lightness moves far enough to be read. Vector drawings, karaoke timing and positioning tags
+are dropped: those say where to paint something over the video, and a list of lines has no
+use for them. Search always matches the plain text, so what is shown and what is found
+cannot disagree, and the whole thing can be switched off in the panel's More menu.
 
 When a file finishes, the next one starts. Opening anything makes its folder the queue, so
 an episode is followed by the next episode without anyone building a playlist — `ep2` before
@@ -174,6 +184,13 @@ capped on the software rasterizer, which is what makes fullscreen usable there.
 
 Under WSL the answer to that last one is still software decode, and now for a stated
 reason: there is no `/dev/dri` render node, and mpv reports `hwdec-current = no` when asked.
+
+### Milestone 6 — Styling in the browser ✅
+
+- ✅ ASS override tags become markup: italics, bold, underline, speaker colours
+- ✅ Cue colours adjusted to stay legible against the panel, hue preserved, at WCAG's 4.5:1
+- ✅ Vector drawings dropped from the list — `{\p1}m 0 0 l 100 0` is a shape, not dialogue
+- ✅ Search unaffected: it matches the plain text, and styling can be turned off
 
 ### Milestone 5 — What plays next ✅
 
