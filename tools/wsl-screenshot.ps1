@@ -27,6 +27,7 @@ param([Parameter(Mandatory=$true, Position=0)][string]$Path,
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
+using System.Text;
 using System.Runtime.InteropServices;
 public class Win32 {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -37,13 +38,49 @@ public class Win32 {
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out RECT rect, int size);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int m);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
 
-$p = Get-Process | Where-Object { $_.MainWindowTitle -like "*$Title*" } | Select-Object -First 1
-if (-not $p) { Write-Output "NOWINDOW ($Title)"; exit 1 }
-$h = $p.MainWindowHandle
+# Find the window by enumerating top-level windows rather than asking Get-Process
+# for MainWindowTitle. Two reasons: a process has only one "main" window, so the
+# detached subtitle browser was unreachable, and the match used to hit any process
+# whose title happened to contain the text -- an editor with tst_subtitles.cpp open
+# swallowed the clicks meant for the player. WSLg titles all end in "(<distro>)",
+# which is what distinguishes a real app window from a Windows-side one.
+$script:found = [IntPtr]::Zero
+$script:foundTitle = ""
+$cb = [Win32+EnumProc]{
+    param($h, $l)
+    if ([Win32]::IsWindowVisible($h)) {
+        $sb = New-Object System.Text.StringBuilder 512
+        [Win32]::GetWindowText($h, $sb, 512) | Out-Null
+        $t = $sb.ToString()
+        if ($t -like "*$Title*" -and $t -match '\(.+\)$') {
+            # Prefer a window whose title *starts* with the requested text. With
+            # the browser detached there are two matches -- "custom media player"
+            # and "Subtitles - custom media player" -- and only this tells them
+            # apart.
+            if ($t.StartsWith($Title)) {
+                $script:found = $h
+                $script:foundTitle = $t
+                return $false
+            }
+            if ($script:found -eq [IntPtr]::Zero) {
+                $script:found = $h
+                $script:foundTitle = $t
+            }
+        }
+    }
+    return $true
+}
+[Win32]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
+if ($script:found -eq [IntPtr]::Zero) { Write-Output "NOWINDOW ($Title)"; exit 1 }
+$h = $script:found
 
 function Get-Bounds($hwnd) {
     $r = New-Object Win32+RECT

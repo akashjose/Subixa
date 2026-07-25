@@ -21,6 +21,7 @@ param([int]$X, [int]$Y, [string]$Text = "", [string]$Title = "custom media playe
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
 using System;
+using System.Text;
 using System.Runtime.InteropServices;
 public class Inp {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -32,13 +33,49 @@ public class Inp {
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, uint d, IntPtr e);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out RECT rect, int size);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int m);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
 
-$p = Get-Process | Where-Object { $_.MainWindowTitle -like "*$Title*" } | Select-Object -First 1
-if (-not $p) { Write-Output "NOWINDOW ($Title)"; exit 1 }
-$h = $p.MainWindowHandle
+# Find the window by enumerating top-level windows rather than asking Get-Process
+# for MainWindowTitle. Two reasons: a process has only one "main" window, so the
+# detached subtitle browser was unreachable, and the match used to hit any process
+# whose title happened to contain the text -- an editor with tst_subtitles.cpp open
+# swallowed the clicks meant for the player. WSLg titles all end in "(<distro>)",
+# which is what distinguishes a real app window from a Windows-side one.
+$script:found = [IntPtr]::Zero
+$script:foundTitle = ""
+$cb = [Inp+EnumProc]{
+    param($h, $l)
+    if ([Inp]::IsWindowVisible($h)) {
+        $sb = New-Object System.Text.StringBuilder 512
+        [Inp]::GetWindowText($h, $sb, 512) | Out-Null
+        $t = $sb.ToString()
+        if ($t -like "*$Title*" -and $t -match '\(.+\)$') {
+            # Prefer a window whose title *starts* with the requested text. With
+            # the browser detached there are two matches -- "custom media player"
+            # and "Subtitles - custom media player" -- and only this tells them
+            # apart.
+            if ($t.StartsWith($Title)) {
+                $script:found = $h
+                $script:foundTitle = $t
+                return $false
+            }
+            if ($script:found -eq [IntPtr]::Zero) {
+                $script:found = $h
+                $script:foundTitle = $t
+            }
+        }
+    }
+    return $true
+}
+[Inp]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
+if ($script:found -eq [IntPtr]::Zero) { Write-Output "NOWINDOW ($Title)"; exit 1 }
+$h = $script:found
 
 # SW_RESTORE only when actually minimised: on a *maximised* window it un-maximises,
 # which silently destroys the one state a fullscreen/wide-window test is checking --

@@ -43,6 +43,7 @@ qt_add_qml_module(custom_media_player
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+        qml/SubtitlePanel.qml
 )
 
 # qmltyperegistrar emits `#if __has_include(<MpvObject.h>)`. Without src/ on the

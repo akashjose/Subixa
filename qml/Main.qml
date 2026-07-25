@@ -23,7 +23,7 @@ ApplicationWindow {
             for (var i = 0; i < subs.tracks.length; ++i) {
                 if (subs.tracks[i].browsable) {
                     root.currentTrack = subs.tracks[i].id
-                    trackTabs.currentIndex = i
+                    panelUi.tabIndex = i
                     break
                 }
             }
@@ -53,6 +53,68 @@ ApplicationWindow {
 
     PlaybackHistory {
         id: history
+    }
+
+    // View state the panel must not lose when it moves between windows, since
+    // the panel item is destroyed and rebuilt each time it does.
+    QtObject {
+        id: panelUi
+        property string searchText: ""
+        property int tabIndex: 0
+        property bool following: true
+    }
+
+    property bool panelDetached: false
+
+    // One definition, instantiated by whichever Loader is active -- docked in the
+    // SplitView, or filling the detached window.
+    Component {
+        id: panelComponent
+
+        SubtitlePanel {
+            manager: subs
+            linesModel: lines
+            ui: panelUi
+            currentRow: root.currentRow
+            detached: root.panelDetached
+            onSeekRequested: (seconds) => mpv.seek(seconds)
+            onTrackActivated: (index) => root.selectTrack(index)
+            onDetachToggled: root.panelDetached = !root.panelDetached
+        }
+    }
+
+    // The browser in its own window: fullscreen video on one screen and the
+    // whole track on another is the arrangement this feature exists for.
+    Window {
+        id: panelWindow
+        width: 460
+        height: 820
+        minimumWidth: 260
+        minimumHeight: 300
+        title: "Subtitles — custom media player"
+        color: "#12121a"
+        visible: root.panelDetached
+        // Closing the window is the same statement as pressing Dock.
+        onClosing: root.panelDetached = false
+
+        Loader {
+            id: detachedPanel
+            anchors.fill: parent
+            sourceComponent: root.panelDetached ? panelComponent : null
+        }
+    }
+
+    // Whichever copy is live. Null for the instant between the two Loaders
+    // swapping, so every use has to tolerate that.
+    readonly property Item activePanel: root.panelDetached ? detachedPanel.item
+                                                           : dockedPanel.item
+
+    function selectTrack(index) {
+        var track = subs.tracks[index]
+        if (track === undefined || !track.browsable)
+            return
+        root.currentTrack = track.id
+        root.applySubtitleSelection()
     }
 
     // The file currently open, tracked because mpv's own path is not what the
@@ -121,7 +183,7 @@ ApplicationWindow {
     // Sidecars go by path and embedded tracks by ffmpeg stream index, because
     // mpv numbers its own tracks and neither numbering follows from the other.
     function applySubtitleSelection() {
-        var track = subs.tracks[trackTabs.currentIndex]
+        var track = subs.tracks[panelUi.tabIndex]
         if (track === undefined || !track.browsable)
             return
         if (track.sidecar)
@@ -143,7 +205,7 @@ ApplicationWindow {
                 continue
             if (mpv.subtitleTrackMatches(mpv.subtitleTrack, t.streamIndex,
                                          t.sidecar ? t.sourcePath : "")) {
-                trackTabs.currentIndex = i
+                panelUi.tabIndex = i
                 return
             }
         }
@@ -194,13 +256,11 @@ ApplicationWindow {
     // below it. The old positionViewAtIndex(Contain) scrolled the *minimum*
     // distance instead, which pinned each new line to the bottom edge and showed
     // no lookahead at all.
+    // The panel positions itself from currentRow; this only has to compute it.
     function syncFollow() {
         var row = lines.rowAt(Math.round(mpv.position * 1000))
-        if (row === root.currentRow)
-            return
-        root.currentRow = row
-        if (followToggle.checked)
-            lineList.currentIndex = row
+        if (row !== root.currentRow)
+            root.currentRow = row
     }
 
     Connections {
@@ -227,7 +287,8 @@ ApplicationWindow {
     // keys it claims. Space and Left/Right it does claim; F and M it does not,
     // so without the guard typing "film" in the search box would toggle
     // fullscreen and mute.
-    readonly property bool typing: searchField.activeFocus
+    readonly property bool typing: root.activePanel !== null
+                                   && root.activePanel.searchActive
 
     FileDialog {
         id: openDialog
@@ -327,7 +388,17 @@ ApplicationWindow {
     }
     Shortcut {
         sequence: "Ctrl+F"
-        onActivated: searchField.forceActiveFocus()
+        onActivated: {
+            if (!root.panelVisible)
+                root.panelVisible = true
+            if (root.activePanel !== null)
+                root.activePanel.focusSearch()
+        }
+    }
+    Shortcut {
+        sequence: "Ctrl+D"
+        enabled: !root.typing
+        onActivated: root.panelDetached = !root.panelDetached
     }
 
     function fmt(t) {
@@ -360,14 +431,37 @@ ApplicationWindow {
         }
     }
 
-    RowLayout {
+    // SplitView rather than a fixed 340 px pane, so the browser can be widened
+    // for long lines or narrowed to give the picture room. The handle's position
+    // is the only thing it adds over the old RowLayout.
+    SplitView {
         anchors.fill: parent
-        spacing: 0
+        orientation: Qt.Horizontal
+
+        // The default handle is a hairline: hard to hit with a mouse and
+        // invisible against a dark theme. This one is wide enough to grab and
+        // lights up under the cursor so it reads as draggable.
+        handle: Rectangle {
+            implicitWidth: 6
+            color: SplitHandle.pressed ? "#42618f"
+                                       : (SplitHandle.hovered ? "#2c2c3a" : "#1b1b25")
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 1
+                height: 28
+                color: "#4a4a5c"
+                visible: !parent.SplitHandle.pressed
+            }
+        }
 
         // ---- video + transport ----------------------------------------
         ColumnLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            SplitView.fillWidth: true
+            // Wide enough that the transport bar still fits: below roughly this,
+            // the speed, Subs and fullscreen buttons start being clipped off the
+            // right-hand end rather than the row degrading gracefully.
+            SplitView.minimumWidth: 700
             spacing: 0
 
             Rectangle {
@@ -601,203 +695,15 @@ ApplicationWindow {
         }
 
         // ---- docked subtitle browser -----------------------------------
-        // One tab per track, incremental search, click-to-seek, and auto-follow
-        // with a toggle so scrolling by hand does not fight playback.
-        Rectangle {
-            Layout.preferredWidth: 340
-            Layout.fillHeight: true
-            color: "#12121a"
-            visible: root.panelVisible
-
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 0
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    implicitHeight: 40
-                    color: "#1b1b25"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-
-                        Label {
-                            color: "#d0d0dc"
-                            text: "Subtitles"
-                            font.bold: true
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        Label {
-                            color: subs.busy ? "#c8a45c" : "#6a6a7a"
-                            font.pixelSize: 11
-                            // While searching, say how much of the track is
-                            // showing; otherwise the parse result.
-                            text: lines.pattern !== ""
-                                  ? lines.count + " of " + lines.sourceCount + " lines"
-                                  : subs.status
-                        }
-                    }
-                }
-
-                TabBar {
-                    id: trackTabs
-                    Layout.fillWidth: true
-                    visible: subs.tracks.length > 0
-
-                    Repeater {
-                        model: subs.tracks
-
-                        TabButton {
-                            required property var modelData
-                            text: modelData.label + " (" + modelData.lineCount + ")"
-                            enabled: modelData.browsable
-                            width: Math.max(implicitWidth, 72)
-                            font.pixelSize: 11
-                            ToolTip.visible: hovered
-                            ToolTip.text: modelData.codec + " · " + modelData.kind
-                                          + (modelData.sidecar ? " · sidecar " + modelData.source : "")
-                                          + (modelData.note !== "" ? "\n" + modelData.note : "")
-                        }
-                    }
-
-                    onCurrentIndexChanged: {
-                        var track = subs.tracks[currentIndex]
-                        if (track !== undefined && track.browsable) {
-                            root.currentTrack = track.id
-                            root.applySubtitleSelection()
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.margins: 8
-                    spacing: 8
-
-                    TextField {
-                        id: searchField
-                        Layout.fillWidth: true
-                        placeholderText: "search…"
-                        enabled: lines.sourceCount > 0
-                        font.pixelSize: 12
-                        // Filtering walks every cue, so a 200k-line track would
-                        // do that work on each keystroke. Coalesce instead.
-                        onTextChanged: searchDebounce.restart()
-                        Keys.onEscapePressed: text = ""
-
-                        Timer {
-                            id: searchDebounce
-                            interval: 150
-                            onTriggered: lines.pattern = searchField.text
-                        }
-                    }
-
-                    Button {
-                        id: followToggle
-                        text: "Follow"
-                        checkable: true
-                        checked: true
-                        font.pixelSize: 11
-                        padding: 6
-                        ToolTip.visible: hovered
-                        ToolTip.text: "Scroll the list to the line playing now.\n"
-                                      + "Turns itself off if you drag the list."
-                        // Coming back on should jump to the current line rather
-                        // than wait for the next cue boundary.
-                        onCheckedChanged: {
-                            if (checked && root.currentRow >= 0)
-                                lineList.currentIndex = root.currentRow
-                        }
-                    }
-                }
-
-                ListView {
-                    id: lineList
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.margins: 8
-                    clip: true
-                    spacing: 2
-                    model: lines
-
-                    ScrollBar.vertical: ScrollBar {}
-
-                    // Keep the playing line in a band in the upper middle rather
-                    // than at a fixed point. A band gives hysteresis: the view
-                    // only scrolls once the line would leave it, so a run of
-                    // short cues does not jog the list on every single one, and
-                    // there are always a few upcoming lines visible below.
-                    //
-                    // Only while following -- with the range applied when follow
-                    // is off, scrolling by hand would be dragged back.
-                    highlightRangeMode: followToggle.checked ? ListView.ApplyRange
-                                                             : ListView.NoHighlightRange
-                    preferredHighlightBegin: height * 0.3
-                    preferredHighlightEnd: height * 0.55
-                    // Animated, because an instant jump between distant cues (a
-                    // seek, or a gap in dialogue) loses the reader's place.
-                    highlightMoveDuration: 220
-                    highlightMoveVelocity: -1
-
-                    // Dragging the list is a statement of intent: stop yanking
-                    // the viewport back to the playing line.
-                    onDragStarted: followToggle.checked = false
-
-                    delegate: ItemDelegate {
-                        id: lineRow
-                        required property int index
-                        required property var model
-                        readonly property bool current: index === root.currentRow
-
-                        width: lineList.width
-                        // Clicking a row seeks there. testclip has a burned-in
-                        // timecode, so the frame that lands is a direct check on
-                        // the parsed timestamp.
-                        onClicked: mpv.seek(model.startMs / 1000)
-
-                        background: Rectangle {
-                            color: lineRow.current ? "#23324a"
-                                                   : (lineRow.hovered ? "#1b1b25" : "transparent")
-                            border.color: lineRow.current ? "#42618f" : "transparent"
-                            radius: 3
-                        }
-
-                        contentItem: ColumnLayout {
-                            spacing: 1
-                            Label {
-                                color: lineRow.current ? "#9fb6dc" : "#6f6f85"
-                                font.pixelSize: 10
-                                font.family: "monospace"
-                                text: lineRow.model.start
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                color: lineRow.current ? "#ffffff" : "#d0d0dc"
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                                text: lineRow.model.text
-                            }
-                        }
-                    }
-
-                    Label {
-                        anchors.fill: parent
-                        visible: lineList.count === 0
-                        color: "#6a6a7a"
-                        wrapMode: Text.WordWrap
-                        verticalAlignment: Text.AlignTop
-                        text: subs.tracks.length === 0
-                              ? "No subtitle tracks in this file."
-                              : lines.pattern !== ""
-                                ? "No lines match “" + lines.pattern + "”."
-                                : "Select a track above."
-                    }
-                }
-            }
+        // A Loader rather than the panel itself: the same component is used
+        // detached, and only one instance may exist at a time.
+        Loader {
+            id: dockedPanel
+            SplitView.preferredWidth: 340
+            SplitView.minimumWidth: 240
+            SplitView.maximumWidth: 900
+            visible: root.panelVisible && !root.panelDetached
+            sourceComponent: visible ? panelComponent : null
         }
     }
 }
