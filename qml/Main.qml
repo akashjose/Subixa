@@ -458,10 +458,9 @@ ApplicationWindow {
         // ---- video + transport ----------------------------------------
         ColumnLayout {
             SplitView.fillWidth: true
-            // Wide enough that the transport bar still fits: below roughly this,
-            // the speed, Subs and fullscreen buttons start being clipped off the
-            // right-hand end rather than the row degrading gracefully.
-            SplitView.minimumWidth: 700
+            // The transport bar drops controls as it narrows, so this only has
+            // to leave room for Play, the clock and a usable seek bar.
+            SplitView.minimumWidth: 380
             spacing: 0
 
             Rectangle {
@@ -520,10 +519,23 @@ ApplicationWindow {
                 visible: root.showChrome
 
                 RowLayout {
+                    id: transport
                     anchors.fill: parent
                     anchors.leftMargin: 12
                     anchors.rightMargin: 12
                     spacing: 8
+
+                    // Controls drop out as the bar narrows rather than clipping
+                    // off the right-hand end, which is what happened once the
+                    // panel became resizable. Play, the clock and the seek bar
+                    // always stay; the rest go in reverse order of how often
+                    // they are reached for, and each has a keyboard shortcut, so
+                    // nothing becomes unreachable when its button is hidden.
+                    readonly property bool showSpeed: width > 700
+                    readonly property bool showVolumeSlider: width > 620
+                    readonly property bool showMute: width > 560
+                    readonly property bool showFullscreen: width > 520
+                    readonly property bool showTracks: width > 440
 
                     Button {
                         text: mpv.paused ? "Play" : "Pause"
@@ -563,6 +575,7 @@ ApplicationWindow {
                         text: "Audio"
                         font.pixelSize: 11
                         padding: 6
+                        visible: transport.showTracks
                         enabled: mpv.duration > 0
                         onClicked: audioMenu.popup(0, -audioMenu.height)
                         ToolTip.visible: hovered
@@ -600,6 +613,9 @@ ApplicationWindow {
                         font.pixelSize: 11
                         padding: 6
                         flat: true
+                        // Kept longer than the slider: muting is the thing you
+                        // reach for in a hurry, and M is easy to forget.
+                        visible: transport.showMute || mpv.muted
                         onClicked: mpv.toggleMute()
                         ToolTip.visible: hovered
                         ToolTip.text: mpv.muted ? "Muted — click or M to unmute"
@@ -608,6 +624,7 @@ ApplicationWindow {
 
                     Slider {
                         id: volumeSlider
+                        visible: transport.showVolumeSlider
                         Layout.preferredWidth: 80
                         from: 0
                         to: 100
@@ -622,6 +639,7 @@ ApplicationWindow {
                     }
 
                     Button {
+                        visible: transport.showSpeed || Math.abs(mpv.speed - 1.0) > 0.01
                         text: mpv.speed.toFixed(2).replace(/0$/, "") + "×"
                         font.pixelSize: 11
                         padding: 6
@@ -652,6 +670,7 @@ ApplicationWindow {
                         text: "Subs"
                         font.pixelSize: 11
                         padding: 6
+                        visible: transport.showTracks
                         enabled: mpv.duration > 0
                         onClicked: subMenu.popup(0, -subMenu.height)
                         ToolTip.visible: hovered
@@ -681,6 +700,7 @@ ApplicationWindow {
                     }
 
                     Button {
+                        visible: transport.showFullscreen
                         text: root.fullscreen ? "Exit" : "Full"
                         font.pixelSize: 11
                         padding: 6

@@ -76,10 +76,13 @@ size and to a safe area, with Qt scaling the result: a 2560 px pane renders into
 and comes out correct, for about 1.7x less CPU and a softer picture. The cap is off on any
 real GPU, where it would only blur subtitles for no reason.
 
-Under WSL the software path is avoidable entirely — `GALLIUM_DRIVER=d3d12` gets real
-hardware GL through the host GPU, where a 2560 px pane is clean at full resolution and
-10-bit video renders natively with no workarounds engaged. The app logs its `GL_RENDERER`
-at startup so which path is in use is never a guess. See `CLAUDE.md` for both.
+Under WSL the software path is avoidable entirely, and the player arranges that itself:
+before creating a context it checks whether D3D12 passthrough is available, verifies it by
+probing in a throwaway child process, and only then switches to hardware GL — where a
+2560 px pane is clean at full resolution and 10-bit video renders natively with no
+workarounds engaged. The result is cached, so only the first launch pays for the probe, and
+`CMP_NO_GPU=1` forces the software path back for testing. The app logs both the choice it
+made and its `GL_RENDERER`, so which path is in use is never a guess.
 
 ## Roadmap
 

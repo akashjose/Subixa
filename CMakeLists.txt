@@ -36,6 +36,8 @@ qt_add_executable(custom_media_player
     src/SubtitleFilterModel.h
     src/PlaybackHistory.cpp
     src/PlaybackHistory.h
+    src/GraphicsSetup.cpp
+    src/GraphicsSetup.h
 )
 
 qt_add_qml_module(custom_media_player

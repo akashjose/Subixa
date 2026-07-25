@@ -29,7 +29,30 @@ times slower for build workloads.
 
 WSLg falls back to llvmpipe by default here (Qt's EGL path fails with `failed to create
 dri2 screen` and lands on swrast), which is where every rendering trap below comes from.
-That fallback is **not necessary on this machine**:
+That fallback is **not necessary on this machine**, and **the player now sorts it out by
+itself** — no environment variable to remember:
+
+```
+graphics: hardware GL confirmed by probe: D3D12 (Intel(R) UHD Graphics 770)
+graphics: hardware GL (remembered)
+graphics: CMP_NO_GPU set, leaving the driver alone
+```
+
+`GraphicsSetup::configure()` runs before `QGuiApplication`, because Mesa reads
+`GALLIUM_DRIVER` when it loads the driver on the first context. It only acts under WSL —
+native Linux picks iris/radeonsi correctly on its own and interfering could only make it
+worse, and Windows has no Mesa in the picture. It checks `/dev/dxg`, the host
+`libd3d12.so` and Mesa's `d3d12_dri.so` are all present, then **probes in a child
+process**: the same binary re-run with `--gl-probe`, which creates an offscreen context,
+prints `GL_RENDERER` and exits non-zero if it got a software rasterizer.
+
+The child matters. A forced `GALLIUM_DRIVER` does not fall back — if the driver cannot
+load, context creation simply fails — so the risky attempt happens in a throwaway process
+rather than in the player. The answer is cached in `QSettings`, keyed by kernel version, so
+only the first launch pays for it. `CMP_NO_GPU=1` opts out and stays on software, which is
+how to test the workarounds.
+
+Setting `GALLIUM_DRIVER` by hand still works and is honoured as-is:
 
 ```bash
 GALLIUM_DRIVER=d3d12 ./build/custom_media_player testclip.mp4
@@ -227,6 +250,7 @@ Two things to know before believing a black window:
 ```
 src/MpvObject.{h,cpp}         QQuickFramebufferObject + libmpv OpenGL render API
 src/main.cpp                  forces OpenGL RHI, passes argv[1] to QML as `initialFile`
+src/GraphicsSetup.{h,cpp}     picks a GL driver before Qt makes a context, probing first
 src/SubtitleTypes.h           SubtitleLine / SubtitleTrack plain structs
 src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker thread
 src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed tracks
@@ -501,8 +525,9 @@ fullscreen, keyboard shortcuts, a file dialog, drag-and-drop, volume, speed and 
 resume. Verified against a real 3 GB AV1 film with **65 subtitle tracks / 93 350 cues**,
 not just the fixtures — including resuming it at 29:44 after a kill.
 
-**First thing in a new session:** run with `GALLIUM_DRIVER=d3d12` (see Environment) and
-play a fixture in a real window to confirm the picture appears. On the software path a
+**First thing in a new session:** play a fixture in a real window and confirm the picture
+appears. The GPU is selected automatically now (see Environment); check the `graphics:`
+line in the log to see which path it took. On the software path a
 black or partial frame may be the degraded WSLg state rather than a real bug, and every
 visual check will lie until the distro is restarted.
 
