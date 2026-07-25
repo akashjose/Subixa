@@ -171,6 +171,48 @@ extractor is right to keep the hard space — `SubtitleFilterModel` now folds it
 both sides, and only when the pattern contains a space, so single-word searches
 keep the optimised `QString::contains()` path.
 
+### The render canary
+
+The one thing the suites above cannot see is whether a picture appeared. That is
+also the thing this environment lies about most, so it has its own tool:
+
+```bash
+./tools/render-canary.sh                 # testclip.mp4, the right clip for it
+./tools/render-canary.sh some-film.mkv   # any clip, if it is bright and moving
+```
+
+It launches the player in a window of stated shape — its own `XDG_CONFIG_HOME`,
+panel hidden, muted, so the developer's settings neither affect it nor get
+written to — waits for `VO: [libmpv]`, grabs two frames 1.5 s apart through
+`wsl-screenshot.ps1`, and answers three questions with numbers:
+
+- **black** — the middle of the pane is above a luma floor, so an unpainted
+  surface is not mistaken for a dark shot;
+- **frozen** — the two grabs differ, which is the other face of the degraded
+  state: one frame repeated while the transport clock advances normally;
+- **content** — the grab's mean colour falls inside the range the clip's own
+  centre region occupies, measured with ffmpeg over the file.
+
+Both crops are the middle 40% of the frame, in the capture and in the clip
+alike, so the comparison does not depend on where the window frame and the
+transport bar put the picture, and chrome is nowhere near it. On a failure the
+grabs and the log are copied to `canary-failure/`.
+
+**All three checks have been made to fire**, which matters more here than the
+passing case: a black clip trips black *and* frozen, and playing `testclip.mp4`
+while comparing against a black reference (the optional second argument, which
+exists for this) trips content. A healthy run reads:
+
+```
+canary: grabbed  luma 127.9 then 126.7, rgb (129,127,132)
+canary: motion   8.07% of samples changed between grabs
+canary: clip     rgb ranges r 118-131 g 122-136 b 119-133
+canary: PASS  the picture is being painted, and it is this clip
+```
+
+It is a precondition, not a renderer test: it says whether visual evidence can
+be trusted at all. When it fails, restart the distro before debugging the app.
+
 Headless run of the app itself:
 
 ```bash
@@ -724,35 +766,32 @@ what is stored rather than inferred from behaviour.
 WSLg surface with the current tooling, so it is compile-and-parse only. Everything else in
 milestone 3 was exercised in a real window.
 
-**First thing in a new session:** play a fixture in a real window and confirm the picture
-appears. The GPU is selected automatically now (see Environment); check the `graphics:`
-line in the log to see which path it took. On the software path a
-black or partial frame may be the degraded WSLg state rather than a real bug, and every
-visual check will lie until the distro is restarted.
+**First thing in a new session:** run `./tools/render-canary.sh`. It plays `testclip.mp4`
+in a window and says whether the picture is being painted, whether it is moving, and
+whether it is that clip — the three things the WSLg degraded state breaks while everything
+in the log looks normal. It also prints which graphics path was chosen. Until it passes,
+every visual check will lie, and the fix is to restart the distro rather than to debug the
+app.
 
 The renderer has no known correctness bugs left: the FBO cap (`FboCap.h`) closed the last
 one, so fullscreen works on the software path as well as on D3D12.
 
 Next, in this order:
 
-1. **A render canary**, which is now the biggest gap in the harness — see the loose end
-   below. Everything else has a headless test; the picture does not.
-2. **Playlists, or at least "next file in the folder".** A drop of several files currently
+1. **Playlists, or at least "next file in the folder".** A drop of several files currently
    plays the last one and ignores the rest, which is the most obviously missing behaviour
    left in ordinary use.
-3. **Styling in the browser** — the raw ASS payload is already kept per cue (`rawText`),
+2. **Styling in the browser** — the raw ASS payload is already kept per cue (`rawText`),
    so italics and speaker colours could be rendered in the list rather than stripped.
-4. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. See the platform section.
+3. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. See the platform section.
 
 Loose ends worth folding into whatever touches them next:
 
-- **No render canary yet.** Visual checks still have to be sanity-checked by hand against a
-  known-good file, which is how the degraded state went unnoticed for a whole film test
-  once. Playing `testclip.mp4` and diffing the grab against an `ffmpeg`-extracted reference
-  frame programmatically would turn that into an explicit precondition. Note an in-process
-  `grabWindow()`/FBO readback cannot serve as the canary — trap 10 records `toImage()`
-  returning a *perfect* frame while the screen was wrong, because the readback is itself
-  the missing synchronisation.
+- **The canary cannot run itself.** It needs a window and the Windows-side capture, so it
+  is a tool rather than a `ctest` case, and nothing makes anyone run it. Note also that an
+  in-process `grabWindow()`/FBO readback could not have replaced it — trap 10 records
+  `toImage()` returning a *perfect* frame while the screen was wrong, because the readback
+  is itself the missing synchronisation.
 - **Search is a linear scan per keystroke**, coalesced by a 150 ms timer in QML. Fine at
   the 200k-cue fixture; if it ever is not, the fix is an index, not a longer timer.
 - **The FBO cap's threshold is a guess, if a conservative one.** `FboCap::SafeArea` is 2.0

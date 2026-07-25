@@ -237,6 +237,18 @@ mpv and the models keep working correctly. The QML suite found two real bugs on 
 run — detaching the panel silently reset the reader's tab, and a handler that does not
 exist on `FileDialog` — neither of which a compiler would have caught.
 
+The picture itself is the one thing they cannot see, so it has a separate check:
+
+```bash
+./tools/render-canary.sh
+```
+
+It plays `testclip.mp4` in a window of its own choosing, grabs two frames a moment apart,
+and reports whether the pane is painted at all, whether it changed between grabs, and
+whether its colours match the clip's — the three ways the degraded session fails while
+every log line looks healthy. All three checks have been made to fire deliberately, which
+is the only reason to believe the passing case.
+
 `testclip.mp4` is a generated 15-second clip with a burned-in timecode, so a screenshot is
 enough to confirm the rendered frame matches the reported playback position. It carries no
 subtitles; `testdata/make-fixtures.sh` builds files that do — embedded SRT/ASS/`mov_text`

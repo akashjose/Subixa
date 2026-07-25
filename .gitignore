@@ -6,6 +6,9 @@ compile_commands.json
 .qtc_clangd/
 CMakeLists.txt.user*
 
+# Where tools/render-canary.sh leaves the grabs and the log when it fails.
+canary-failure/
+
 # Generated test media. testclip.mp4 is 15 s of testsrc2 with a burned-in
 # timecode; testdata/make-fixtures.sh prints the ffmpeg line to rebuild it.
 testclip.mp4
