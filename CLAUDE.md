@@ -122,6 +122,16 @@ real check on the extractor.
 Anything about playback or rendering needs a real window. Check the log for
 `VO: [libmpv]`; anything else means the render path is broken (see trap 1).
 
+**Xvfb is not a usable substitute, and it fails misleadingly.** It was tried to test
+llvmpipe with WSLg out of the picture (`Xvfb :99 -screen 0 2560x1440x24`, then
+`QT_QPA_PLATFORM=xcb` and `import -window`). The app runs — 160% CPU, mpv logs
+`VO: [libmpv]`, the clock advances internally — but the X window never repaints after
+the first frame: three captures a second apart came back *byte identical*, transport
+clock included. So the video pane looks black or half-drawn at every size, which reads
+exactly like the rendering bug under investigation and is nothing of the kind. Any
+pixel test that runs under Xvfb will report failures that are not there, which also
+rules Xvfb out for the QQuickTest harness idea below as far as video pixels go.
+
 ### Seeing the UI from WSL
 
 WSLg windows are Wayland surfaces and do **not** show up in an XWayland root grab
@@ -371,6 +381,16 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     mode stops being reachable at all rather than being pushed slightly further out. The
     price is a softer picture when the window exceeds the video, which is the normal
     trade every player makes.
+
+    **Is this llvmpipe generally, or WSLg?** Unresolved, and worth knowing before spending
+    much on the cap. It is *not* the Wayland surface specifically: switching to XWayland
+    (`QT_QPA_PLATFORM=xcb`) keeps the corruption and only changes its severity — a fine
+    mesh where the Wayland path paints solid black. But both still run through WSLg, so
+    that does not exonerate it. The Xvfb attempt to remove WSLg entirely produced no
+    evidence either way for the reason recorded in the Tests section: the window never
+    repaints there, so every size looks broken. Settling it needs llvmpipe on a Linux
+    desktop that is not WSLg — a VM with a compositor, or real hardware with
+    `LIBGL_ALWAYS_SOFTWARE=1`.
 
     Until that lands, **fullscreen and very large windows show a corrupt picture on the
     software rasterizer** — so run with `GALLIUM_DRIVER=d3d12`, where the same 2560 px pane
