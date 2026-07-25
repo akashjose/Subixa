@@ -29,6 +29,9 @@ That is the goal. Playback is the necessary substrate; the subtitle browser is t
 - Keyboard shortcuts, fullscreen
 - Remembers position per file
 
+The browser docks beside the video or detaches into its own window (Ctrl+D), and is
+resizable either way. `CLAUDE.md` lists the keyboard shortcuts.
+
 ## Design decisions
 
 **Built from scratch, not forked.** VLC, Haruna, and SMPlayer all carry architecture

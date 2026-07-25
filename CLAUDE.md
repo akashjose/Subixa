@@ -161,6 +161,29 @@ exactly like the rendering bug under investigation and is nothing of the kind. A
 pixel test that runs under Xvfb will report failures that are not there, which also
 rules Xvfb out for the QQuickTest harness idea below as far as video pixels go.
 
+### Keyboard and controls
+
+Every shortcut is gated on the search box not having focus, so typing "film" into it does
+not toggle fullscreen and mute. Escape is bound only while fullscreen; in the search box it
+clears the text instead.
+
+| | |
+|---|---|
+| Space, K | play/pause |
+| ← / → | seek 5 s, Shift for 1 s |
+| J / L | seek 10 s |
+| ↑ / ↓ | volume, M mutes |
+| F, F11 | fullscreen, Esc leaves it |
+| Tab | show/hide the subtitle panel |
+| Ctrl+D | detach the panel into its own window, or dock it again |
+| Ctrl+F | focus the search box |
+| Ctrl+O | open a file |
+| [ / ] | playback speed, Backspace resets |
+
+The transport bar drops controls as it narrows — speed first, then the volume slider, mute,
+fullscreen, and the track menus — so a wide panel does not clip them off the right-hand
+end. Everything it hides has a shortcut above, which is what makes that safe.
+
 ### Seeing the UI from WSL
 
 WSLg windows are Wayland surfaces and do **not** show up in an XWayland root grab
@@ -256,6 +279,9 @@ src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker t
 src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed tracks
 src/SubtitleLineModel.{h,cpp} QAbstractListModel over one track's cues
 src/SubtitleFilterModel.{h,cpp} search proxy + the row mapping auto-follow needs
+src/PlaybackHistory.{h,cpp}   per-file resume positions in QSettings, and their policy
+src/FboCap.h                  how large a framebuffer to give mpv on a software rasterizer
+src/MpvTrackList.h            maps browser tracks onto mpv's, header-only so it is testable
 qml/Main.qml                  video + transport, and the window the panel lives in
 qml/SubtitlePanel.qml         the browser itself, docked or in its own window
 tools/wsl-*.ps1               screenshot and input injection from the Windows side
@@ -275,6 +301,21 @@ The cap is why `MpvObject` sets `setTextureFollowsItemSize(false)`. With it on, 
 compares the FBO's size against the item's every frame and destroys any that disagrees,
 so a capped framebuffer would be recreated forever; with it off, recreation is asked for
 explicitly in `MpvRenderer::synchronize()` when the target size changes.
+
+**The panel is one component in two homes.** `SubtitlePanel.qml` takes the manager, the
+filter proxy and a `ui` object as properties rather than reaching for ids, so the same
+component runs docked in a `SplitView` or alone in a `Window` (Ctrl+D, or the Detach
+button). Only one instance exists at a time — each home is a `Loader` whose
+`sourceComponent` is null when the other is active — so the item is destroyed and rebuilt
+on every move. That is why search text, tab index and follow live in the caller's `ui`
+object: anything stored inside the panel would be lost. It costs almost nothing because
+the models are C++-side and passed by reference; a detach re-creates delegates, not cues.
+
+Two QML details that bite here. A property named `lines` on the panel shadows the caller's
+`lines` id inside the component's scope, so `lines: lines` silently binds to itself —
+hence `linesModel`. And `TabBar` and `TextField` assign their own `currentIndex`/`text` on
+interaction, which destroys a binding, so both are restored in `Component.onCompleted` and
+pushed back to `ui` by hand instead.
 
 **Parsing cost is I/O, not cues.** One `av_read_frame` loop collects every subtitle
 stream in a single pass, so 65 tracks cost the same walk as one — but subtitle packets
@@ -525,6 +566,16 @@ fullscreen, keyboard shortcuts, a file dialog, drag-and-drop, volume, speed and 
 resume. Verified against a real 3 GB AV1 film with **65 subtitle tracks / 93 350 cues**,
 not just the fixtures — including resuming it at 29:44 after a kill.
 
+Since then the browser became resizable and detachable, the playing line is kept in a band
+rather than at the bottom edge, parsing reports progress, the framebuffer is capped on the
+software rasterizer, and the GPU is selected automatically instead of by hand. All verified
+on the film: capped fullscreen renders correctly, D3D12 renders 10-bit natively, and
+switching between its two English tracks picks the right one through `ff-index`.
+
+**Not verified: drag-and-drop.** There is no way to synthesise a drag from Windows into a
+WSLg surface with the current tooling, so it is compile-and-parse only. Everything else in
+milestone 3 was exercised in a real window.
+
 **First thing in a new session:** play a fixture in a real window and confirm the picture
 appears. The GPU is selected automatically now (see Environment); check the `graphics:`
 line in the log to see which path it took. On the software path a
@@ -536,10 +587,14 @@ one, so fullscreen works on the software path as well as on D3D12.
 
 Next, in this order:
 
-1. **Milestone 4: polish.** Settings persistence beyond resume position, error surfaces for
-   unsupported or corrupt files, theming for the panel, and exporting a track to `.srt`.
-2. **A QML-level test harness**, if UI regressions start costing time — see the loose end.
+1. **Cache parsed cues.** The biggest remaining win in daily use: reopening the film costs
+   9.4 s to rediscover the same 93 350 cues. See the first loose end.
+2. **Milestone 4: polish.** Settings persistence beyond resume position — window size,
+   panel width, docked-or-detached, volume, and *subtitle track selection*, which today
+   resets to mpv's default on every open. Then error surfaces for unsupported or corrupt
+   files, theming for the panel, and exporting a track to `.srt`.
 3. **`hwdec=no`**, now that a GPU is reachable — see the loose end below.
+4. **A QML-level test harness**, if UI regressions start costing time.
 
 Loose ends worth folding into whatever touches them next:
 
@@ -560,9 +615,6 @@ Loose ends worth folding into whatever touches them next:
   `grabWindow()`/FBO readback cannot serve as the canary — trap 10 records `toImage()`
   returning a *perfect* frame while the screen was wrong, because the readback is itself
   the missing synchronisation.
-- **`hwdec=no` is hardcoded** in `MpvObject`'s constructor for WSL's sake. Conditional on
-  the same `usingSoftwareRasterizer()` check, native Linux would get vaapi/nvdec for about
-  five lines. See the platform section.
 - **Search is a linear scan per keystroke**, coalesced by a 150 ms timer in QML. Fine at
   the 200k-cue fixture; if it ever is not, the fix is an index, not a longer timer.
 - **The FBO cap's threshold is a guess, if a conservative one.** `FboCap::SafeArea` is 2.0
