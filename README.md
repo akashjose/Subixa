@@ -152,6 +152,22 @@ Windows side (`tools/wsl-screenshot.ps1`, with `tools/wsl-input.ps1` to drive th
 the WSLg session can degrade into painting black at every window size, at which point
 visual checks return false negatives until the distro is restarted.
 
+### Tests
+
+```bash
+cd build && ctest --output-on-failure
+```
+
+Two headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
+layer underneath the browser — the cue binary search, the search filter, and the row mapping
+auto-follow depends on. `tst_mpvtracks` links libmpv with `vo=null` and checks that selecting
+a track changes what mpv would render, comparing its `sub-text` property rather than looking
+at pixels.
+
+Both avoid needing a window on purpose: under WSLg a screenshot is the *least* reliable
+evidence available, since the session can degrade into painting stale frames while mpv and
+the models keep working correctly.
+
 `testclip.mp4` is a generated 15-second clip with a burned-in timecode, so a screenshot is
 enough to confirm the rendered frame matches the reported playback position. It carries no
 subtitles; `testdata/make-fixtures.sh` builds files that do — embedded SRT/ASS/`mov_text`

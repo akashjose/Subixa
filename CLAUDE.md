@@ -46,7 +46,36 @@ Subtitle fixtures (`testclip.mp4` has no subtitle track):
 ./testdata/make-fixtures.sh --big    # plus huge.mp4, a 200k-cue ASS sidecar
 ```
 
-Headless run:
+### Tests
+
+```bash
+cd build && ctest --output-on-failure     # or run ./build/tst_subtitles directly
+```
+
+Two headless suites, neither needing a window, a GL context, or a compositor —
+deliberately, because a screenshot is the least reliable evidence available here
+(see the degraded-state note below). Run these before reaching for the UI.
+
+- **`tst_subtitles`** — the extractor against the fixtures (the 8-comma ASS field
+  layout, entity decoding, both halves of the rebase rule) plus
+  `SubtitleLineModel::indexAt()`, the filter, and `rowAt()`/`startMsAt()` mapping.
+  Sources are compiled into the test target rather than shared via a static
+  library: `qt_add_qml_module` registers the QML-exposed types from the sources
+  listed in `qt_add_executable`, and moving them out breaks that registration.
+- **`tst_mpvtracks`** — libmpv directly, `vo=null`. Verifies that selecting a
+  track changes what mpv *would* burn over the video, read back as text from
+  `sub-text` rather than looked at. `track-list/N/ff-index` is confirmed present,
+  which is what lets a panel tab address an mpv track without matching language
+  strings. Note `vo=null` rather than `QT_QPA_PLATFORM=offscreen`: offscreen never
+  creates a render context, so the queued `loadfile` never flushes and mpv loads
+  nothing at all (trap 2).
+
+One `QEXPECT_FAIL` records a real gap rather than hiding it: search does not fold
+U+00A0 to a plain space, so a phrase spanning an ASS `\h` (which the extractor
+correctly keeps as a non-breaking space) matches nothing. Fixing
+`filterAcceptsRow()` flips it to an unexpected pass.
+
+Headless run of the app itself:
 
 ```bash
 QT_QPA_PLATFORM=offscreen timeout 6 ./build/custom_media_player testdata/subs.mkv
@@ -362,11 +391,19 @@ Immediate task is **Milestone 3: player usability**, in this order and for this 
 
 Loose ends worth folding into whatever touches them next:
 
-- **Nothing exercises the models below the scene graph.** `offscreen` runs cannot see UI,
-  so tabs, filtering and follow are verified by screenshotting a real window
-  (`tools/wsl-*.ps1`). `SubtitleLineModel::indexAt()`, the filter, and `rowAt()` mapping
-  are all testable without a window and should get a harness before milestone 3 piles more
-  state on top — especially with the degraded-black state able to invalidate visual checks.
+- **The models now have a harness; the QML above them still does not.** `ctest` covers the
+  extractor, `indexAt()`, the filter and `rowAt()` mapping, plus mpv's own track selection
+  via `sub-text` — see the Tests section. What remains screenshot-only is the QML layer
+  itself: that a tab click swaps the model, that follow scrolls the view, that the search
+  box is wired to the proxy. A `QQuickTest`/`QQuickView` harness could reach those without
+  a compositor and is the obvious next step if UI regressions start costing time.
+- **No render canary yet.** Visual checks still have to be sanity-checked by hand against a
+  known-good file, which is how the degraded state went unnoticed for a whole film test
+  once. Playing `testclip.mp4` and diffing the grab against an `ffmpeg`-extracted reference
+  frame programmatically would turn that into an explicit precondition. Note an in-process
+  `grabWindow()`/FBO readback cannot serve as the canary — trap 10 records `toImage()`
+  returning a *perfect* frame while the screen was wrong, because the readback is itself
+  the missing synchronisation.
 - **`hwdec=no` is hardcoded** in `MpvObject`'s constructor for WSL's sake. Conditional on
   the same `usingSoftwareRasterizer()` check, native Linux would get vaapi/nvdec for about
   five lines. See the platform section.

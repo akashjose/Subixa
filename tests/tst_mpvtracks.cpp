@@ -1,0 +1,247 @@
+// What mpv itself does with track selection, verified with no window and no FBO.
+//
+// This is the half of the subtitle browser that a unit test over our own models
+// cannot reach: whether selecting a track actually changes what mpv would burn
+// over the video. It does not need a picture to answer that -- mpv exposes the
+// current subtitle as text in `sub-text`, so "does the panel agree with the
+// video" is a string comparison rather than a screenshot. That matters here
+// because WSLg can degrade into painting stale frames while mpv keeps working
+// perfectly (see CLAUDE.md), which makes visual checks the least trustworthy
+// evidence available.
+//
+// vo=null, not QT_QPA_PLATFORM=offscreen: offscreen never creates a render
+// context, so the queued loadfile is never flushed and mpv does not load the
+// file at all (trap 2). vo=null has no such dependency.
+
+#include <QtTest>
+
+#include <QtCore/QFileInfo>
+
+#include <mpv/client.h>
+
+namespace {
+
+QString fixture(const QString &name)
+{
+    return QStringLiteral(CMP_TESTDATA_DIR "/") + name;
+}
+
+}  // namespace
+
+class TstMpvTracks : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void initTestCase();
+    void cleanupTestCase();
+
+    void subtitleTracksCarryFfIndexAndLanguage();
+    void audioTrackIsSelectable();
+    void selectingSidChangesWhatMpvWouldRender();
+    void mpvLeavesEntitiesEncoded();
+
+private:
+    // Pumps mpv's event queue until `id` arrives. Every check here depends on
+    // mpv having finished a seek or a load, and there is no other way to know.
+    bool waitFor(mpv_event_id id, int timeoutMs = 10'000);
+    QString stringProp(const char *name);
+    double doubleProp(const char *name);
+    // sub-text lags the seek by a frame or two even once the seek reports done.
+    QString subTextAfterSeek(double seconds, int timeoutMs = 5000);
+    int subTrackId(const QString &language);
+
+    mpv_handle *m_mpv = nullptr;
+};
+
+void TstMpvTracks::initTestCase()
+{
+    const QString path = fixture(QStringLiteral("subs.mkv"));
+    if (!QFileInfo::exists(path))
+        QSKIP("fixtures missing -- run ./testdata/make-fixtures.sh");
+
+    m_mpv = mpv_create();
+    QVERIFY(m_mpv);
+
+    // No video output at all: this test is about mpv's state, not its pixels.
+    QCOMPARE(mpv_set_option_string(m_mpv, "vo", "null"), 0);
+    QCOMPARE(mpv_set_option_string(m_mpv, "ao", "null"), 0);
+    mpv_set_option_string(m_mpv, "terminal", "no");
+    mpv_set_option_string(m_mpv, "hwdec", "no");
+    mpv_set_option_string(m_mpv, "keep-open", "yes");
+    // Paused: every assertion reads state at a timestamp it chose, so playback
+    // must not drift past the cue under test between the seek and the read.
+    mpv_set_option_string(m_mpv, "pause", "yes");
+
+    QCOMPARE(mpv_initialize(m_mpv), 0);
+
+    const QByteArray utf8 = path.toUtf8();
+    const char *cmd[] = {"loadfile", utf8.constData(), nullptr};
+    QCOMPARE(mpv_command(m_mpv, cmd), 0);
+    QVERIFY2(waitFor(MPV_EVENT_FILE_LOADED), "mpv never loaded the fixture");
+}
+
+void TstMpvTracks::cleanupTestCase()
+{
+    if (m_mpv) {
+        mpv_terminate_destroy(m_mpv);
+        m_mpv = nullptr;
+    }
+}
+
+bool TstMpvTracks::waitFor(mpv_event_id id, int timeoutMs)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMs) {
+        mpv_event *event = mpv_wait_event(m_mpv, 0.1);
+        if (!event)
+            continue;
+        if (event->event_id == id)
+            return true;
+        if (event->event_id == MPV_EVENT_END_FILE)
+            return false;
+    }
+    return false;
+}
+
+QString TstMpvTracks::stringProp(const char *name)
+{
+    char *value = nullptr;
+    if (mpv_get_property(m_mpv, name, MPV_FORMAT_STRING, &value) < 0 || !value)
+        return QString();
+    const QString result = QString::fromUtf8(value);
+    mpv_free(value);
+    return result;
+}
+
+double TstMpvTracks::doubleProp(const char *name)
+{
+    double value = 0.0;
+    if (mpv_get_property(m_mpv, name, MPV_FORMAT_DOUBLE, &value) < 0)
+        return -1.0;
+    return value;
+}
+
+QString TstMpvTracks::subTextAfterSeek(double seconds, int timeoutMs)
+{
+    const QByteArray pos = QByteArray::number(seconds);
+    const char *cmd[] = {"seek", pos.constData(), "absolute", nullptr};
+    if (mpv_command(m_mpv, cmd) < 0)
+        return QString();
+    waitFor(MPV_EVENT_PLAYBACK_RESTART, timeoutMs);
+
+    // The seek is done but the subtitle for the new position may need another
+    // decode cycle, so poll rather than read once and trust it.
+    QElapsedTimer timer;
+    timer.start();
+    QString text;
+    while (timer.elapsed() < timeoutMs) {
+        text = stringProp("sub-text");
+        if (!text.isEmpty())
+            break;
+        mpv_wait_event(m_mpv, 0.05);
+    }
+    return text;
+}
+
+int TstMpvTracks::subTrackId(const QString &language)
+{
+    const int count = static_cast<int>(doubleProp("track-list/count"));
+    for (int i = 0; i < count; ++i) {
+        const QByteArray base = QByteArrayLiteral("track-list/") + QByteArray::number(i);
+        if (stringProp(base + "/type") != QStringLiteral("sub"))
+            continue;
+        if (stringProp(base + "/lang") == language)
+            return static_cast<int>(doubleProp(base + "/id"));
+    }
+    return -1;
+}
+
+void TstMpvTracks::subtitleTracksCarryFfIndexAndLanguage()
+{
+    const int count = static_cast<int>(doubleProp("track-list/count"));
+    QVERIFY2(count >= 5, qPrintable(QStringLiteral("track-list/count=%1").arg(count)));
+
+    QStringList subLanguages;
+    int subs = 0;
+    for (int i = 0; i < count; ++i) {
+        const QByteArray base = QByteArrayLiteral("track-list/") + QByteArray::number(i);
+        if (stringProp(base + "/type") != QStringLiteral("sub"))
+            continue;
+        ++subs;
+        subLanguages << stringProp(base + "/lang");
+
+        // ff-index is the bridge between mpv's own track numbering and the
+        // ffmpeg stream index the extractor records, which is what lets a panel
+        // tab name an mpv track without matching on language strings.
+        const double ffIndex = doubleProp(base + "/ff-index");
+        QVERIFY2(ffIndex >= 0,
+                 qPrintable(QStringLiteral("track %1 has no ff-index").arg(i)));
+        QVERIFY(doubleProp(base + "/id") >= 1);
+    }
+
+    QCOMPARE(subs, 3);
+    QCOMPARE(subLanguages, QStringList({QStringLiteral("eng"), QStringLiteral("jpn"),
+                                        QStringLiteral("fre")}));
+}
+
+void TstMpvTracks::audioTrackIsSelectable()
+{
+    // aid is the other half of milestone 3's first item; the fixture has exactly
+    // one audio track, so the useful assertion is that it is addressable at all.
+    const double aid = doubleProp("aid");
+    QVERIFY2(aid >= 1, qPrintable(QStringLiteral("aid=%1").arg(aid)));
+
+    QCOMPARE(mpv_set_property_string(m_mpv, "aid", "no"), 0);
+    QCOMPARE(stringProp("aid"), QStringLiteral("no"));
+
+    QCOMPARE(mpv_set_property_string(m_mpv, "aid", "1"), 0);
+    QCOMPARE(static_cast<int>(doubleProp("aid")), 1);
+}
+
+void TstMpvTracks::selectingSidChangesWhatMpvWouldRender()
+{
+    const int eng = subTrackId(QStringLiteral("eng"));
+    const int jpn = subTrackId(QStringLiteral("jpn"));
+    QVERIFY(eng > 0);
+    QVERIFY(jpn > 0);
+    QVERIFY(eng != jpn);
+
+    // 7 s falls inside the third cue of both tracks.
+    QCOMPARE(mpv_set_property_string(m_mpv, "sid", QByteArray::number(eng).constData()), 0);
+    QCOMPARE(static_cast<int>(doubleProp("sid")), eng);
+    QCOMPARE(stringProp("current-tracks/sub/lang"), QStringLiteral("eng"));
+    QCOMPARE(subTextAfterSeek(7.0), QStringLiteral("Searchable keyword: albatross."));
+
+    // Switching the track must change the text at the same timestamp -- this is
+    // the whole point of wiring the panel's tabs to sid.
+    QCOMPARE(mpv_set_property_string(m_mpv, "sid", QByteArray::number(jpn).constData()), 0);
+    QCOMPARE(static_cast<int>(doubleProp("sid")), jpn);
+    QCOMPARE(stringProp("current-tracks/sub/lang"), QStringLiteral("jpn"));
+
+    const QString styled = subTextAfterSeek(7.0);
+    QVERIFY2(styled.contains(QStringLiteral("Italic")), qPrintable(styled));
+    QVERIFY2(styled.contains(QStringLiteral("hard space")), qPrintable(styled));
+
+    // sid=no turns subtitles off entirely, which the panel needs a way to express.
+    QCOMPARE(mpv_set_property_string(m_mpv, "sid", "no"), 0);
+    QCOMPARE(stringProp("sid"), QStringLiteral("no"));
+}
+
+void TstMpvTracks::mpvLeavesEntitiesEncoded()
+{
+    const int eng = subTrackId(QStringLiteral("eng"));
+    QVERIFY(eng > 0);
+    QCOMPARE(mpv_set_property_string(m_mpv, "sid", QByteArray::number(eng).constData()), 0);
+
+    // Trap 12, pinned down: ffmpeg's SRT decoder leaves character entities
+    // literal, so libass renders "&amp;" over the video while the browser panel
+    // shows "&" for the same cue. Both are correct by their own rules, and any
+    // future comparison between panel text and mpv's text has to expect it.
+    const QString text = subTextAfterSeek(4.0);
+    QVERIFY2(text.contains(QStringLiteral("&amp;")), qPrintable(text));
+}
+
+QTEST_MAIN(TstMpvTracks)
+#include "tst_mpvtracks.moc"
