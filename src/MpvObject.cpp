@@ -57,6 +57,27 @@ public:
             } else {
                 mpv_render_context_set_update_callback(m_mpvGL, &MpvObject::onMpvRedraw,
                                                        m_obj);
+
+                // Say which driver we actually got. Two workarounds and their size
+                // limits hinge on this being a software rasterizer, and "no
+                // software-rasterizer message appeared" is a poor way to learn that
+                // hardware GL came up -- especially when porting, or when checking
+                // whether WSL picked up D3D12 passthrough instead of llvmpipe.
+                if (QOpenGLFunctions *gl = QOpenGLContext::currentContext()
+                                               ? QOpenGLContext::currentContext()
+                                                     ->functions()
+                                               : nullptr) {
+                    Q_UNUSED(gl);
+                    const char *renderer = reinterpret_cast<const char *>(
+                        glGetString(GL_RENDERER));
+                    const char *version = reinterpret_cast<const char *>(
+                        glGetString(GL_VERSION));
+                    QMetaObject::invokeMethod(
+                        m_obj, "reportRenderer", Qt::QueuedConnection,
+                        Q_ARG(QString, QString::fromUtf8(renderer ? renderer : "?")),
+                        Q_ARG(QString, QString::fromUtf8(version ? version : "?")));
+                }
+
                 // Queued before onRenderContextReady on purpose: the workaround has
                 // to be in place before the pending file starts playing, or the
                 // filter chain gets rebuilt mid-playback.
@@ -488,6 +509,11 @@ void MpvObject::onRenderContextReady()
         m_pendingFile.clear();
         command({QStringLiteral("loadfile"), file});
     }
+}
+
+void MpvObject::reportRenderer(const QString &renderer, const QString &version)
+{
+    emit logMessage(QStringLiteral("GL_RENDERER: %1 | %2").arg(renderer, version));
 }
 
 void MpvObject::forceEightBitVideo()

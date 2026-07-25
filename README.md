@@ -63,12 +63,15 @@ choosing a track from the transport menu moves the panel to match. Files arrive 
 `argv[1]`, a file dialog, or drag-and-drop, with keyboard shortcuts, fullscreen, volume and
 playback speed alongside.
 
-One known defect, and it is in the renderer rather than any of that: under WSL's software
-rasterizer a video pane above roughly 2.9 megapixels renders black or with a fine mesh of
-unwritten pixels, so **fullscreen and very large windows currently show a corrupt picture**.
-`glFinish()` before Qt samples the framebuffer fixed this at ordinary window sizes and
-stops short at large ones. The fix is to cap the framebuffer to the video's native size and
-let Qt scale — see `CLAUDE.md` trap 10. A real GPU is unaffected.
+One known defect, confined to software rendering: on Mesa's llvmpipe a video pane above
+roughly 2.9 megapixels renders black or with a fine mesh of unwritten pixels, so fullscreen
+and very large windows show a corrupt picture there. `glFinish()` before Qt samples the
+framebuffer fixed that at ordinary window sizes and stops short at large ones.
+
+Under WSL this is avoidable rather than inherent — `GALLIUM_DRIVER=d3d12` gets real
+hardware GL through the host GPU, and on that path the same 2560 px pane is clean and 10-bit
+video renders natively with no workarounds engaged. The app logs its `GL_RENDERER` at
+startup so which path is in use is never a guess. See `CLAUDE.md` for both.
 
 ## Roadmap
 

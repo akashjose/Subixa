@@ -23,7 +23,37 @@ times slower for build workloads.
 | libmpv | 0.37, client API 2.2.0, from apt |
 | FFmpeg | 6.1.1 (`libavformat` 60.16.100, `libavcodec` 60.31.102) |
 | Compiler | gcc 13.3.0, C++17, CMake 3.28.3 + Ninja |
-| Display | WSLg. **Software rendering only** — no GPU decode. Expected, not a bug. |
+| Display | WSLg. Defaults to llvmpipe, but **hardware GL is available** — see below. |
+
+### Hardware GL under WSL: `GALLIUM_DRIVER=d3d12`
+
+WSLg falls back to llvmpipe by default here (Qt's EGL path fails with `failed to create
+dri2 screen` and lands on swrast), which is where every rendering trap below comes from.
+That fallback is **not necessary on this machine**:
+
+```bash
+GALLIUM_DRIVER=d3d12 ./build/custom_media_player testclip.mp4
+```
+
+That one variable is sufficient — `/dev/dxg`, Mesa's `d3d12_dri.so` and the host's
+`/usr/lib/wsl/lib/libd3d12.so` are all already present, and `ld.wsl.conf` already has the
+loader path. The app logs which driver it got at startup, so there is no guessing:
+
+```
+GL_RENDERER: llvmpipe (LLVM 20.1.2, 256 bits) | 4.5 (Compatibility Profile) Mesa 25.2.8
+GL_RENDERER: D3D12 (Intel(R) UHD Graphics 770) | 4.1 (Compatibility Profile) Mesa 25.2.8
+```
+
+**On the D3D12 path every software-rasterizer trap below disappears**, verified rather than
+assumed: a 2560 px pane renders cleanly where llvmpipe paints it black, and `yuv420p10`
+renders natively and correctly with the 8-bit workaround switched off. The 3 GB 10-bit AV1
+film plays correctly at 30 min with 65 subtitle tracks loaded.
+
+So llvmpipe is a *fallback*, not the environment. Use `GALLIUM_DRIVER=d3d12` for anything
+about picture quality, large windows or fullscreen; drop it deliberately when testing the
+software path and its workarounds. Note the D3D12 driver reports GL 4.1 rather than 4.5 and
+still prints the EGL dri2 warning — both are harmless here. `hwdec=no` is still hardcoded,
+so decode remains on the CPU either way; revisiting that is now worth doing (see Next up).
 
 ## Build and run
 
@@ -342,9 +372,17 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     price is a softer picture when the window exceeds the video, which is the normal
     trade every player makes.
 
-    Until that lands, **fullscreen and very large windows show a corrupt picture under
-    WSL's software rasterizer**. A real GPU is unaffected: this whole family of bugs is
-    llvmpipe-specific and the workarounds disable themselves elsewhere.
+    Until that lands, **fullscreen and very large windows show a corrupt picture on the
+    software rasterizer** — so run with `GALLIUM_DRIVER=d3d12`, where the same 2560 px pane
+    is clean. "A real GPU is unaffected" is no longer an assumption: it was measured on the
+    D3D12 path, at the exact size that paints black under llvmpipe.
+
+    That also lowers the urgency of the cap. It is still worth doing — it is the only fix
+    for anyone stuck on software rendering, and it cuts CPU — but it is a fallback-path fix
+    rather than a blocker, and it must stay gated on `usingSoftwareRasterizer()` for a
+    reason beyond safety: libass draws subtitles into this same FBO, so capping it renders
+    subtitle text at video resolution and upscales it. In a player whose whole point is
+    subtitles, that is the last thing to blur on a GPU that has no need of the cap.
 
 ### Browser UI
 
@@ -439,13 +477,20 @@ Loose ends worth folding into whatever touches them next:
   five lines. See the platform section.
 - **Search is a linear scan per keystroke**, coalesced by a 150 ms timer in QML. Fine at
   the 200k-cue fixture; if it ever is not, the fix is an index, not a longer timer.
-- **The video pane is capped by nothing, and that is now a correctness bug.** It was
-  filed here as a CPU concern — software rendering costs ~1000% CPU at 2560 px, and
-  capping the FBO to the video's native size would cut that ~6x for a softer upscale.
-  Adding fullscreen showed it is more than that: above roughly 2.9 MP of FBO the picture
-  goes black or meshed even with `glFinish()` in place (trap 10, second half). Capping is
-  therefore the next renderer task, not an optimisation to get to eventually — it removes
-  the failure mode instead of moving it. **This is the top priority in the renderer.**
+- **The video pane is capped by nothing.** On the software path this is a correctness bug,
+  not just the ~1000% CPU it was filed as: above roughly 2.9 MP of FBO the picture goes
+  black or meshed even with `glFinish()` (trap 10, second half). On the D3D12 path it is
+  neither — a 2560 px pane is clean. So capping the FBO to the video's native size is a
+  software-fallback fix plus a CPU win, and must stay gated on `usingSoftwareRasterizer()`:
+  libass renders into the same FBO, so capping blurs subtitle text, which is the one thing
+  this player should not blur. A cap also needs a third term to help 4K at all —
+  `min(pane, native, safe area)` — since for 4K the native size is *above* the pane and the
+  cap would never engage.
+- **`hwdec=no` is worth revisiting now that a GPU is reachable.** It was hardcoded because
+  WSL had no usable GPU path; `GALLIUM_DRIVER=d3d12` shows it does. Rendering is already on
+  the GPU there while decode stays on the CPU, so the 3 GB AV1 film still burns cores for
+  no reason. Whether Intel's WSL D3D12 exposes a usable vaapi/`d3d11va` decode path is
+  untested.
 
 ## Related context
 

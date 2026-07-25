@@ -110,6 +110,8 @@ private slots:
     // Invoked from the render thread when GL_RENDERER turns out to be a software
     // rasterizer, which cannot render 10-bit planes correctly.
     void forceEightBitVideo();
+    // Also from the render thread, once, with whatever driver GL actually gave us.
+    void reportRenderer(const QString &renderer, const QString &version);
 
 private:
     static void onMpvRedraw(void *ctx);
