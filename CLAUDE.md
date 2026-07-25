@@ -83,12 +83,21 @@ read straight off a capture.
 
 Two things to know before believing a black window:
 
-- **The picture is intermittently missing on 8-bit files.** Runs that log
-  `VO: [libmpv] 1280x720 yuv420p` and advance the clock normally sometimes still paint
-  black. Not file-specific (`huge.mp4` is a byte-identical copy of `testclip.mp4`, and both
-  have done it), logs identical either way, and a re-run comes back fine. Still
-  unexplained; distinct from the 10-bit bug in trap 11, which is deterministic and fixed.
-  Re-run before investigating.
+- **The whole WSLg session can degrade into painting black, and stays that way.** Runs
+  that log `VO: [libmpv] ... yuv420p` and advance the clock normally paint black at *every*
+  window size, including files and timestamps that rendered correctly minutes earlier in
+  the same session. It sets in after many launch/kill cycles. What it is **not**: not the
+  sync bug in trap 12 (it reproduces with `CMP_NO_SYNC=1` and without, identically), not
+  instance count (one process alone still fails), not memory (10 GB free), and weston.log
+  shows nothing. Still unexplained.
+
+  The reset is `wsl --terminate Ubuntu-24.04` **from Windows** — targeted, and it leaves
+  the 22.04 distro's containers alone. Do **not** use `wsl --shutdown`, which stops every
+  distro including the one hosting live Immich/Jellyfin containers. Note that terminating
+  also kills any Claude Code session running inside that distro.
+
+  Practical consequence: **verify render fixes early in a session.** Once it degrades,
+  every visual check returns a false negative.
 - **Dark content is not a bug.** Feature films open on studio cards and near-black
   footage — seek a third of the way in before concluding anything about the render path.
 - **Audio init sometimes times out** (`Init failed: Timeout`, then mpv walks pulse → alsa
@@ -187,6 +196,34 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
    fixture locally — that path is verified against the codec table, not a file.)
 
 ### Rendering
+
+12. **mpv's render must be *finished*, not just issued, before Qt samples the FBO.**
+    Symptom: above roughly **2048 px of video-pane width** the picture goes black, or
+    streaked, or shows a fine mesh of unwritten pixels. Below it, everything looks fine.
+    A conformant driver tracks the render-to-texture dependency itself; llvmpipe does not,
+    so the scene graph composites a partially rasterised surface.
+
+    How that was established, because every cheaper explanation was wrong:
+
+    - Not resize handling — a window that is 2400x1300 *from launch* fails identically.
+    - Not a driver limit — `GL_MAX_TEXTURE_SIZE`, `GL_MAX_RENDERBUFFER_SIZE` and
+      `GL_MAX_VIEWPORT_DIMS` all report **16384**. A 2060-wide FBO is legal.
+    - No GL error is raised, at any point, draining the queue every frame.
+    - Not two contexts: the renderer and the scene graph share one
+      (`OpenGLContextResource` compares equal), so this is not the shared-context
+      flush rule.
+    - **Not mpv.** Dumping the FBO with `toImage()` at the failing size yields a
+      *perfect* frame. The readback is itself the missing synchronisation, which is
+      why the dump looks right while the screen does not.
+    - Not sampling geometry — filling the FBO with four `glScissor`+`glClear`
+      quadrants renders sharp, correctly placed quadrants at the failing size. (A
+      uniform fill proves nothing here: it looks identical under any scaling error.)
+
+    `glFinish()` after `mpv_render_context_render()` fixes it. `glFlush()` is **not**
+    enough — it submits the work without waiting, which visibly improves the frame but
+    leaves a fine grid of unwritten pixels. Gated on `usingSoftwareRasterizer()` so a
+    real GPU is not stalled every frame for a bug it does not have. `CMP_NO_SYNC=1`
+    disables the call, which is how to A/B it.
 
 11. **Mesa's software rasterizers render 10-bit video wrong, and say nothing about it.**
     A `yuv420p10` file comes out either fully black (synthetic 10-bit H.264) or heavily

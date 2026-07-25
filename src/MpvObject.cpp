@@ -98,6 +98,33 @@ public:
         if (win)
             win->beginExternalCommands();
         mpv_render_context_render(m_mpvGL, params);
+
+        // mpv's rendering must have *completed* before Qt samples this FBO as a
+        // texture. A conformant driver tracks that render-to-texture dependency
+        // itself; llvmpipe does not, so the scene graph composites a partially
+        // rasterised surface. Evidence: same GL context, no GL error, and the
+        // FBO reads back perfectly via toImage() -- whose readback is itself the
+        // missing synchronisation.
+        //
+        // It hides below roughly 2048 px, where mpv's render finishes before Qt
+        // gets there. Above that the frame arrives black, or streaked, or with a
+        // fine mesh of unwritten pixels depending on how far rasterisation got.
+        //
+        // glFinish, not glFlush: flushing only submits the work, which visibly
+        // improves the frame without fixing it. Restricted to software
+        // rasterizers so a real GPU is not stalled every frame for a bug it
+        // does not have.
+        if (m_needsFinish < 0) {
+            m_needsFinish = (usingSoftwareRasterizer()
+                             && !qEnvironmentVariableIsSet("CMP_NO_SYNC"))
+                                ? 1
+                                : 0;
+        }
+        if (m_needsFinish == 1) {
+            if (QOpenGLContext *c = QOpenGLContext::currentContext())
+                c->functions()->glFinish();
+        }
+
         if (win)
             win->endExternalCommands();
     }
@@ -129,6 +156,7 @@ private:
 
     MpvObject *m_obj = nullptr;
     mpv_render_context *m_mpvGL = nullptr;
+    int m_needsFinish = -1;  // -1 until GL_RENDERER has been read
 };
 
 MpvObject::MpvObject(QQuickItem *parent) : QQuickFramebufferObject(parent)
