@@ -17,6 +17,13 @@
 # CopyFromScreen is kept as a fallback for the case where PrintWindow comes back
 # blank, and it now refuses to fire unless the player really is foreground.
 
+# A modal dialog becomes the process's main window, so while one is open the
+# player title matches nothing -- pass -Title 'Open media' to reach the dialog.
+# $Path stays positional so existing callers that pass only an output file keep
+# working -- declaring any param() at all is what stops it landing in $args.
+param([Parameter(Mandatory=$true, Position=0)][string]$Path,
+      [string]$Title = "custom media player")
+
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
@@ -34,8 +41,8 @@ public class Win32 {
 }
 "@
 
-$p = Get-Process | Where-Object { $_.MainWindowTitle -like "*custom media player*" } | Select-Object -First 1
-if (-not $p) { Write-Output "NOWINDOW"; exit 1 }
+$p = Get-Process | Where-Object { $_.MainWindowTitle -like "*$Title*" } | Select-Object -First 1
+if (-not $p) { Write-Output "NOWINDOW ($Title)"; exit 1 }
 $h = $p.MainWindowHandle
 
 function Get-Bounds($hwnd) {
@@ -68,8 +75,8 @@ $ok = [Win32]::PrintWindow($h, $hdc, 2)                                # PW_REND
 $g.ReleaseHdc($hdc)
 
 if ($ok -and -not (Test-Blank $bmp)) {
-    $bmp.Save($args[0], [System.Drawing.Imaging.ImageFormat]::Png)
-    Write-Output "OK $w x $hgt (printwindow) -> $($args[0])"
+    $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    Write-Output "OK $w x $hgt (printwindow) -> $($Path)"
     exit 0
 }
 $bmp.Dispose()
@@ -100,5 +107,5 @@ $hgt = $r.Bottom - $r.Top
 $bmp = New-Object System.Drawing.Bitmap $w, $hgt
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
-$bmp.Save($args[0], [System.Drawing.Imaging.ImageFormat]::Png)
-Write-Output "OK $w x $hgt (screengrab) -> $($args[0])"
+$bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+Write-Output "OK $w x $hgt (screengrab) -> $($Path)"

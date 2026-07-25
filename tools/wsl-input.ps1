@@ -14,7 +14,9 @@
 # Foreground is now forced, verified, and the script aborts rather than clicking
 # into someone else's window.
 
-param([int]$X, [int]$Y, [string]$Text = "")
+# A modal dialog becomes the process's main window, so while one is open the
+# player title matches nothing -- pass -Title 'Open media' to reach the dialog.
+param([int]$X, [int]$Y, [string]$Text = "", [string]$Title = "custom media player")
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
@@ -34,8 +36,8 @@ public class Inp {
 }
 "@
 
-$p = Get-Process | Where-Object { $_.MainWindowTitle -like "*custom media player*" } | Select-Object -First 1
-if (-not $p) { Write-Output "NOWINDOW"; exit 1 }
+$p = Get-Process | Where-Object { $_.MainWindowTitle -like "*$Title*" } | Select-Object -First 1
+if (-not $p) { Write-Output "NOWINDOW ($Title)"; exit 1 }
 $h = $p.MainWindowHandle
 
 # SW_RESTORE only when actually minimised: on a *maximised* window it un-maximises,
