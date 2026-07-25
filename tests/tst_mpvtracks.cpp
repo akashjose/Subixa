@@ -19,6 +19,8 @@
 
 #include <mpv/client.h>
 
+#include "MpvTrackList.h"
+
 namespace {
 
 QString fixture(const QString &name)
@@ -40,6 +42,11 @@ private slots:
     void audioTrackIsSelectable();
     void selectingSidChangesWhatMpvWouldRender();
     void mpvLeavesEntitiesEncoded();
+
+    // Pure mapping, no mpv handle needed.
+    void mapsStreamIndexToSid();
+    void mapsSidecarPathToSid();
+    void mappingIgnoresOtherTrackTypes();
 
 private:
     // Pumps mpv's event queue until `id` arrives. Every check here depends on
@@ -241,6 +248,87 @@ void TstMpvTracks::mpvLeavesEntitiesEncoded()
     // future comparison between panel text and mpv's text has to expect it.
     const QString text = subTextAfterSeek(4.0);
     QVERIFY2(text.contains(QStringLiteral("&amp;")), qPrintable(text));
+}
+
+namespace {
+
+QVariantMap makeTrack(int id, const char *type, int ffIndex, bool selected = false,
+                      const QString &externalFilename = QString())
+{
+    QVariantMap track;
+    track[QStringLiteral("id")] = id;
+    track[QStringLiteral("type")] = QLatin1String(type);
+    track[QStringLiteral("ffIndex")] = ffIndex;
+    track[QStringLiteral("selected")] = selected;
+    track[QStringLiteral("external")] = !externalFilename.isEmpty();
+    track[QStringLiteral("externalFilename")] = externalFilename;
+    return track;
+}
+
+}  // namespace
+
+void TstMpvTracks::mapsStreamIndexToSid()
+{
+    // Shape of a real file: video and audio occupy the low ffmpeg stream indices,
+    // so mpv's sid never equals the stream index and the two must not be confused.
+    const QVariantList tracks = {
+        makeTrack(1, "video", 0),
+        makeTrack(1, "audio", 1),
+        makeTrack(1, "sub", 2),
+        makeTrack(2, "sub", 3),
+        makeTrack(3, "sub", 4),
+    };
+
+    QCOMPARE(MpvTrackList::subtitleIdForStream(tracks, 2), 1);
+    QCOMPARE(MpvTrackList::subtitleIdForStream(tracks, 3), 2);
+    QCOMPARE(MpvTrackList::subtitleIdForStream(tracks, 4), 3);
+
+    // A stream mpv does not have, and the two ways of asking for nothing.
+    QCOMPARE(MpvTrackList::subtitleIdForStream(tracks, 9), -1);
+    QCOMPARE(MpvTrackList::subtitleIdForStream(tracks, -1), -1);
+    QCOMPARE(MpvTrackList::subtitleIdForStream({}, 2), -1);
+}
+
+void TstMpvTracks::mapsSidecarPathToSid()
+{
+    const QString sidecar = fixture(QStringLiteral("sidecar.srt"));
+    const QVariantList tracks = {
+        makeTrack(1, "sub", 2),
+        makeTrack(2, "sub", 0, false, sidecar),
+    };
+
+    QCOMPARE(MpvTrackList::subtitleIdForFile(tracks, sidecar), 2);
+
+    // The same file named a different way still has to match: mpv reports an
+    // absolute path while the extractor may hold whatever argv[1] contained.
+    const QString messy = QStringLiteral(CMP_TESTDATA_DIR "/../testdata/sidecar.srt");
+    QCOMPARE(MpvTrackList::subtitleIdForFile(tracks, messy), 2);
+
+    QCOMPARE(MpvTrackList::subtitleIdForFile(tracks, fixture(QStringLiteral("en.srt"))), -1);
+    QCOMPARE(MpvTrackList::subtitleIdForFile(tracks, QString()), -1);
+
+    // An external track's ff-index counts within its own file, so it must never
+    // be matched as though it were an embedded stream index -- here the sidecar's
+    // ff-index of 0 would otherwise shadow a real stream 0.
+    QCOMPARE(MpvTrackList::subtitleIdForStream(tracks, 0), -1);
+}
+
+void TstMpvTracks::mappingIgnoresOtherTrackTypes()
+{
+    // An audio track sharing a subtitle track's ff-index must not be returned;
+    // ff-index is unique per file, but the guard costs nothing and the failure
+    // would be a silently muted or wrongly switched stream.
+    const QVariantList tracks = {
+        makeTrack(1, "audio", 2),
+        makeTrack(1, "sub", 5),
+    };
+    QCOMPARE(MpvTrackList::subtitleIdForStream(tracks, 2), -1);
+    QCOMPARE(MpvTrackList::subtitleIdForStream(tracks, 5), 1);
+
+    QVERIFY(!MpvTrackList::isSelected(tracks, 1));
+    const QVariantList selected = {makeTrack(4, "sub", 5, true)};
+    QVERIFY(MpvTrackList::isSelected(selected, 4));
+    QVERIFY(!MpvTrackList::isSelected(selected, 9));
 }
 
 QTEST_MAIN(TstMpvTracks)

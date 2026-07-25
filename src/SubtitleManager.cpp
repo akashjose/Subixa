@@ -157,6 +157,10 @@ void SubtitleManager::rebuildTracksView()
         entry[QStringLiteral("kind")] = kindName(track.kind);
         entry[QStringLiteral("sidecar")] = track.sidecar;
         entry[QStringLiteral("source")] = QFileInfo(track.sourcePath).fileName();
+        // Full path as well as the display name: selecting a sidecar in mpv means
+        // matching or adding it by path, since mpv numbers external tracks
+        // independently of anything the extractor sees.
+        entry[QStringLiteral("sourcePath")] = track.sourcePath;
         entry[QStringLiteral("streamIndex")] = track.streamIndex;
         entry[QStringLiteral("lineCount")] = track.lines.size();
         entry[QStringLiteral("browsable")] =

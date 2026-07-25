@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QtCore/QStringList>
+#include <QtCore/QVariantList>
 #include <QtQml/qqmlregistration.h>
 #include <QtQuick/QQuickFramebufferObject>
 
@@ -20,6 +21,17 @@ class MpvObject : public QQuickFramebufferObject
     Q_PROPERTY(double duration READ duration NOTIFY durationChanged)
     Q_PROPERTY(bool paused READ paused NOTIFY pausedChanged)
 
+    // mpv's own view of the file's tracks: one entry per audio/video/subtitle
+    // stream, keyed by mpv's ids. Distinct from SubtitleManager::tracks, which is
+    // the browsable text this app parsed itself -- the two overlap but neither
+    // contains the other (mpv sees bitmap subtitle tracks the browser cannot
+    // list; the browser sees sidecars mpv may not have loaded).
+    Q_PROPERTY(QVariantList tracks READ tracks NOTIFY tracksChanged)
+    // Selected sid/aid, or -1 for off. -1 rather than mpv's "no" so QML can
+    // compare with an integer.
+    Q_PROPERTY(int subtitleTrack READ subtitleTrack NOTIFY subtitleTrackChanged)
+    Q_PROPERTY(int audioTrack READ audioTrack NOTIFY audioTrackChanged)
+
 public:
     explicit MpvObject(QQuickItem *parent = nullptr);
     ~MpvObject() override;
@@ -29,6 +41,9 @@ public:
     double position() const { return m_position; }
     double duration() const { return m_duration; }
     bool paused() const { return m_paused; }
+    QVariantList tracks() const { return m_tracks; }
+    int subtitleTrack() const { return m_subtitleTrack; }
+    int audioTrack() const { return m_audioTrack; }
 
     Q_INVOKABLE void loadFile(const QString &file);
     Q_INVOKABLE void command(const QStringList &args);
@@ -36,10 +51,34 @@ public:
     Q_INVOKABLE void togglePause();
     Q_INVOKABLE void seek(double seconds);
 
+    // -1 turns the stream off. Named rather than exposed as a WRITE on the
+    // property so QML cannot bind them into a loop with mpv's own notifications.
+    Q_INVOKABLE void setSubtitleTrack(int id);
+    Q_INVOKABLE void setAudioTrack(int id);
+
+    // Selects the mpv subtitle track corresponding to a browser track. Returns
+    // false when mpv has no matching track *yet* -- the file may still be
+    // loading, since the extractor and mpv open it independently -- so the caller
+    // can retry when the track list next changes.
+    Q_INVOKABLE bool selectSubtitleStream(int ffIndex);
+    // Sidecars: mpv may have auto-loaded the file already, in which case it only
+    // needs selecting; otherwise it has to be added first.
+    Q_INVOKABLE void selectSubtitleFile(const QString &path);
+
+    // True when mpv's subtitle track `id` is the same stream as a browser track
+    // described by (ffIndex, sidecarPath); an empty sidecarPath means embedded.
+    // Lets QML answer "which tab is mpv showing" without comparing paths itself,
+    // where a relative and an absolute spelling of one file would not match.
+    Q_INVOKABLE bool subtitleTrackMatches(int id, int ffIndex,
+                                          const QString &sidecarPath) const;
+
 signals:
     void positionChanged();
     void durationChanged();
     void pausedChanged();
+    void tracksChanged();
+    void subtitleTrackChanged();
+    void audioTrackChanged();
     void fileLoaded();
     void logMessage(const QString &text);
 
@@ -55,11 +94,17 @@ private:
     static void onMpvRedraw(void *ctx);
     static void onMpvWakeup(void *ctx);
     void handleMpvEvent(void *event);
+    // Re-reads mpv's track-list into m_tracks. Cheap and rare: tracks change on
+    // load, on sub-add, and when a selection changes.
+    void refreshTracks();
 
     mpv_handle *m_mpv = nullptr;
     double m_position = 0.0;
     double m_duration = 0.0;
     bool m_paused = true;
+    QVariantList m_tracks;
+    int m_subtitleTrack = -1;
+    int m_audioTrack = -1;
 
     // The render context only exists once the item has been rendered at least
     // once. Loading before that makes mpv's VO fail with "No render context

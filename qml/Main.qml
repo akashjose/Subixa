@@ -41,6 +41,76 @@ ApplicationWindow {
         sourceModel: subs.tracks.length > 0 ? subs.model(root.currentTrack) : null
     }
 
+    // Tells mpv to burn the track the panel is showing over the video. Until this
+    // existed the two were independent, so you could read one language in the
+    // panel while another rendered on screen with no way to reconcile them.
+    //
+    // Sidecars go by path and embedded tracks by ffmpeg stream index, because
+    // mpv numbers its own tracks and neither numbering follows from the other.
+    function applySubtitleSelection() {
+        var track = subs.tracks[trackTabs.currentIndex]
+        if (track === undefined || !track.browsable)
+            return
+        if (track.sidecar)
+            mpv.selectSubtitleFile(track.sourcePath)
+        else
+            mpv.selectSubtitleStream(track.streamIndex)
+    }
+
+    // The other direction: picking a subtitle track from the transport menu moves
+    // the panel to the matching tab, so the two agree no matter which was used.
+    // Path comparison happens in C++ -- one file can be named relatively in the
+    // extractor and absolutely by mpv.
+    function syncPanelToSubtitleTrack() {
+        if (mpv.subtitleTrack < 0)
+            return
+        for (var i = 0; i < subs.tracks.length; ++i) {
+            var t = subs.tracks[i]
+            if (!t.browsable)
+                continue
+            if (mpv.subtitleTrackMatches(mpv.subtitleTrack, t.streamIndex,
+                                         t.sidecar ? t.sourcePath : "")) {
+                trackTabs.currentIndex = i
+                return
+            }
+        }
+    }
+
+    Connections {
+        target: mpv
+        // The extractor and mpv open the file independently, so the panel can
+        // pick a tab before mpv has a track list to match it against. Retrying
+        // when the list changes covers that, and also re-selects after a
+        // sub-add lands.
+        function onTracksChanged() { root.applySubtitleSelection() }
+        function onSubtitleTrackChanged() { root.syncPanelToSubtitleTrack() }
+    }
+
+    function tracksOfType(type) {
+        var out = []
+        for (var i = 0; i < mpv.tracks.length; ++i) {
+            if (mpv.tracks[i].type === type)
+                out.push(mpv.tracks[i])
+        }
+        return out
+    }
+
+    function trackLabel(t) {
+        var parts = []
+        if (t.language !== undefined && t.language !== "")
+            parts.push(t.language)
+        if (t.title !== undefined && t.title !== "")
+            parts.push(t.title)
+        if (parts.length === 0)
+            parts.push("track " + t.id)
+        var label = parts.join(" · ")
+        if (t.codec !== undefined && t.codec !== "")
+            label += "  [" + t.codec + "]"
+        if (t.external)
+            label += "  (external)"
+        return label
+    }
+
     // Auto-follow. Cheap enough to run on every position tick: rowAt() is a
     // binary search plus a proxy row mapping, and the view is only touched when
     // the row actually changes.
@@ -167,6 +237,74 @@ ApplicationWindow {
                         color: "#9a9aa8"
                         text: root.fmt(mpv.duration)
                     }
+
+                    // mpv's own track selection. The panel's tabs cover browsable
+                    // text tracks; these menus also reach what it cannot list --
+                    // audio, and bitmap subtitles, which carry pictures rather
+                    // than text and so can be displayed but never browsed.
+                    Button {
+                        text: "Audio"
+                        font.pixelSize: 11
+                        padding: 6
+                        enabled: mpv.duration > 0
+                        onClicked: audioMenu.popup(0, -audioMenu.height)
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Audio track"
+
+                        Menu {
+                            id: audioMenu
+
+                            Repeater {
+                                model: root.tracksOfType("audio")
+                                MenuItem {
+                                    required property var modelData
+                                    text: root.trackLabel(modelData)
+                                    checkable: true
+                                    checked: modelData.id === mpv.audioTrack
+                                    onTriggered: mpv.setAudioTrack(modelData.id)
+                                }
+                            }
+
+                            MenuItem {
+                                text: "Off"
+                                checkable: true
+                                checked: mpv.audioTrack < 0
+                                onTriggered: mpv.setAudioTrack(-1)
+                            }
+                        }
+                    }
+
+                    Button {
+                        text: "Subs"
+                        font.pixelSize: 11
+                        padding: 6
+                        enabled: mpv.duration > 0
+                        onClicked: subMenu.popup(0, -subMenu.height)
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Subtitle track burned over the video"
+
+                        Menu {
+                            id: subMenu
+
+                            Repeater {
+                                model: root.tracksOfType("sub")
+                                MenuItem {
+                                    required property var modelData
+                                    text: root.trackLabel(modelData)
+                                    checkable: true
+                                    checked: modelData.id === mpv.subtitleTrack
+                                    onTriggered: mpv.setSubtitleTrack(modelData.id)
+                                }
+                            }
+
+                            MenuItem {
+                                text: "Off"
+                                checkable: true
+                                checked: mpv.subtitleTrack < 0
+                                onTriggered: mpv.setSubtitleTrack(-1)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -236,8 +374,10 @@ ApplicationWindow {
 
                     onCurrentIndexChanged: {
                         var track = subs.tracks[currentIndex]
-                        if (track !== undefined && track.browsable)
+                        if (track !== undefined && track.browsable) {
                             root.currentTrack = track.id
+                            root.applySubtitleSelection()
+                        }
                     }
                 }
 

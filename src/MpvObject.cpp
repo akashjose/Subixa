@@ -1,5 +1,7 @@
 #include "MpvObject.h"
 
+#include "MpvTrackList.h"
+
 #include <mpv/client.h>
 #include <mpv/render_gl.h>
 
@@ -182,6 +184,13 @@ MpvObject::MpvObject(QQuickItem *parent) : QQuickFramebufferObject(parent)
     mpv_observe_property(m_mpv, 0, "time-pos", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "duration", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "pause", MPV_FORMAT_FLAG);
+    // The notification is all that is needed here; the list itself is re-read as
+    // a node, which MPV_FORMAT_NODE observation would not simplify.
+    mpv_observe_property(m_mpv, 0, "track-list", MPV_FORMAT_NONE);
+    // As strings, because both are "no" when off and "auto" before a file loads;
+    // MPV_FORMAT_INT64 simply fails on those and the change would be missed.
+    mpv_observe_property(m_mpv, 0, "sid", MPV_FORMAT_STRING);
+    mpv_observe_property(m_mpv, 0, "aid", MPV_FORMAT_STRING);
 
     mpv_request_log_messages(m_mpv, "info");
     mpv_set_wakeup_callback(m_mpv, &MpvObject::onMpvWakeup, this);
@@ -238,9 +247,35 @@ void MpvObject::handleMpvEvent(void *ev)
     switch (event->event_id) {
     case MPV_EVENT_PROPERTY_CHANGE: {
         auto *prop = static_cast<mpv_event_property *>(event->data);
-        if (!prop || !prop->data)
+        if (!prop)
             break;
         const QByteArray name(prop->name);
+
+        // Observed with MPV_FORMAT_NONE, so prop->data is null by design -- this
+        // has to come before the guard below or the notification is dropped.
+        if (name == "track-list") {
+            refreshTracks();
+            break;
+        }
+
+        if (!prop->data)
+            break;
+        if (name == "sid" || name == "aid") {
+            // "no" when off, "auto" before a track is chosen: both mean "no
+            // selection" to QML, which wants a number.
+            const QString value =
+                QString::fromUtf8(*static_cast<char **>(prop->data));
+            bool ok = false;
+            const int id = value.toInt(&ok);
+            if (name == "sid") {
+                m_subtitleTrack = ok ? id : -1;
+                emit subtitleTrackChanged();
+            } else {
+                m_audioTrack = ok ? id : -1;
+                emit audioTrackChanged();
+            }
+            break;
+        }
         if (name == "time-pos" && prop->format == MPV_FORMAT_DOUBLE) {
             m_position = *static_cast<double *>(prop->data);
             emit positionChanged();
@@ -265,6 +300,144 @@ void MpvObject::handleMpvEvent(void *ev)
     default:
         break;
     }
+}
+
+namespace {
+
+// mpv_node -> QVariant. track-list is an array of maps of scalars, so this only
+// has to cover those; anything unexpected lands as an invalid QVariant rather
+// than being guessed at.
+QVariant nodeToVariant(const mpv_node &node)
+{
+    switch (node.format) {
+    case MPV_FORMAT_STRING:
+        return QString::fromUtf8(node.u.string);
+    case MPV_FORMAT_FLAG:
+        return node.u.flag != 0;
+    case MPV_FORMAT_INT64:
+        return QVariant::fromValue(node.u.int64);
+    case MPV_FORMAT_DOUBLE:
+        return node.u.double_;
+    case MPV_FORMAT_NODE_ARRAY: {
+        QVariantList list;
+        list.reserve(node.u.list->num);
+        for (int i = 0; i < node.u.list->num; ++i)
+            list.append(nodeToVariant(node.u.list->values[i]));
+        return list;
+    }
+    case MPV_FORMAT_NODE_MAP: {
+        QVariantMap map;
+        for (int i = 0; i < node.u.list->num; ++i) {
+            map.insert(QString::fromUtf8(node.u.list->keys[i]),
+                       nodeToVariant(node.u.list->values[i]));
+        }
+        return map;
+    }
+    default:
+        return QVariant();
+    }
+}
+
+}  // namespace
+
+void MpvObject::refreshTracks()
+{
+    m_tracks.clear();
+    if (!m_mpv) {
+        emit tracksChanged();
+        return;
+    }
+
+    mpv_node node;
+    if (mpv_get_property(m_mpv, "track-list", MPV_FORMAT_NODE, &node) < 0) {
+        emit tracksChanged();
+        return;
+    }
+
+    const QVariantList raw = nodeToVariant(node).toList();
+    mpv_free_node_contents(&node);
+
+    m_tracks.reserve(raw.size());
+    for (const QVariant &entry : raw) {
+        const QVariantMap in = entry.toMap();
+        // Renamed to camelCase on the way through, both to match the rest of the
+        // QML-facing API and so the keys MpvTrackList works with are fixed here
+        // rather than spread across mpv's spelling.
+        QVariantMap out;
+        out[QStringLiteral("id")] = in.value(QStringLiteral("id")).toInt();
+        out[QStringLiteral("type")] = in.value(QStringLiteral("type"));
+        out[QStringLiteral("language")] = in.value(QStringLiteral("lang"));
+        out[QStringLiteral("title")] = in.value(QStringLiteral("title"));
+        out[QStringLiteral("codec")] = in.value(QStringLiteral("codec"));
+        out[QStringLiteral("ffIndex")] =
+            in.value(QStringLiteral("ff-index"), -1).toInt();
+        out[QStringLiteral("selected")] =
+            in.value(QStringLiteral("selected"), false).toBool();
+        out[QStringLiteral("default")] =
+            in.value(QStringLiteral("default"), false).toBool();
+        out[QStringLiteral("external")] =
+            in.value(QStringLiteral("external"), false).toBool();
+        out[QStringLiteral("externalFilename")] =
+            in.value(QStringLiteral("external-filename"));
+        m_tracks.append(out);
+    }
+
+    emit tracksChanged();
+}
+
+void MpvObject::setSubtitleTrack(int id)
+{
+    if (!m_mpv)
+        return;
+    const QByteArray value =
+        id < 0 ? QByteArrayLiteral("no") : QByteArray::number(id);
+    mpv_set_property_string(m_mpv, "sid", value.constData());
+}
+
+void MpvObject::setAudioTrack(int id)
+{
+    if (!m_mpv)
+        return;
+    const QByteArray value =
+        id < 0 ? QByteArrayLiteral("no") : QByteArray::number(id);
+    mpv_set_property_string(m_mpv, "aid", value.constData());
+}
+
+bool MpvObject::selectSubtitleStream(int ffIndex)
+{
+    const int id = MpvTrackList::subtitleIdForStream(m_tracks, ffIndex);
+    if (id < 0)
+        return false;
+
+    // Selecting what is already selected would be a no-op for mpv, but skipping
+    // it keeps this safe to call from a tracksChanged handler -- which is exactly
+    // where the retry path calls it from.
+    if (!MpvTrackList::isSelected(m_tracks, id))
+        setSubtitleTrack(id);
+    return true;
+}
+
+void MpvObject::selectSubtitleFile(const QString &path)
+{
+    const int existing = MpvTrackList::subtitleIdForFile(m_tracks, path);
+    if (existing >= 0) {
+        if (!MpvTrackList::isSelected(m_tracks, existing))
+            setSubtitleTrack(existing);
+        return;
+    }
+
+    // `cached` selects the file if it has already been added and adds it
+    // otherwise, so clicking a sidecar tab repeatedly does not stack duplicate
+    // tracks. mpv emits a track-list change once it lands.
+    command({QStringLiteral("sub-add"), path, QStringLiteral("cached")});
+}
+
+bool MpvObject::subtitleTrackMatches(int id, int ffIndex,
+                                     const QString &sidecarPath) const
+{
+    if (sidecarPath.isEmpty())
+        return MpvTrackList::subtitleIdForStream(m_tracks, ffIndex) == id;
+    return MpvTrackList::subtitleIdForFile(m_tracks, sidecarPath) == id;
 }
 
 void MpvObject::command(const QStringList &args)

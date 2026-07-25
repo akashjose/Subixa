@@ -93,6 +93,7 @@ target_link_libraries(tst_subtitles PRIVATE
 # Talks to libmpv directly with vo=null: verifies that selecting a track changes
 # what mpv would render, read back as text from `sub-text` instead of pixels.
 qt_add_executable(tst_mpvtracks tests/tst_mpvtracks.cpp)
+target_include_directories(tst_mpvtracks PRIVATE src)
 target_compile_definitions(tst_mpvtracks PRIVATE
     CMP_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
 target_link_libraries(tst_mpvtracks PRIVATE
