@@ -23,18 +23,30 @@ That is the goal. Playback is the necessary substrate; the subtitle browser is t
 - Click a row → seek there
 - Auto-follow: the current line highlights and scrolls into view as playback advances
 
+- Search-hit navigation, so a term can be walked through a 200 000-cue track
+- Subtitle timing offset, applied to the browser's own timestamps as well as to the
+  picture — including "sync to this line", which computes the offset from a line you pick
+  and the moment it should actually be spoken
+- Loop a single line, copy it with or without its timestamp, export the track as `.srt`
+- Optional reading-speed readout, flagged when a line runs faster than 21 characters a
+  second
+
 **Player** (enough to make the above usable)
 
-- Open/drag-drop, transport controls, seek bar, volume, playback speed
-- Audio/subtitle track selection
-- Keyboard shortcuts, fullscreen
+- Open/drag-drop, transport controls, a seek bar that previews the line under the cursor,
+  volume, playback speed with pitch correction
+- Audio/subtitle track selection, chapters, A-B loop, screenshots, audio delay
+- Subtitle appearance — font, size, colour, outline, shadow, position — configurable while
+  playing, never in a config file
+- Remappable keyboard shortcuts, fullscreen
 - Remembers position, subtitle track, window and panel layout per file and per session
 - Plays on to the next file in the folder, in the order a person would put them in
 
 The browser docks beside the video or detaches into its own window (Ctrl+D), and is
-resizable either way. `CLAUDE.md` lists the keyboard shortcuts. Its per-session actions —
-detach, export the track as `.srt`, light/dark theme, text size — live behind the **More**
-button in the panel header.
+resizable either way. Everything is reachable by mouse as well as by key: the transport's
+overflow menu holds whatever the width has dropped, and **Settings** (Ctrl+,) covers
+playback, subtitle appearance and timing, the browser, hotkeys and the interface.
+`CLAUDE.md` lists the default shortcuts.
 
 ## Design decisions
 

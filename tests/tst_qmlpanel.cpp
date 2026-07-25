@@ -22,6 +22,8 @@
 #include <QtCore/QDir>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QGuiApplication>
+#include "MpvEngine.h"
+
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickItem>
@@ -74,6 +76,7 @@ private:
     QString queueFolderFile(const QString &name);
 
     QTemporaryDir m_home;
+    std::unique_ptr<MpvEngine> m_mpv;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QObject *m_root = nullptr;
 };
@@ -105,15 +108,26 @@ void TstQmlPanel::init()
 void TstQmlPanel::cleanup()
 {
     m_root = nullptr;
+    // Reverse of construction, for the same reason main() relies on.
     m_engine.reset();
+    m_mpv.reset();
 }
 
 bool TstQmlPanel::startApp()
 {
+    // Declared before the engine, and destroyed after it, exactly as main.cpp
+    // does -- see MpvEngine on why that order is load-bearing. Under `offscreen`
+    // no render context is ever created, so this half of it is not exercised
+    // here; the ordering is mirrored anyway so the harness does not quietly
+    // diverge from the thing it is testing.
+    m_mpv = std::make_unique<MpvEngine>();
+
     m_engine = std::make_unique<QQmlApplicationEngine>();
-    // main.cpp passes argv[1] this way; an empty string is "no file yet".
-    m_engine->rootContext()->setContextProperty(QStringLiteral("initialFile"),
-                                                QString());
+    m_engine->rootContext()->setContextProperty(QStringLiteral("mpvEngine"),
+                                                m_mpv.get());
+    // main.cpp passes the positional arguments this way; empty is "no file yet".
+    m_engine->rootContext()->setContextProperty(QStringLiteral("initialFiles"),
+                                                QStringList());
     m_engine->loadFromModule("CustomMediaPlayer", "Main");
 
     if (m_engine->rootObjects().isEmpty()) {

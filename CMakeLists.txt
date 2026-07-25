@@ -1,11 +1,25 @@
 cmake_minimum_required(VERSION 3.21)
-project(custom_media_player LANGUAGES CXX)
+project(custom_media_player VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 OpenGL Test)
+option(CMP_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
+
+# 6.5 rather than 6.9. Nothing here needs 6.9, and requiring a 2025 release put
+# the project out of reach of every current LTS distribution -- which is the
+# difference between "packageable" and "build Qt yourself first".
+# QtQuick.Shapes -- which draws every icon in the app -- deliberately absent.
+# Qt 6.9 ships it as a private module (only Qt6QuickShapesPrivate has a CMake
+# config), and a dynamically linked build resolves the QML plugin through the
+# import path at runtime with no link-time dependency at all. A future *static*
+# build will need Qt6QuickShapesPrivate here and qt_import_qml_plugins.
+set(CMP_QT_COMPONENTS Core Gui Quick Qml QuickControls2 OpenGL)
+if(CMP_BUILD_TESTS)
+    list(APPEND CMP_QT_COMPONENTS Test)
+endif()
+find_package(Qt6 6.5 REQUIRED COMPONENTS ${CMP_QT_COMPONENTS})
 
 # libmpv comes from apt (0.37 on 24.04). pkg-config keeps us off a hardcoded path.
 find_package(PkgConfig REQUIRED)
@@ -21,10 +35,16 @@ pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
 
 qt_standard_project_setup(REQUIRES 6.5)
 
-qt_add_executable(custom_media_player
-    src/main.cpp
-    src/MpvObject.cpp
-    src/MpvObject.h
+# Everything but main.cpp, shared verbatim between the app and the QML harness.
+# Listed once because a source that reaches only one of the two produces a link
+# error in the other, at a place that says nothing about the omission.
+set(CMP_APP_SOURCES
+    src/MpvEngine.cpp
+    src/MpvEngine.h
+    src/MpvVideoItem.cpp
+    src/MpvVideoItem.h
+    src/MpvTrackList.h
+    src/FboCap.h
     src/SubtitleTypes.h
     src/SubtitleExtractor.cpp
     src/SubtitleExtractor.h
@@ -36,31 +56,77 @@ qt_add_executable(custom_media_player
     src/SubtitleLineModel.h
     src/SubtitleStyle.cpp
     src/SubtitleStyle.h
+    src/SubtitleText.cpp
+    src/SubtitleText.h
     src/SubtitleFilterModel.cpp
     src/SubtitleFilterModel.h
     src/PlaybackHistory.cpp
     src/PlaybackHistory.h
     src/Playlist.cpp
     src/Playlist.h
+    src/ShortcutRegistry.cpp
+    src/ShortcutRegistry.h
     src/GraphicsSetup.cpp
     src/GraphicsSetup.h
 )
 
+# The QML files, likewise declared once. tst_qmlpanel re-declares the module
+# under the same URI, and a file added to only one list fails at *runtime* with
+# a type-resolution error rather than at build time -- which is a long way from
+# the missing line.
+set(CMP_QML_FILES
+    qml/Main.qml
+    qml/TransportBar.qml
+    qml/SubtitlePanel.qml
+    qml/SubtitleRow.qml
+    qml/SettingsWindow.qml
+    qml/Theme.qml
+    qml/ui/Icons.qml
+    qml/ui/Icon.qml
+    qml/ui/IconButton.qml
+    qml/ui/TextButton.qml
+    qml/ui/ToolTipBubble.qml
+    qml/ui/Chip.qml
+    qml/ui/SearchField.qml
+    qml/ui/AppMenu.qml
+    qml/ui/AppMenuItem.qml
+    qml/ui/AppMenuSeparator.qml
+    qml/ui/AppScrollBar.qml
+    qml/ui/AppSlider.qml
+    qml/ui/AppSwitch.qml
+    qml/ui/AppSpinBox.qml
+    qml/ui/AppComboBox.qml
+    qml/ui/Segmented.qml
+    qml/ui/SeekBar.qml
+    qml/ui/Banner.qml
+    qml/ui/EmptyState.qml
+    qml/ui/Divider.qml
+    qml/ui/SectionCard.qml
+    qml/ui/FormRow.qml
+    qml/ui/ColorSwatch.qml
+)
+
+qt_add_executable(custom_media_player
+    src/main.cpp
+    ${CMP_APP_SOURCES}
+)
+
+target_compile_definitions(custom_media_player PRIVATE
+    CMP_VERSION="${PROJECT_VERSION}")
+
 # Must precede qt_add_qml_module: the property is read as the module is defined,
 # and a Theme.qml registered without it is an ordinary type that every user would
 # instantiate a private copy of.
-set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/Theme.qml qml/ui/Icons.qml
+    PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(custom_media_player
     URI CustomMediaPlayer
     VERSION 1.0
-    QML_FILES
-        qml/Main.qml
-        qml/SubtitlePanel.qml
-        qml/Theme.qml
+    QML_FILES ${CMP_QML_FILES}
 )
 
-# qmltyperegistrar emits `#if __has_include(<MpvObject.h>)`. Without src/ on the
+# qmltyperegistrar emits `#if __has_include(<MpvEngine.h>)`. Without src/ on the
 # include path that guard is silently false, the include is skipped, and the
 # generated file fails with "QQuickItem was not declared" rather than anything
 # pointing at the real cause.
@@ -77,6 +143,26 @@ target_link_libraries(custom_media_player PRIVATE
     PkgConfig::FFMPEG
 )
 
+# Warnings on. The tree is clean at this level and staying that way is cheaper
+# than getting back to it.
+target_compile_options(custom_media_player PRIVATE -Wall -Wextra)
+
+# ---- install ------------------------------------------------------------
+# Enough to package. The desktop entry and its MIME list are what make the
+# player appear in a file manager's "Open with", which is how most people will
+# reach it.
+include(GNUInstallDirs)
+
+install(TARGETS custom_media_player
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(FILES custom-media-player.desktop
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
+)
+install(FILES LICENSE
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+)
+
 # Tests. Both are headless by construction -- no window, no GL context -- because
 # WSLg can degrade into painting stale frames while everything underneath keeps
 # working, which makes a screenshot the least reliable evidence available. See
@@ -87,6 +173,7 @@ target_link_libraries(custom_media_player PRIVATE
 # qt_add_qml_module against the sources listed in qt_add_executable, and moving
 # them out breaks that registration for the app. Recompiling four files is the
 # cheaper trade.
+if(CMP_BUILD_TESTS)
 enable_testing()
 
 set(CMP_MODEL_SOURCES
@@ -96,6 +183,7 @@ set(CMP_MODEL_SOURCES
     src/SubtitleLineModel.cpp
     src/SubtitleFilterModel.cpp
     src/SubtitleStyle.cpp
+    src/SubtitleText.cpp
 )
 
 # Resume-position store. Its policy is what the tests are really about, so it is
@@ -110,6 +198,11 @@ target_link_libraries(tst_playbackhistory PRIVATE Qt6::Core Qt6::Qml Qt6::Test)
 qt_add_executable(tst_playlist tests/tst_playlist.cpp src/Playlist.cpp)
 target_include_directories(tst_playlist PRIVATE src)
 target_link_libraries(tst_playlist PRIVATE Qt6::Core Qt6::Qml Qt6::Test)
+
+# The hotkey table and its overrides. Pure policy over a temporary ini file.
+qt_add_executable(tst_shortcuts tests/tst_shortcuts.cpp src/ShortcutRegistry.cpp)
+target_include_directories(tst_shortcuts PRIVATE src)
+target_link_libraries(tst_shortcuts PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test)
 
 qt_add_executable(tst_subtitles tests/tst_subtitles.cpp ${CMP_MODEL_SOURCES})
 target_include_directories(tst_subtitles PRIVATE src)
@@ -145,20 +238,14 @@ target_link_libraries(tst_mpvtracks PRIVATE
 # binaries, so sharing the URI at runtime costs nothing.
 qt_add_executable(tst_qmlpanel
     tests/tst_qmlpanel.cpp
-    src/MpvObject.cpp
-    src/MpvObject.h
-    ${CMP_MODEL_SOURCES}
-    src/PlaybackHistory.cpp
-    src/Playlist.cpp
+    ${CMP_APP_SOURCES}
 )
+target_compile_definitions(tst_qmlpanel PRIVATE CMP_VERSION="${PROJECT_VERSION}")
 qt_add_qml_module(tst_qmlpanel
     URI CustomMediaPlayer
     VERSION 1.0
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qmltest/CustomMediaPlayer
-    QML_FILES
-        qml/Main.qml
-        qml/SubtitlePanel.qml
-        qml/Theme.qml
+    QML_FILES ${CMP_QML_FILES}
 )
 target_include_directories(tst_qmlpanel PRIVATE src)
 target_compile_definitions(tst_qmlpanel PRIVATE
@@ -179,10 +266,11 @@ add_test(NAME subtitles COMMAND tst_subtitles)
 add_test(NAME mpvtracks COMMAND tst_mpvtracks)
 add_test(NAME playbackhistory COMMAND tst_playbackhistory)
 add_test(NAME playlist COMMAND tst_playlist)
+add_test(NAME shortcuts COMMAND tst_shortcuts)
 add_test(NAME qmlpanel COMMAND tst_qmlpanel)
 
 # None of these needs a display; make sure they never try to open one.
-set_tests_properties(subtitles mpvtracks playbackhistory playlist PROPERTIES
+set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=minimal"
     TIMEOUT 120
 )
@@ -194,3 +282,5 @@ set_tests_properties(qmlpanel PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 180
 )
+
+endif()  # CMP_BUILD_TESTS

@@ -1,8 +1,13 @@
 #include "SubtitleStyle.h"
 
+#include "SubtitleText.h"
+
+#include <QtCore/QHash>
+#include <QtCore/QPair>
 #include <QtCore/QStringView>
 
 #include <cmath>
+#include <utility>
 
 namespace {
 
@@ -184,6 +189,37 @@ QColor readableOn(const QColor &colour, const QColor &background)
 {
     if (!colour.isValid() || !background.isValid())
         return colour;
+
+    // Memoised, because this is on the hottest path in the browser and it is
+    // not cheap: the walk below runs up to 50 steps, each computing two relative
+    // luminances, each of those three std::pow -- so up to 300 pow() calls for
+    // one colour tag. Styling is derived per *visible row* and Text queries the
+    // role more than once per row when it wraps, so a karaoke or multi-speaker
+    // ASS line with a dozen colour tags was paying that repeatedly while
+    // scrolling.
+    //
+    // The domain is tiny and that is the whole point: a track uses a handful of
+    // speaker colours against one row background, so the table saturates within
+    // the first screenful and never grows again. thread_local rather than a
+    // shared cache with a mutex -- the contention would cost more than the work.
+    static thread_local QHash<QPair<QRgb, QRgb>, QColor> memo;
+    const QPair<QRgb, QRgb> key(colour.rgb(), background.rgb());
+    const auto cached = memo.constFind(key);
+    if (cached != memo.constEnd())
+        return cached.value();
+
+    const QColor answer = readableOnUncached(colour, background);
+    // A cue can only carry so many distinct colours before something has gone
+    // wrong with the file rather than with us; drop the table rather than let a
+    // pathological track grow it without bound.
+    if (memo.size() > 4096)
+        memo.clear();
+    memo.insert(key, answer);
+    return answer;
+}
+
+QColor readableOnUncached(const QColor &colour, const QColor &background)
+{
     if (SubtitleStyle::contrastRatio(colour, background) >= kMinimumContrast)
         return colour;
 
@@ -273,6 +309,26 @@ QString toStyledText(const QString &assPayload, const QColor &background)
                 sync();
                 out += QLatin1String("&nbsp;");
                 ++i;
+                continue;
+            }
+        }
+
+        // Entities are decoded here, on the text runs only, and then escaped
+        // again on the way out -- so "&amp;" arrives, becomes "&", and is
+        // emitted as "&amp;", which StyledText renders as "&". That is exactly
+        // what the flattened `text` role holds, which is what search matches.
+        //
+        // Doing it any earlier would corrupt the payload: an "&amp;lt;" in
+        // dialogue would decode to "<" and then be read as the start of a tag.
+        if (c == u'&') {
+            QString decoded;
+            const qsizetype used = SubtitleText::decodeEntityAt(
+                QStringView(assPayload), i, &decoded);
+            if (used > 0) {
+                sync();
+                for (const QChar d : std::as_const(decoded))
+                    appendEscaped(out, d);
+                i += used - 1;
                 continue;
             }
         }

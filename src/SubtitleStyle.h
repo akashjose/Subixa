@@ -25,7 +25,13 @@ QString toStyledText(const QString &assPayload, const QColor &background);
 // A colour close enough to `colour` to still read as that speaker's colour, but
 // far enough from `background` to be legible on it. Returns `colour` unchanged
 // when it already contrasts.
+//
+// Memoised: it is computed per visible row rather than stored per cue, and the
+// walk it performs is expensive enough that a track with many speaker colours
+// felt it while scrolling. The uncached form is exposed so a test can assert
+// the guarantee itself rather than whatever happens to be in the table.
 QColor readableOn(const QColor &colour, const QColor &background);
+QColor readableOnUncached(const QColor &colour, const QColor &background);
 
 // WCAG contrast ratio, 1.0 (identical) to 21.0 (black on white). Exposed
 // because it is the promise readableOn() makes -- 4.5:1, the body-text

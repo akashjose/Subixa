@@ -1,5 +1,7 @@
 #include "SubtitleExtractor.h"
 
+#include "SubtitleText.h"
+
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -131,69 +133,6 @@ QString stripAssTags(const QString &in)
     return out.trimmed();
 }
 
-// SRT and WebVTT carry HTML-ish markup. ffmpeg's decoders turn the tags into ASS
-// overrides (which stripAssTags then drops) but leave character entities alone,
-// so "Fish &amp; chips" would otherwise show -- and be searched -- literally.
-QString decodeEntities(const QString &in)
-{
-    if (!in.contains(u'&'))
-        return in;
-
-    static const struct {
-        QLatin1String name;
-        QChar value;
-    } kNamed[] = {
-        {QLatin1String("amp"), u'&'},   {QLatin1String("lt"), u'<'},
-        {QLatin1String("gt"), u'>'},    {QLatin1String("quot"), u'"'},
-        {QLatin1String("apos"), u'\''}, {QLatin1String("nbsp"), QChar(0x00A0)},
-    };
-    // Longest entity handled is "&#x10FFFF;"; anything longer is not one.
-    constexpr int kMaxEntityLen = 10;
-
-    QString out;
-    out.reserve(in.size());
-
-    for (qsizetype i = 0; i < in.size(); ++i) {
-        if (in.at(i) != u'&') {
-            out.append(in.at(i));
-            continue;
-        }
-
-        const qsizetype end = in.indexOf(u';', i + 1);
-        if (end < 0 || end - i > kMaxEntityLen) {
-            out.append(in.at(i));
-            continue;
-        }
-
-        const QString body = in.mid(i + 1, end - i - 1);
-        bool handled = false;
-
-        if (body.startsWith(u'#')) {
-            const bool hex = body.size() > 1
-                && (body.at(1) == u'x' || body.at(1) == u'X');
-            bool ok = false;
-            const char32_t code = body.mid(hex ? 2 : 1).toUInt(&ok, hex ? 16 : 10);
-            if (ok && code > 0 && code <= 0x10FFFF) {
-                out.append(QString::fromUcs4(&code, 1));
-                handled = true;
-            }
-        } else {
-            for (const auto &entity : kNamed) {
-                if (body == entity.name) {
-                    out.append(entity.value);
-                    handled = true;
-                    break;
-                }
-            }
-        }
-
-        if (handled)
-            i = end;
-        else
-            out.append(in.at(i));  // not an entity: a bare ampersand
-    }
-    return out;
-}
 
 // A sidecar named "movie.en.srt" or "movie.forced.eng.srt" carries its language
 // in the filename; it has none of the container metadata embedded tracks have.
@@ -533,7 +472,7 @@ bool SubtitleExtractor::readContainer(const QString &path, const QString &videoB
         if (!rawParts.isEmpty()) {
             SubtitleLine line;
             line.rawText = rawParts.join(QLatin1Char('\n'));
-            line.text = decodeEntities(stripAssTags(line.rawText));
+            line.text = SubtitleText::decodeEntities(stripAssTags(line.rawText));
             line.startMs = baseMs + sub.start_display_time;
 
             if (sub.end_display_time > sub.start_display_time

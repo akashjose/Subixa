@@ -78,7 +78,7 @@ software path and its workarounds. Note the D3D12 driver reports GL 4.1 rather t
 still prints the EGL dri2 warning — both are harmless here.
 
 **`hwdec` is no longer hardcoded, and it changes nothing here.** Decode starts on the CPU
-and `MpvObject::enableHardwareDecoding()` asks for `hwdec=auto-safe` once `GL_RENDERER`
+and `MpvEngine::applyHardwareDecoding()` asks for `hwdec=auto-safe` once `GL_RENDERER`
 proves there is a real GPU — the same check that gates the software workarounds, so the two
 decisions cannot disagree. Under WSL the answer is still software, and now for a stated
 reason rather than by assumption: there is **no `/dev/dri`** at all, so there is no VA-API
@@ -169,6 +169,15 @@ deliberately, because a screenshot is the least reliable evidence available here
   harness covers the other half — that opening a file queues its folder and that
   advancing does not rebuild the queue.
 
+- **`tst_shortcuts`** — the keyboard table and its overrides, against a temporary
+  ini file. Mostly policy: an override survives a reopen, rebinding to the
+  default *clears* the override rather than storing a copy (so a later change to
+  a default still reaches anyone who once touched that row), two actions cannot
+  silently claim one key, `ctrl+d` and `Ctrl+D` are one binding rather than two,
+  and unbinding is distinct from resetting. It also asserts that no two actions
+  ship with the same default, which is the check that stops the table rotting as
+  it grows.
+
 - **`tst_playbackhistory`** — the resume-position store against a temporary ini file,
   and mostly its policy: too short, barely started, and near-the-end all mean *do
   not resume*, and finishing a file clears a position saved earlier. Also that two
@@ -178,6 +187,16 @@ deliberately, because a screenshot is the least reliable evidence available here
   also remembers the subtitle track being read, it covers that the two are kept in
   separate groups: finishing a film clears the position and must *not* forget that
   this household reads the Latin American Spanish track.
+
+`tst_subtitles` also now covers two things that were bugs rather than
+hypotheticals: that a poisoned count in a cache entry reads back as a miss with
+the real cues still returned (see the note in the test about what that does and
+does not prove), and that the styled and plain text of every cue in every fixture
+*render to the same characters*. The second is the invariant the whole panel
+rests on — search matches the plain text — and it was false: entities were
+decoded on the way to `text` but not on the way to `styled`, so with styling on
+(the default) the browser showed "a &amp;amp; entity" while search matched
+"a & entity". `SubtitleText` now serves both paths.
 
 The harness found one real bug on its first run, since fixed: search did not fold
 U+00A0 to a plain space, so a phrase spanning an ASS `\h` matched nothing. The
@@ -255,33 +274,53 @@ rules Xvfb out for the QQuickTest harness idea below as far as video pixels go.
 
 ### Keyboard and controls
 
-Every shortcut is gated on the search box not having focus, so typing "film" into it does
-not toggle fullscreen and mute. Escape is bound only while fullscreen; in the search box it
-clears the text instead.
+**Every binding lives in `ShortcutRegistry`, not in QML.** The table there carries an id, a
+label, a category, a default sequence, and whether the binding still works while the search
+box has focus. `Main.qml` repeats over it to create the `Shortcut` objects and dispatches by
+id; menus and tooltips read their key caps from the same table. That replaced 125 lines of
+hardcoded `Shortcut` elements which could express a fixed set of bindings and nothing else —
+no remapping, no way to show a shortcut next to a menu item without writing the string out
+again by hand, and no way to notice that two things wanted the same key.
+
+Overrides live in the `[hotkeys]` group. Rebinding to the default *clears* the override
+rather than storing a copy of it, so a later change to a default still reaches anyone who
+once touched that row. `tst_shortcuts` covers that, plus conflict detection, unbinding as
+distinct from resetting, and that no two actions ship with the same default.
+
+The defaults, abbreviated — the full table is in `ShortcutRegistry::actions()` and in
+Settings → Hotkeys:
 
 | | |
 |---|---|
 | Space, K | play/pause |
-| ← / → | seek 5 s, Shift for 1 s |
-| J / L | seek 10 s |
+| ← / → | seek, Shift for 1 s; step size is a setting |
+| J / L | large seek |
+| Ctrl+← / Ctrl+→ | previous / next subtitle line |
 | ↑ / ↓ | volume, M mutes |
 | F, F11 | fullscreen, Esc leaves it |
 | Tab | show/hide the subtitle panel |
 | Ctrl+D | detach the panel into its own window, or dock it again |
 | Ctrl+F | focus the search box |
-| Ctrl+O | open a file |
+| Ctrl+O / Ctrl+Shift+O | open a file / open a subtitle file |
 | [ / ] | playback speed, Backspace resets |
+| Ctrl+[ / Ctrl+] | subtitle delay, Ctrl+0 resets |
+| Ctrl+Shift+S | sync subtitles to the selected line |
+| A / B / Shift+A | set loop start / end / clear |
+| R | loop the line playing now |
+| V | subtitles on the video on/off |
+| Ctrl+C / Ctrl+Shift+C | copy the current line, with or without its timestamp |
+| Ctrl+S | screenshot |
+| Ctrl+, | settings |
 | < / > | previous/next file in the queue |
 | Ctrl+= / Ctrl+- | subtitle row text size, remembered |
 
-The panel's per-session actions — detach/dock, export this track as `.srt`, light/dark
-theme, subtitle styling on or off, text size — live behind the **More** button in its header
-rather than as buttons.
-The header has to survive a 240 px panel, and each of them is reached once a session.
+Guarding is per action rather than blanket: a binding is disabled while the search box has
+focus unless its `worksWhileTyping` flag says the sequence carries a modifier a `TextField`
+does not claim. Without that, typing "film" into the search box toggled fullscreen and mute.
 
-The transport bar drops controls as it narrows — speed first, then the volume slider, mute,
-fullscreen, and the track menus — so a wide panel does not clip them off the right-hand
-end. Everything it hides has a shortcut above, which is what makes that safe.
+Anything reached by key is also reachable by mouse. The transport's overflow menu (the
+rightmost button, always visible) holds whatever the width breakpoints have dropped plus the
+things that have no button of their own, so nothing is keyboard-only.
 
 ### Seeing the UI from WSL
 
@@ -328,13 +367,48 @@ left thinking ALT is held, and then every `-Text` character arrives as an accele
 (Alt+A, Alt+L, …) that a QML `TextField` ignores. The symptom is a click that demonstrably
 worked — a tab switches — beside typing that vanishes with no error.
 
-**Thin light-on-dark text captures in false colour.** Panel rows that are `#d0d0dc` on
-`#12121a` come back as saturated yellow and green in the PNG — the glyph pixels are
-literally `#ffff00`, not fringed grey. Flat fills in the same capture are *exact*
-(`#12121a`, `#23324a`, `#42618f` all match the theme to the byte), and dark-on-light text
-captures correctly, so this is chroma loss in the msrdc/RDP path rather than anything the
-app or the driver is doing. Consequence: **verify colours on rectangles, never on glyphs**,
-and do not go hunting a text-rendering bug that a screenshot alone appears to show.
+**Light text renders in the wrong colour on the D3D12 driver — and it is not the capture.**
+
+This file used to say the opposite, and the correction is worth stating plainly, because
+the old note sent anyone who saw it away from a real bug. Panel rows that are `#e8eaf0` on
+`#12151c` come out **bright yellow**; `#aab2c2` comes out **bright green**; the 11 px
+timestamp column at `#7e93b5` loses so much luminance it reads as **black and disappears
+entirely**. Flat fills in the same window are exact to the byte, and dark-on-light text is
+correct.
+
+The old conclusion — chroma loss in the msrdc/RDP path — is wrong. Three things rule it out:
+
+- A `Rectangle` filled with `#aab2c2` and a `Text` coloured `#aab2c2`, side by side in one
+  window, render *differently*: the rectangle is right and the text is destroyed. No
+  transport codec distinguishes a glyph from a quad.
+- A vector `Shape` icon of the same stroke weight sitting directly above 24 px DemiBold
+  text renders perfectly while the text does not.
+- **The same build on llvmpipe is correct.** So is a stock `qml` runtime on llvmpipe.
+
+And it reproduces with **no part of this project involved**: four `Text` items and one
+`Rectangle` in a file run by Qt's own `qml` binary under `GALLIUM_DRIVER=d3d12` show it.
+It is a Qt-on-Mesa-D3D12 bug in the glyph path — single-channel (R8/A8) texture sampling
+is the likely mechanism, which is consistent with fills, shapes and video all being fine.
+
+Neither `QQuickWindow::setTextRenderType(QtTextRendering)` nor
+`QFont::NoSubpixelAntialias` fixes it; both are set anyway because both are right
+independently. **The only known workaround is to avoid the driver: `CMP_NO_GPU=1` renders
+the UI correctly.**
+
+That leaves a genuine trade, unresolved at the time of writing, and it should be settled
+before release because it decides whether the product's central feature is legible:
+
+| | UI text | video |
+|---|---|---|
+| D3D12 | destroyed | 10-bit native, any window size |
+| llvmpipe | correct | capped to 1280x720 by `FboCap`, ~800% CPU on 720p |
+
+The shape of the fix is to extend `GraphicsSetup`'s existing child-process probe — it
+already re-runs the binary to check `GL_RENDERER` — so it also samples a single-channel
+texture and rejects a driver that gets it wrong, with an override in Settings.
+
+Consequence for screenshots meanwhile: **verify colours on rectangles, never on glyphs**,
+and check which driver the run used before reading anything into text colour.
 
 Two things to know before believing a black window:
 
@@ -378,40 +452,141 @@ Two things to know before believing a black window:
 ## Architecture
 
 ```
-src/MpvObject.{h,cpp}         QQuickFramebufferObject + libmpv OpenGL render API
-src/main.cpp                  forces OpenGL RHI, passes argv[1] to QML as `initialFile`
+src/MpvEngine.{h,cpp}         playback: owns mpv_handle, every property and command
+src/MpvVideoItem.{h,cpp}      the video surface: owns only the render context and the FBO
+src/main.cpp                  OpenGL RHI, the Basic style, the engine, and argv parsing
 src/GraphicsSetup.{h,cpp}     picks a GL driver before Qt makes a context, probing first
+src/ShortcutRegistry.{h,cpp}  every keyboard action, its default, and any rebinding
 src/SubtitleTypes.h           SubtitleLine / SubtitleTrack plain structs
 src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker thread
+src/SubtitleText.{h,cpp}      entity decoding, shared by the flattened and styled paths
 src/SubtitleCache.{h,cpp}     parsed cues on disk, so a reopen costs nothing
 src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed tracks
 src/SubtitleLineModel.{h,cpp} QAbstractListModel over one track's cues
 src/SubtitleStyle.{h,cpp}     ASS override tags -> markup the browser can show
-src/SubtitleFilterModel.{h,cpp} search proxy + the row mapping auto-follow needs
+src/SubtitleFilterModel.{h,cpp} search proxy, the row mapping auto-follow needs, the delay
 src/PlaybackHistory.{h,cpp}   per-file resume positions in QSettings, and their policy
 src/Playlist.{h,cpp}          what plays next: the folder as a queue, in natural order
 src/FboCap.h                  how large a framebuffer to give mpv on a software rasterizer
 src/MpvTrackList.h            maps browser tracks onto mpv's, header-only so it is testable
-qml/Main.qml                  video + transport, and the window the panel lives in
+qml/Main.qml                  the window: services, actions, layout, and the file lifecycle
+qml/TransportBar.qml          seek strip + grouped controls, adaptive by named breakpoint
 qml/SubtitlePanel.qml         the browser itself, docked or in its own window
-qml/Theme.qml                 every colour, in two schemes, as a QML singleton
+qml/SubtitleRow.qml           one cue: the rail, the timestamp column, the text
+qml/SettingsWindow.qml        preferences, applied live -- no OK button
+qml/Theme.qml                 the design system: colour, type, space, radius, motion
+qml/ui/*.qml                  the control library (see below) + Icon/Icons
 tools/wsl-*.ps1               screenshot and input injection from the Windows side
 ```
 
-`MpvObject` owns an `mpv_handle`; the nested `MpvRenderer` (render thread) owns the
-`mpv_render_context` and draws into the FBO. mpv state reaches QML through observed
-properties (`time-pos`, `duration`, `pause`) surfaced as Qt properties.
+**Playback and the video surface are separate objects, and that is load-bearing.**
+`MpvEngine` is a plain `QObject` created in `main()` *before* the `QQmlApplicationEngine`;
+`MpvVideoItem` is the `QQuickFramebufferObject` that draws from it. They used to be one
+class, which put the mpv handle inside a scene-graph item and made three things wrong at
+once:
 
-`MpvRenderer` carries three workarounds for Mesa's software rasterizers, all keyed off
-`usingSoftwareRasterizer()` (a `GL_RENDERER` string check) so a real GPU is untouched:
+- **Teardown ran backwards.** Qt destroys a `Renderer` on the render thread *after* the
+  item's destructor, so the handle was freed while the render context that referenced it
+  was still alive — the reverse of what libmpv requires. Declaration order in `main()` now
+  fixes it by construction: the QML engine is destroyed first, the window blocks on the
+  render thread as it tears down, and every `mpv_render_context_free()` has completed
+  before `~MpvEngine` runs. `MpvEngine` keeps an atomic count of live contexts and warns
+  if that ever stops being true.
+- **Nothing about playback could be tested without a window.** Everything on `MpvEngine`
+  runs headless under `vo=null`.
+- **Every new feature had to be bolted onto a `QQuickItem`** to reach mpv at all.
+
+`MpvVideoItem::itemChange` is where `setPersistentGraphics`/`setPersistentSceneGraph` are
+called. They were in `createRenderer()`, which runs on the **render thread**, so they were
+reaching into `QQuickWindowPrivate` while the GUI thread was live. The renderer now samples
+the window pointer, the mpv handle and the video size in `synchronize()` — the one place
+where the GUI thread is blocked — and uses only those copies in `render()`.
+
+mpv state reaches QML through observed properties surfaced as Qt properties — position,
+duration, pause, tracks, volume, speed, and now `sub-delay`, `audio-delay`, `ab-loop-a/b`,
+`sub-visibility`, `demuxer-cache-time` and `chapter-list` as well.
+
+**Every command and property write is checked.** `MpvEngine::checked()` turns a negative
+return into a `commandFailed` signal that reaches the notice banner. It used to be silent,
+which is how a malformed sidecar produced a tab that simply did nothing. For the same
+reason `mpv_initialize` failing is no longer `qFatal`: init genuinely fails in the field —
+no audio device, a sandboxed container — and a core dump is not something a user can act on.
+`main()` reports the reason and exits 1.
+
+**Subtitle rendering options are allow-listed** (`setSubtitleOption`). The names all come
+from our own settings window, but a general "set any mpv property from a string" invokable
+is a far wider surface than this needs, and mpv has properties that load files.
+
+`MpvRenderer` carries three workarounds for Mesa's software rasterizers, all keyed off a
+single `GL_RENDERER` check made once at context creation and handed to everything
+downstream (including QML, as `MpvEngine.softwareRendering`, which switches off shadows):
 8-bit conversion for 10-bit video, a `glFinish()` before Qt samples the FBO, and the
 framebuffer cap in `FboCap.h`. Traps 9 and 10 explain why each is needed and what was
 ruled out first — do not remove any of them without reading those.
 
-The cap is why `MpvObject` sets `setTextureFollowsItemSize(false)`. With it on, Qt
+The cap is why `MpvVideoItem` sets `setTextureFollowsItemSize(false)`. With it on, Qt
 compares the FBO's size against the item's every frame and destroys any that disagrees,
 so a capped framebuffer would be recreated forever; with it off, recreation is asked for
 explicitly in `MpvRenderer::synchronize()` when the target size changes.
+
+**The UI is a design system plus an in-repo control library, not Qt's default style.**
+
+`main.cpp` pins `QQuickStyle::setStyle("Basic")`. Before that it was unset, which meant
+every `Button`, `Slider`, `TabBar`, `TextField`, `Menu` and `ScrollBar` was drawn by Qt's
+reference style — unchanged in look since 2016, with its own hardcoded greys and geometry
+that ignore any palette. `Theme.qml` only ever coloured the things the app drew *itself*, so
+every actual control was off-palette. That was most of why it looked dated, and no amount of
+colour work fixes it. It is pinned rather than left to the platform default so a Windows
+build does not silently pick FluentWinUI3 and stop looking like the same program.
+
+`qml/ui/` holds the replacements, built on `QtQuick.Templates` so they carry the behaviour
+(hover, press, checked, focus reason) and none of the style's appearance: `IconButton`,
+`TextButton`, `Chip`, `SearchField`, `AppMenu`/`AppMenuItem`, `AppScrollBar`, `AppSlider`,
+`AppSwitch`, `AppSpinBox`, `AppComboBox`, `Segmented`, `SeekBar`, `Banner`, `EmptyState`,
+`SectionCard`, `FormRow`, `ColorSwatch`, `ToolTipBubble`, `Divider`. A full custom Controls
+*style* was considered and rejected: the app uses nine control types, and style resolution
+plus `qtquickcontrols2.conf` plus fallback styles is a day of work for the same result.
+
+`Theme.qml` is grouped tokens — `Theme.color.textPrimary`, `Theme.space.lg`,
+`Theme.radius.md`, `Theme.motion.fast` — rather than the flat list of 24 colours it
+replaced. That list had no scale for spacing, type, radius or motion, so every component
+invented its own inline and nothing lined up.
+
+**Contrast is checked, not asserted.** Every text token carries its measured WCAG ratio in a
+comment, and body text clears 4.5:1 on every surface it is permitted on. The old palette
+failed that in eight places — including the parse-progress readout at 3.22:1 and, worst, the
+timestamp on the *currently playing* row at 2.64:1, so the highlight made the timestamp
+harder to read than an ordinary row. `textTertiary` is deliberately allowed only on
+`bgSurface` and `bgRaised`; on a selected row callers step up to `textSecondary`, and the
+subtitle row delegate does exactly that.
+
+**Icons are SVG path data in a QML singleton** (`ui/Icons.qml`), drawn by `QtQuick.Shapes`.
+No files, no icon font, no decode, and tinting is one colour property rather than a colorize
+pass — which matters because this app runs on a software rasterizer often enough that an
+extra pass per icon is real. Note that `QtQuick.Shapes` has **no public CMake package** in
+Qt 6.9 (only `Qt6QuickShapesPrivate`); a dynamically linked build resolves the QML plugin at
+runtime with no link-time dependency, and a future static build will need the private module
+plus `qt_import_qml_plugins`.
+
+`Theme.effectsEnabled` follows `MpvEngine.softwareRendering`, so shadows switch off on
+llvmpipe. Every elevation level therefore defines a distinct surface colour *and* border as
+well as a shadow — the UI has to be complete without a single one of them.
+
+**The subtitle row is the one component with a written brief**: easy to follow, not
+distracting. Four decisions carry it, and they are in `SubtitleRow.qml`'s header comment —
+a 3px accent rail carries the signal while the fill only carries context; no border and no
+corner radius, because the row it replaced triple-encoded its state and the rounded corners
+broke the continuous column the eye scans down; text brightens rather than recolours, so the
+row gains weight without changing character; and the change crossfades over 140 ms, below
+which it strobes on rapid dialogue and above which it lags the audio. The layout is a
+leading timestamp column rather than the timestamp stacked above the text — stacking gave
+the eye no straight left edge, which is the entire ergonomic point of a timestamped list.
+
+**The subtitle delay reaches the browser, not just mpv.** `SubtitleFilterModel::delayMs`
+shifts `rowAt()` one way and `startMsAt()` the other, so auto-follow highlights the right
+line and clicking a row still seeks to where it is actually spoken. Without that the two
+halves of this player would disagree the moment anyone resynced, which is the one thing a
+subtitle browser cannot do.
 
 **The panel is one component in two homes.** `SubtitlePanel.qml` takes the manager, the
 filter proxy and a `ui` object as properties rather than reaching for ids, so the same
@@ -443,7 +618,7 @@ being bound. The tab index is the awkward one, and trap 13 explains why it is re
 - *Per file*, in `PlaybackHistory`: the resume position, and now **which subtitle track was
   being read**. In separate groups on purpose — finishing a film clears its position by
   design, and that must not also forget the track. Embedded tracks are stored by ffmpeg
-  stream index and sidecars by absolute path, the same split `MpvObject` uses to select
+  stream index and sidecars by absolute path, the same split `MpvEngine` uses to select
   them, because mpv's own numbering follows from neither.
 
 A new file with no entry of its own falls back to the language last chosen anywhere, then
@@ -486,7 +661,7 @@ Two details worth knowing:
 
 - **The end of a file is a property, not an event.** `keep-open=yes` means mpv never
   unloads the file and so never emits `MPV_EVENT_END_FILE` for a normal finish; it pauses
-  on the last frame and sets `eof-reached`. `MpvObject` observes that and emits `endOfFile`
+  on the last frame and sets `eof-reached`. `MpvEngine` observes that and emits `endOfFile`
   on the rising edge only, because mpv clears it again on the seek an advance performs.
 - **`pause` is a player property, not a per-file one.** keep-open pauses at the end of the
   outgoing file, so the incoming one arrives paused unless told otherwise — which is why
@@ -581,7 +756,7 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
    and no obvious error. Early loads are queued and flushed in `onRenderContextReady()`.
    **Any new mpv command that must run before first paint needs the same treatment.**
 3. **`target_include_directories(... PRIVATE src)` is mandatory.** qmltyperegistrar emits
-   `#if __has_include(<MpvObject.h>)`; without `src/` on the include path that guard is
+   `#if __has_include(<MpvEngine.h>)`; without `src/` on the include path that guard is
    silently false and the build fails with `QQuickItem was not declared` — nowhere near
    the real cause.
 4. **`QOpenGLFramebufferObject` is in QtOpenGL, not QtGui** (Qt 6 moved it;
@@ -762,6 +937,60 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     would have gone on serving them. `SubtitleCache::kFormatVersion` went to 2 in the same
     commit — the remedy is easy and easy to forget.
 
+### QML — every one of these cost a build-and-look cycle
+
+15. **`font.families` does not exist on `Text` in Qt 6.9.** Only `font.family`. Assigning a
+    fallback list — the natural way to say "Inter, else Ubuntu Sans, else DejaVu" — fails at
+    load with `Cannot assign to non-existent property "families"`, pointing at the property
+    rather than at the missing feature. `Theme.pickFont()` walks a preference list against
+    `Qt.fontFamilies()` once instead, and every call site uses `font.family: Theme.type.sans`.
+
+16. **`AbstractButton.icon` is FINAL, so a control cannot declare its own `icon`.** Anything
+    built on `Button`, `MenuItem` or `ItemDelegate` fails with `Cannot override FINAL
+    property`. The components here take `iconName`. The rename is worth doing carefully: a
+    blanket `s/icon/iconName/` also rewrites `iconSize` into `iconNameSize`, which then
+    fails one layer further down.
+
+17. **A `default property alias` swallows the component's own children.** Declaring
+    `default property alias content: inner.data` means *anything written as an ordinary
+    child of that file's root* is routed into the alias — including the component's own
+    internal layout, which then contains the item it is being assigned into. The error
+    surfaces a long way from the cause (it came out as a bogus complaint about `font`).
+    `SectionCard` and `FormRow` assign their internal structure through `children: [ ... ]`
+    for exactly this reason.
+
+18. **`Layout.fillWidth` on a *nested layout* does not stretch it.** A
+    `ColumnLayout { Layout.fillWidth: true }` inside a `RowLayout` stays at its implicit
+    width, so everything after it tracks the length of its own content instead of forming a
+    column. Measured, not assumed: the same structure with an explicit
+    `Item { Layout.fillWidth: true }` spacer aligns to the pixel. The hotkey table in
+    Settings is the case that exposed it — the key caps and buttons drifted per row.
+
+19. **`prefs: prefs` binds to itself, and says nothing.** This is trap 13's shadowing rule
+    generalised: a child declaring `required property var prefs` and given `prefs: prefs`
+    resolves the right-hand side to its *own* property. With a `var` there is no error at
+    all — it simply holds `undefined`, every control reading through it falls back to its
+    declared default, and the settings window comes up showing zeroes for values that are
+    not zero. `Main.qml` therefore exposes each service as a `readonly property` on the root
+    (`root.prefsStore`, `root.linesModel`, `root.queue`, …) and every binding that hands one
+    to a child is qualified. That makes the trap unrepresentable rather than something to
+    remember — which matters, because it had already been paid for once with `linesModel`.
+
+20. **A Qt 6.9 `Menu` defaults to a *native* popup, and there is none under WSLg.**
+    `popupType` arrived in 6.8, and a `Menu` defaults to `Popup.Native`: Qt asks the
+    platform for a real menu and, where the platform has one, ignores `background`,
+    `contentItem` and every delegate you wrote. WSLg has no native menu implementation, so
+    `popup()` returned successfully and drew **nothing** — no warning, no error, no menu.
+    Every button in the app that opens a menu was silently dead, which is most of them:
+    the track picker, the overflow, audio, subtitles, speed, the queue, the panel's More
+    menu, and right-click on a row. `AppMenu` sets `popupType: T.Popup.Item`. Note this is
+    invisible to `tst_qmlpanel` (it asserts model state, not that a popup appeared) *and*
+    to a screenshot, because a native popup would be a separate window anyway.
+
+21. **`ScrollBar` and `ScrollIndicator` are different types.** `T.ScrollIndicator.vertical:
+    AppScrollBar {}` fails with a type mismatch that names both, which is clear enough, but
+    the attached property to use inside a `ListView` in a popup is `T.ScrollBar.vertical`.
+
 Known-harmless: Qt's fallback `FileDialog` will not prefill the name field for a
 `SaveFile`, whatever `selectedFile`/`currentFile` are set to and whenever they are set —
 the file being named does not exist yet, so nothing in the listing matches it. The export
@@ -778,10 +1007,26 @@ all; it is mpv ruling out a backend, not a failure.
 ## Conventions
 
 - C++17, 4-space indent, Qt naming (`m_` members, camelCase methods).
-- Keep mpv-specific types out of `MpvObject.h` — it forward-declares `mpv_handle` and
+- Keep mpv-specific types out of `MpvEngine.h` — it forward-declares `mpv_handle` and
   takes `void*` in `handleMpvEvent` so mpv headers stay in the .cpp.
-- QML talks to mpv only through `Q_INVOKABLE`/properties on `MpvObject`. Do not reach
+- QML talks to mpv only through `Q_INVOKABLE`/properties on `MpvEngine`. Do not reach
   into libmpv from QML.
+- Every `Text` sets `textFormat` explicitly. `Text.AutoText` promotes anything that looks
+  like markup to *full* rich text, which supports `<img src>` and fetches it — and plenty of
+  strings here come straight out of a container's metadata. The one deliberate exception is
+  the subtitle row, whose markup `SubtitleStyle` generates and escapes.
+- New UI takes its sizes, colours and durations from `Theme`. A literal `12` or a hex colour
+  in a component is the thing the token system exists to stop. There are exactly two
+  exceptions in the tree and both are labelled where they sit: the subtitle *rendering*
+  colours in `Main.qml`'s `subtitleStyle` group and `ColorSwatch`'s preset list, which
+  describe how subtitles are drawn over the film in mpv's `#AARRGGBB` spelling. Those must
+  not follow the UI scheme — switching to the light theme should not change the subtitles
+  burnt into the picture.
+- Three token groups are deliberately *not* scheme-aware, for one reason: they are drawn on
+  something whose colour is not ours to know. `knob`/`knobEdge` sit on an accent fill at one
+  end of a slider's travel and a sunken groove at the other; `tileEdge` rings a
+  user-chosen colour; and the `onVideo*` set is fullscreen chrome over arbitrary film
+  frames, where a light theme must not make the seek bar dark over a night scene.
 - Subtitle parsing must **not** block the GUI thread.
 
 ## Platform: why development stays on WSL
@@ -815,92 +1060,102 @@ against, so **`hwdec-current` on a native Linux desktop is worth a look at port 
 
 ## Next up
 
-Milestones 1 (extraction), 2 (browser UI) and 3 (player usability) are all committed and
-the tree is clean. The panel and the picture agree in both directions, and the player has
-fullscreen, keyboard shortcuts, a file dialog, drag-and-drop, volume, speed and per-file
-resume. Verified against a real 3 GB AV1 film with **65 subtitle tracks / 93 350 cues**,
-not just the fixtures — including resuming it at 29:44 after a kill.
+Milestones 1 (extraction), 2 (browser UI), 3 (player usability) and 4 (caching, persisted
+settings, export, theming, the QML harness) are all in, and were verified against a real
+3 GB AV1 film with **65 subtitle tracks / 93 350 cues** rather than only the fixtures.
 
-Since then the browser became resizable and detachable, the playing line is kept in a band
-rather than at the bottom edge, parsing reports progress, the framebuffer is capped on the
-software rasterizer, and the GPU is selected automatically instead of by hand. All verified
-on the film: capped fullscreen renders correctly, D3D12 renders 10-bit natively, and
-switching between its two English tracks picks the right one through `ff-index`.
+**Milestone 5 — the pre-release pass — is in the tree, uncommitted.** It came out of two
+reviews, one architectural and one of the UI, and it is large. What changed:
 
-**Milestone 4 is in the tree** (uncommitted at the time of writing): parsed cues are
-cached, settings persist, files that will not play say so, a track exports to `.srt`, the
-panel is themed, `hwdec` is chosen rather than hardcoded, and the QML layer has a harness.
-Verified on the film in a real window, in this order: reopening it takes ~110 ms instead of
-15.7 s and the status says `cached`; picking a Chinese track, closing, and reopening comes
-back on that track with the tab scrolled to it, the right cues, and mpv burning the same
-track over the picture; click-to-seek lands on the clicked cue; export writes 87 KB of
-valid UTF-8 SubRip; the light theme reaches both windows and survives a restart. The
-`[ui]`, `[resume]` and `[subtitle]` groups in the settings file were read back to confirm
-what is stored rather than inferred from behaviour.
+*Correctness and security.* The mpv handle no longer lives inside a scene-graph item, so
+teardown runs in the order libmpv requires; `createRenderer()` no longer mutates the window
+from the render thread; absolute seeks are exact and formatted to milliseconds (
+`QString::number(double)` is six significant digits, so a cue three hours in was landing
+123 ms off — on the app's headline interaction); closing the main window while the panel is
+detached now quits instead of leaving an orphan process; cue-cache counts are bounded
+against the file before anything is allocated; the styled and plain text of a cue agree
+again; and every `Text` in the app sets `textFormat` explicitly, closing an `AutoText`
+path where a track title out of a container could have been promoted to rich text and made
+the player fetch an `<img src>`.
 
-**Playing on to the next file is in too**, with the folder as the queue and no playlist
-panel. Verified in a real window on three generated clips: ep1 → ep2 → ep10, in that order,
-advancing on its own and stopping on the last frame of the last one. That run also found
-the bug worth remembering — `pause` is a player property, so keep-open's pause at the end
-of one file arrived with the next one still paused.
+*The UI.* A real design system with measured contrast, a control library replacing the Basic
+style, vector icons, a two-row transport with a full-bleed seek bar that previews the cue
+under the cursor, a rebuilt subtitle row, and a settings window that did not exist.
 
-**Not verified: drag-and-drop.** There is no way to synthesise a drag from Windows into a
-WSLg surface with the current tooling, so it is compile-and-parse only — including the
-multi-file drop that builds a queue, whose *effect* is covered in `tst_qmlpanel` by calling
-the same functions the drop handler calls.
+*Features.* Subtitle delay applied to both mpv and the browser, sync-to-this-line, per-cue
+seek, A-B loop including loop-this-cue, cue copy, screenshots, audio delay, picture
+adjustments, an OSD, a queue popover, and remappable keys.
 
-**First thing in a new session:** run `./tools/render-canary.sh`. It plays `testclip.mp4`
-in a window and says whether the picture is being painted, whether it is moving, and
-whether it is that clip — the three things the WSLg degraded state breaks while everything
-in the log looks normal. It also prints which graphics path was chosen. Until it passes,
-every visual check will lie, and the fix is to restart the distro rather than to debug the
-app.
+Verified in a real window: the render canary passes after the engine split, the settings
+window shows real stored values across all five pages, the hotkey table lists all 48 actions
+with aligned key caps, and the entity fix is visible in the panel. All six suites pass.
 
-The renderer has no known correctness bugs left: the FBO cap (`FboCap.h`) closed the last
-one, so fullscreen works on the software path as well as on D3D12.
+**Not verified, and worth doing before a release:** the 3 GB 65-track film has not been
+re-opened since the rewrite — the cache path, the track picker that replaces a 65-tab strip,
+and the tab-restore logic all deserve a run against it. Drag-and-drop remains
+compile-and-parse only for the reason in the note above.
 
-Next, in this order:
+Next, in rough order:
 
-1. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. See the platform section.
-   It is now the only item on this list that is clearly worth doing.
-2. **A visible queue**, if the folder-as-a-queue behaviour turns out to want one. It
-   deliberately has no panel — see the architecture note — so this is a decision to
-   revisit rather than work that is pending.
-3. **Per-style defaults in the browser**, if a track turns out to need them. The styling
-   now rendered comes from the *override tags* in each cue; an ASS file's `[V4+ Styles]`
-   table, where a style can be italic or coloured for every line that uses it, never
-   reaches the extractor — ffmpeg hands over dialogue payloads, not the style block. A
-   track styled entirely that way will read plain in the list and italic on the picture.
+1. **Finish the release plumbing.** A `LICENSE` is now present (GPL-3.0-or-later, which the
+   dependency chain effectively forces — Ubuntu's libmpv binary is GPL-3+ because of
+   libsmbclient) along with install rules and a `.desktop` entry, but there is still no CI,
+   no AppImage or Flatpak, no icon, no `metainfo.xml`, and no crash or log file. Flatpak is
+   the right primary Linux target: FFmpeg and libmpv versions are the biggest portability
+   variable and the runtime pins them.
+2. **One settings service.** There are still three independent `QSettings` writers — the QML
+   `Settings` objects, `PlaybackHistory`, and `ShortcutRegistry` — with no schema, no
+   migration hook, and `PlaybackHistory::remember` calling `sync()` on a five-second timer,
+   which rewrites the whole file including whatever the QML `Settings` objects are buffering.
+3. **Drain `Main.qml`.** It is smaller in spirit but still ~1300 lines, and the two-namespace
+   track reconciliation — the most intricate logic in the product — is untyped JavaScript
+   with one integration test. It belongs in C++ beside `MpvTrackList.h`.
+4. **The search proxy.** Filtering is still a linear scan over every cue per keystroke, on
+   the GUI thread, coalesced by a 150 ms timer. The fix is incremental narrowing: when the
+   new pattern extends the old one, only currently-accepted rows can still match, which
+   makes every keystroke after the first O(matches). `QSortFilterProxyModel` cannot express
+   that, so it means a small custom proxy.
+5. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. See the platform section.
+   Note the tell: the product thesis is "PotPlayer's subtitle list, done properly", and
+   PotPlayer's users are on Windows.
+6. **Per-style defaults and native `.ass` parsing.** The styling rendered comes from the
+   *override tags* in each cue; an ASS file's `[V4+ Styles]` table never reaches the
+   extractor, so a track styled entirely that way reads plain in the list and italic on the
+   picture. Native parsing would also give the Name/Actor field, which is a strong browser
+   column, and make `.ass` round-trip export possible.
 
 Loose ends worth folding into whatever touches them next:
 
-- **The canary cannot run itself.** It needs a window and the Windows-side capture, so it
-  is a tool rather than a `ctest` case, and nothing makes anyone run it. Note also that an
-  in-process `grabWindow()`/FBO readback could not have replaced it — trap 10 records
-  `toImage()` returning a *perfect* frame while the screen was wrong, because the readback
-  is itself the missing synchronisation.
-- **Search is a linear scan per keystroke**, coalesced by a 150 ms timer in QML. Fine at
-  the 200k-cue fixture; if it ever is not, the fix is an index, not a longer timer.
+- **The canary cannot run itself.** It needs a window and the Windows-side capture, so it is
+  a tool rather than a `ctest` case, and nothing makes anyone run it. An in-process
+  `grabWindow()`/FBO readback could not have replaced it — trap 10 records `toImage()`
+  returning a *perfect* frame while the screen was wrong, because the readback is itself the
+  missing synchronisation.
+- **`hostileCacheCountsAreRefused` pins behaviour, not the allocation.** Removing the bound
+  and re-running leaves every case passing, because the read loop then fails on the next
+  record and reports the same miss one enormous `reserve()` later. Making that observable
+  needs a memory-limited run or an allocation hook.
 - **The FBO cap's threshold is a guess, if a conservative one.** `FboCap::SafeArea` is 2.0
-  MP, chosen below the observed boundary (2.86 MP clean, 2.99 MP corrupt) rather than at
-  it, because trap 10 also records that a *trivial* draw at those sizes is fine — so the
-  failure depends on render load as well as area, and a threshold sitting on the measured
-  edge would not hold. Nobody has mapped whether the real variable is area, height, or
-  something else; two panes of matched area and different shapes would answer it.
-- **Hardware decode is asked for but never granted here.** `hwdec=auto-safe` is now
-  requested on the D3D12 path and mpv answers `hwdec-current = no`, because WSL exposes no
-  `/dev/dri` render node. So the film still decodes on the CPU under WSL and there is
-  nothing further to try short of a native Linux desktop or a Windows build.
-- **The cue cache is never invalidated by anything but the files it was built from.** A
-  format bump handles a layout change, but if the *extractor's* output changes — a fix to
-  tag stripping, say — old entries stay valid and quietly serve the old text. Bumping
-  `kFormatVersion` alongside such a fix is the whole remedy, and it is easy to forget. It
-  has been needed once already (trap 14, version 2), and the bump was verified by watching
-  the film re-parse instead of loading in 110 ms.
+  MP, chosen below the observed boundary (2.86 MP clean, 2.99 MP corrupt) rather than at it,
+  because trap 10 also records that a *trivial* draw at those sizes is fine — so the failure
+  depends on render load as well as area. Nobody has mapped whether the real variable is
+  area, height, or something else.
+- **Hardware decode is asked for but never granted here.** WSL exposes no `/dev/dri` render
+  node, so the film still decodes on the CPU and there is nothing further to try short of a
+  native Linux desktop or a Windows build.
 - **The QML harness cannot see anything that needs pixels.** It runs `offscreen`, so
-  delegate geometry, the FBO cap, and whether the panel actually *scrolled* are all
-  outside it — `tst_qmlpanel` asserts `currentIndex`, not `contentY`. The tab-strip
-  positioning in trap 13 was verified by screenshot for exactly that reason.
+  delegate geometry, the FBO cap, and whether the panel actually *scrolled* are outside it.
+  Everything visual in milestone 5 was checked by screenshot instead, which is why the
+  layout traps above were each found once rather than caught by a test.
+- **Path identity is `absoluteFilePath`**, which does not resolve symlinks or `..`, in
+  `PlaybackHistory`, `SubtitleCache`, `Playlist` and `MpvTrackList`. The same film reached
+  through a symlink gets two cache entries and two resume positions, which a user
+  experiences as "it forgot where I was". One `canonicalFilePath` helper, four call sites.
+- **No `qsTr()` anywhere, and no accessibility.** Both get harder the longer they wait, and
+  for a *reading* tool the second is more relevant than usual.
+- **`SubtitleExtractor` has no ffmpeg interrupt callback**, so `avformat_open_input` on a
+  stalled network or 9p mount can block indefinitely — and `~SubtitleManager` waits on the
+  thread unbounded, so the app will not exit.
 
 ## Related context
 

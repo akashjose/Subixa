@@ -29,6 +29,11 @@
 #include "SubtitleLineModel.h"
 #include "SubtitleTypes.h"
 
+#include <QtCore/QBuffer>
+#include <QtCore/QDataStream>
+#include <QtCore/QRegularExpression>
+#include <QtCore/QtEndian>
+
 namespace {
 
 QString fixture(const QString &name)
@@ -141,12 +146,15 @@ private slots:
     void cacheMissesWhenTheMediaChanges();
     void cacheMissesWhenASidecarAppears();
     void corruptCacheEntryIsIgnored();
+    void hostileCacheCountsAreRefused();
 
     void stylingRendersItalicsAndColours();
     void stylingEscapesAndBreaks();
     void stylingDropsVectorDrawings();
     void cueColoursStayLegibleOnEitherTheme();
+    void memoisedContrastMatchesTheRealWalk();
     void styledRoleFollowsTheRowBackground();
+    void styledAndPlainTextAgreeOnContent();
 
     void exportedSrtReparsesToTheSameCues();
     void exportRejectsWhatItCannotWrite();
@@ -600,6 +608,44 @@ void TstSubtitles::cueColoursStayLegibleOnEitherTheme()
     QVERIFY2(navyOnDark.lightness() > 100, qPrintable(navyOnDark.name()));
 }
 
+void TstSubtitles::memoisedContrastMatchesTheRealWalk()
+{
+    // readableOn() is memoised because it is computed per visible row and the
+    // walk is expensive. A cache that answered differently from the thing it
+    // caches would break the one guarantee the function makes -- 4.5:1 against
+    // the row -- in a way that only shows up on the second cue of a colour.
+    const QColor darkRow(0x12, 0x15, 0x1c);
+    const QColor lightRow(0xff, 0xff, 0xff);
+
+    int checked = 0;
+    for (const QColor &background : {darkRow, lightRow}) {
+        for (int r = 0; r <= 255; r += 51) {
+            for (int g = 0; g <= 255; g += 51) {
+                for (int b = 0; b <= 255; b += 51) {
+                    const QColor cue(r, g, b);
+                    const QColor expected =
+                        SubtitleStyle::readableOnUncached(cue, background);
+                    // Twice: the first call fills the table, the second reads it.
+                    QCOMPARE(SubtitleStyle::readableOn(cue, background), expected);
+                    QCOMPARE(SubtitleStyle::readableOn(cue, background), expected);
+                    QVERIFY2(SubtitleStyle::contrastRatio(expected, background)
+                                 >= 4.4,
+                             qPrintable(QStringLiteral("%1 on %2 came back at %3:1")
+                                            .arg(cue.name(), background.name())
+                                            .arg(SubtitleStyle::contrastRatio(
+                                                expected, background))));
+                    ++checked;
+                }
+            }
+        }
+    }
+    QCOMPARE(checked, 2 * 6 * 6 * 6);
+
+    // An invalid colour must pass straight through rather than being cached as
+    // something.
+    QVERIFY(!SubtitleStyle::readableOn(QColor(), darkRow).isValid());
+}
+
 void TstSubtitles::styledRoleFollowsTheRowBackground()
 {
     QVector<SubtitleLine> lines;
@@ -879,6 +925,196 @@ void TstSubtitles::startMsAtRoundTripsThroughTheFilter()
     // scroll and click-to-seek uses the second.
     const int row = filter.rowAt(5500);
     QCOMPARE(filter.startMsAt(row), 5000);
+}
+
+
+void TstSubtitles::hostileCacheCountsAreRefused()
+{
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    const QString path = fixture(QStringLiteral("subs.mkv"));
+
+    bool hit = true;
+    const SubtitleTrackList real = parseCached(path, cache.path(), &hit);
+    QVERIFY(!hit);
+    QCOMPARE(real.size(), 3);
+
+    const QFileInfoList entries = QDir(cache.path())
+                                      .entryInfoList({QStringLiteral("*.cues")},
+                                                     QDir::Files);
+    QCOMPARE(entries.size(), 1);
+    const QString entryPath = entries.first().absoluteFilePath();
+
+    QByteArray original;
+    {
+        QFile source(entryPath);
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        original = source.readAll();
+    }
+    QVERIFY(original.size() > 64);
+
+    // Walk the header exactly as the loader does, to find where the two count
+    // fields actually sit. Reproducing the layout here is deliberate: these are
+    // the only fields that decide an allocation, and a format change that moved
+    // them should fail loudly rather than leave the test poisoning padding.
+    qint64 trackCountAt = -1;
+    qint64 lineCountAt = -1;
+    {
+        QBuffer buffer(&original);
+        QVERIFY(buffer.open(QIODevice::ReadOnly));
+        QDataStream in(&buffer);
+        in.setVersion(QDataStream::Qt_6_0);
+
+        quint32 magic = 0;
+        quint32 version = 0;
+        qint32 sourceCount = 0;
+        in >> magic >> version >> sourceCount;
+        QCOMPARE(in.status(), QDataStream::Ok);
+        for (qint32 i = 0; i < sourceCount; ++i) {
+            QString stampPath;
+            qint64 size = 0;
+            qint64 modified = 0;
+            in >> stampPath >> size >> modified;
+        }
+        QCOMPARE(in.status(), QDataStream::Ok);
+
+        trackCountAt = buffer.pos();
+        qint32 trackCount = 0;
+        in >> trackCount;
+        QCOMPARE(trackCount, qint32(real.size()));
+
+        // The first track's fields, up to its cue count.
+        qint32 id = 0, streamIndex = 0, kind = 0;
+        QString language, title, codecName, sourcePath, note;
+        bool sidecar = false;
+        in >> id >> streamIndex >> language >> title >> codecName >> kind
+            >> sidecar >> sourcePath >> note;
+        QCOMPARE(in.status(), QDataStream::Ok);
+        lineCountAt = buffer.pos();
+        qint32 lineCount = 0;
+        in >> lineCount;
+        QCOMPARE(lineCount, qint32(real.at(0).lines.size()));
+    }
+    QVERIFY(trackCountAt > 0);
+    QVERIFY(lineCountAt > trackCountAt);
+
+    // A count field is corruption- and attacker-controlled: it says how much to
+    // allocate before anything has been read. Unbounded, a flipped byte here
+    // asked for tens of gigabytes in one call -- and the entry was never
+    // invalidated, because nothing reached any cleanup, so the player became
+    // permanently unable to open that one film.
+    //
+    // Be clear about what this test does and does not prove. It pins the
+    // *behaviour*: a poisoned count is a miss, and the real cues still come
+    // back. It does not observe the allocation, and it cannot -- checked by
+    // removing the bound and re-running, where every case below still passes,
+    // because the read loop then fails on the next record and reports the same
+    // miss one enormous reserve() later. The bound is what stops that reserve;
+    // the assertion here is the guarantee around it, not the mechanism.
+    const QVector<quint32> poisons = {
+        quint32(0x7FFFFFFF),  // INT_MAX
+        quint32(0x40000000),  // a billion
+        quint32(0x00100000),  // a million: plausible, still far past the file
+        quint32(0xFFFFFFFF),  // reads back as -1
+    };
+
+    for (const qint64 offset : {trackCountAt, lineCountAt}) {
+        for (const quint32 poison : poisons) {
+            QByteArray damaged = original;
+            qToBigEndian(poison, damaged.data() + offset);
+
+            {
+                QFile out(entryPath);
+                QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+                QCOMPARE(out.write(damaged), qint64(damaged.size()));
+            }
+
+            bool damagedHit = true;
+            const SubtitleTrackList recovered =
+                parseCached(path, cache.path(), &damagedHit);
+            QVERIFY2(!damagedHit,
+                     qPrintable(QStringLiteral("count at %1 poisoned with 0x%2 "
+                                               "was served from cache")
+                                    .arg(offset)
+                                    .arg(poison, 0, 16)));
+            // A miss still has to produce the real cues.
+            QCOMPARE(recovered.size(), real.size());
+        }
+    }
+
+    // And a count that is merely *slightly* too large -- the case a bounds check
+    // written against a fixed ceiling rather than the file size would let past.
+    {
+        QByteArray damaged = original;
+        qToBigEndian(quint32(real.at(0).lines.size() + 10000),
+                     damaged.data() + lineCountAt);
+        QFile out(entryPath);
+        QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(out.write(damaged), qint64(damaged.size()));
+        out.close();
+
+        bool damagedHit = true;
+        parseCached(path, cache.path(), &damagedHit);
+        QVERIFY2(!damagedHit, "a cue count larger than the file can hold was served");
+    }
+}
+
+void TstSubtitles::styledAndPlainTextAgreeOnContent()
+{
+    // The invariant the panel rests on: turning styling on changes how a row is
+    // *rendered* and nothing about what it says. Search matches the plain text,
+    // so the moment the two disagree the browser is showing lines it will not
+    // find.
+    //
+    // They did disagree. Entities were decoded on the way to `text` but not on
+    // the way to `styled`, and the styling pass then escaped the surviving
+    // ampersand -- so with styling on (the default) a cue reading "a & entity"
+    // rendered as "a &amp; entity" while search still matched "a & entity".
+    const QColor background(0x12, 0x15, 0x1c);
+
+    // StyledText markup back to the characters it renders as. Only the subset
+    // SubtitleStyle emits.
+    const auto render = [](QString markup) {
+        static const QRegularExpression tag(QStringLiteral("<[^>]*>"));
+        markup.replace(QStringLiteral("<br>"), QStringLiteral("\n"));
+        markup.remove(tag);
+        markup.replace(QStringLiteral("&lt;"), QStringLiteral("<"));
+        markup.replace(QStringLiteral("&gt;"), QStringLiteral(">"));
+        markup.replace(QStringLiteral("&quot;"), QStringLiteral("\""));
+        markup.replace(QStringLiteral("&nbsp;"), QString(QChar(0x00A0)));
+        // Last, or it would undo the escaping of the others.
+        markup.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
+        return markup;
+    };
+
+    int checked = 0;
+    for (const QString &name : {QStringLiteral("subs.mkv"),
+                                QStringLiteral("sidecar.mp4"),
+                                QStringLiteral("movtext.mp4")}) {
+        const QString path = fixture(name);
+        if (!QFileInfo::exists(path))
+            continue;
+
+        for (const SubtitleTrack &track : parse(path)) {
+            for (const SubtitleLine &line : track.lines) {
+                const QString styled =
+                    SubtitleStyle::toStyledText(line.rawText, background);
+                QCOMPARE(render(styled), line.text);
+                ++checked;
+            }
+        }
+    }
+    QVERIFY2(checked > 0, "no cues were compared");
+
+    // And the specific case that was broken, pinned by hand so a change to the
+    // fixtures cannot quietly remove the coverage.
+    const QString styled = SubtitleStyle::toStyledText(
+        QStringLiteral("Fish &amp; chips &lt;3"), background);
+    QCOMPARE(render(styled), QStringLiteral("Fish & chips <3"));
+    QVERIFY2(styled.contains(QStringLiteral("&amp;")),
+             qPrintable(styled));   // renders as one ampersand
+    QVERIFY2(!styled.contains(QStringLiteral("&amp;amp;")),
+             qPrintable(styled));   // would render as "&amp;"
 }
 
 QTEST_MAIN(TstSubtitles)

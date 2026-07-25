@@ -62,7 +62,12 @@ private:
     QString stringProp(const char *name);
     double doubleProp(const char *name);
     // sub-text lags the seek by a frame or two even once the seek reports done.
-    QString subTextAfterSeek(double seconds, int timeoutMs = 5000);
+    // 15 s rather than 5: the cue has to satisfy the bracket check below, and
+    // under a full-suite run -- where this starts right after another test has
+    // had mpv busy -- a decode cycle can take noticeably longer than when the
+    // suite runs this case alone. The old budget turned that into a spurious
+    // failure roughly one run in three.
+    QString subTextAfterSeek(double seconds, int timeoutMs = 15000);
     int subTrackId(const QString &language);
 
     mpv_handle *m_mpv = nullptr;
@@ -80,6 +85,10 @@ void TstMpvTracks::initTestCase()
     // No video output at all: this test is about mpv's state, not its pixels.
     QCOMPARE(mpv_set_option_string(m_mpv, "vo", "null"), 0);
     QCOMPARE(mpv_set_option_string(m_mpv, "ao", "null"), 0);
+    // Paused: this suite asks "which cue is current at time T", and a position
+    // that advances while it looks is the difference between a stable answer
+    // and a race. Seeks still decode subtitles when paused.
+    QCOMPARE(mpv_set_option_string(m_mpv, "pause", "yes"), 0);
     mpv_set_option_string(m_mpv, "terminal", "no");
     mpv_set_option_string(m_mpv, "hwdec", "no");
     mpv_set_option_string(m_mpv, "keep-open", "yes");
@@ -139,6 +148,16 @@ double TstMpvTracks::doubleProp(const char *name)
 
 QString TstMpvTracks::subTextAfterSeek(double seconds, int timeoutMs)
 {
+    // Drain first. `waitFor(PLAYBACK_RESTART)` below would otherwise return
+    // instantly on an event the *previous* test's seek left in the queue, and
+    // this one would then poll while playback was still somewhere else
+    // entirely. That was the flake: seeking to 4 s and reading the cue at 8.3 s,
+    // because the file keeps playing while we look.
+    while (mpv_event *stale = mpv_wait_event(m_mpv, 0)) {
+        if (stale->event_id == MPV_EVENT_NONE)
+            break;
+    }
+
     const QByteArray pos = QByteArray::number(seconds);
     const char *cmd[] = {"seek", pos.constData(), "absolute", nullptr};
     if (mpv_command(m_mpv, cmd) < 0)
@@ -147,13 +166,36 @@ QString TstMpvTracks::subTextAfterSeek(double seconds, int timeoutMs)
 
     // The seek is done but the subtitle for the new position may need another
     // decode cycle, so poll rather than read once and trust it.
+    //
+    // Non-empty is *not* enough, and accepting it was a real flake: after a
+    // track switch mpv can still be reporting the cue from wherever playback
+    // was before, so the first non-empty answer is sometimes the previous
+    // test's line. It failed only in a full-suite run, where a preceding test
+    // had left a different position and sid behind -- in isolation the state it
+    // read stale happened to be empty. So the cue has to actually cover the
+    // position that was asked for before it counts.
     QElapsedTimer timer;
     timer.start();
     QString text;
     while (timer.elapsed() < timeoutMs) {
+        // And the seek has to have actually landed before the cue means
+        // anything -- PLAYBACK_RESTART alone does not promise that.
+        if (qAbs(doubleProp("time-pos") - seconds) > 1.0) {
+            text.clear();
+            mpv_wait_event(m_mpv, 0.05);
+            continue;
+        }
+
         text = stringProp("sub-text");
-        if (!text.isEmpty())
-            break;
+        if (!text.isEmpty()) {
+            const double start = doubleProp("sub-start");
+            const double end = doubleProp("sub-end");
+            // A little slack at each end: these are the decoder's own bounds and
+            // a seek lands on the nearest frame rather than exactly.
+            if (start <= seconds + 0.25 && end >= seconds - 0.25)
+                break;
+        }
+        text.clear();
         mpv_wait_event(m_mpv, 0.05);
     }
     return text;

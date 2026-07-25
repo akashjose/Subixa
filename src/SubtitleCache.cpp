@@ -10,6 +10,7 @@
 #include <QtCore/QStandardPaths>
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 
@@ -27,14 +28,53 @@ constexpr quint32 kFormatVersion = 2;
 // encoded and turn every existing entry into garbage.
 constexpr auto kStreamVersion = QDataStream::Qt_6_0;
 
+// A count read from the file says how much to allocate, so it is attacker- and
+// corruption-controlled: a flipped byte in a length field asks for tens of
+// gigabytes in one call, which is a std::bad_alloc and a std::terminate on open.
+// The entry is never invalidated by that, because the crash precedes any
+// cleanup -- so the player becomes permanently unable to open that one film.
+//
+// Every count is therefore checked against how many bytes are actually left in
+// the file before it is believed. These are the smallest encodings a record can
+// have under kStreamVersion: a QString is a quint32 length and nothing else when
+// empty, a qint64 is 8 bytes, a qint32 is 4, a bool is 1.
+constexpr qint64 kMinLineBytes = 8 + 8 + 4 + 4;
+constexpr qint64 kMinTrackBytes = 4 + 4 + 4 + 4 + 4 + 4 + 1 + 4 + 4 + 4;
+
+// Absolute ceilings on top of the size check, so a large *valid-length* file
+// cannot ask for an allocation that is merely proportionate rather than sane.
+// Both sit far above anything real: the 200k-cue fixture is the largest track
+// anyone has, and the 65-track film is the widest container.
+constexpr qint32 kMaxLinesPerTrack = 5'000'000;
+constexpr qint32 kMaxTracks = 4096;
+
+// What the stream has not consumed yet. QDataStream reads straight through to
+// the device rather than buffering ahead, so the device's own count is exact.
+qint64 bytesLeft(QDataStream &in)
+{
+    const QIODevice *device = in.device();
+    return device ? device->bytesAvailable() : 0;
+}
+
+// True when `count` records of at least `minBytes` each could actually fit in
+// what is left of the file. A count that cannot fit is a corrupt or hostile
+// entry, and the only safe response is to treat the whole thing as a miss.
+bool countFits(QDataStream &in, qint32 count, qint64 minBytes, qint32 ceiling)
+{
+    if (count < 0 || count > ceiling)
+        return false;
+    return qint64(count) * minBytes <= bytesLeft(in);
+}
+
 void writeLine(QDataStream &out, const SubtitleLine &line)
 {
     out << line.startMs << line.endMs << line.text << line.rawText;
 }
 
-void readLine(QDataStream &in, SubtitleLine &line)
+bool readLine(QDataStream &in, SubtitleLine &line)
 {
     in >> line.startMs >> line.endMs >> line.text >> line.rawText;
+    return in.status() == QDataStream::Ok;
 }
 
 void writeTrack(QDataStream &out, const SubtitleTrack &track)
@@ -58,7 +98,9 @@ bool readTrack(QDataStream &in, SubtitleTrack &track)
         >> kind >> track.sidecar >> track.sourcePath >> track.note;
     in >> lineCount;
 
-    if (in.status() != QDataStream::Ok || lineCount < 0)
+    if (in.status() != QDataStream::Ok)
+        return false;
+    if (!countFits(in, lineCount, kMinLineBytes, kMaxLinesPerTrack))
         return false;
 
     track.id = id;
@@ -75,14 +117,22 @@ bool readTrack(QDataStream &in, SubtitleTrack &track)
         break;
     }
 
-    track.lines.resize(lineCount);
+    // Grown a record at a time rather than resize()d to the declared count: the
+    // count has been bounded above, but reserving to it still trusts the file
+    // for the whole allocation, and appending only what actually read back means
+    // a truncated entry stops at the truncation instead of leaving
+    // default-constructed cues behind it. reserve() keeps that from being a
+    // reallocation per cue on the 200k-cue case.
+    track.lines.clear();
+    track.lines.reserve(lineCount);
     for (qint32 i = 0; i < lineCount; ++i) {
-        readLine(in, track.lines[i]);
+        SubtitleLine line;
         // Checked per line rather than once at the end: a truncated entry would
         // otherwise spend the rest of the loop appending default-constructed
         // cues to a list the caller is about to treat as a parse result.
-        if (in.status() != QDataStream::Ok)
+        if (!readLine(in, line))
             return false;
+        track.lines.append(std::move(line));
     }
     return true;
 }
@@ -143,7 +193,7 @@ bool SubtitleCache::load(const QString &mediaPath, const SubtitleSourceStamps &s
     qint32 sourceCount = 0;
     in >> sourceCount;
     if (in.status() != QDataStream::Ok || sourceCount != sources.size())
-        return false;  // a sidecar appeared or went away
+        return false;  // a sidecar appeared or went away, or the count is junk
 
     for (qint32 i = 0; i < sourceCount; ++i) {
         SubtitleSourceStamp stamp;
@@ -154,14 +204,20 @@ bool SubtitleCache::load(const QString &mediaPath, const SubtitleSourceStamps &s
 
     qint32 trackCount = 0;
     in >> trackCount;
-    if (in.status() != QDataStream::Ok || trackCount < 0)
+    if (in.status() != QDataStream::Ok)
+        return false;
+    if (!countFits(in, trackCount, kMinTrackBytes, kMaxTracks))
         return false;
 
+    // Same shape as the cue loop: appended per track that actually read back,
+    // never sized to a number the file claimed.
     SubtitleTrackList parsed;
-    parsed.resize(trackCount);
+    parsed.reserve(trackCount);
     for (qint32 i = 0; i < trackCount; ++i) {
-        if (!readTrack(in, parsed[i]))
+        SubtitleTrack track;
+        if (!readTrack(in, track))
             return false;
+        parsed.append(std::move(track));
     }
 
     *tracks = parsed;
