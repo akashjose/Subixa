@@ -19,3 +19,6 @@ testdata/*.mkv
 testdata/*.mp4
 testdata/sidecar.*
 testdata/huge.en.ass
+
+# Test artefacts copied next to testclip.mp4 while checking the browser.
+testclip.*.srt
