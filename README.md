@@ -58,6 +58,12 @@ Exercised on a real 3 GB AV1 film carrying **65 subtitle tracks and 93 350 cues*
 matching sidecar `.srt` picked up as a 66th: tabs per language, search across the track,
 and follow landing on the correct cue after arbitrary seeks.
 
+The browser can be resized by dragging its edge, or detached into its own window with
+Ctrl+D — useful with the film fullscreen on another screen. The line playing now is kept
+in a band in the upper middle of the list rather than at the bottom edge, so the next few
+lines are always in view. Parsing a feature-length container takes a few seconds (it has
+to be walked end to end whatever the cue count), and the panel reports how far along it is.
+
 The panel and the picture now agree: selecting a tab tells mpv to render that track, and
 choosing a track from the transport menu moves the panel to match. Files arrive by
 `argv[1]`, a file dialog, or drag-and-drop, with keyboard shortcuts, fullscreen, volume and

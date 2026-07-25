@@ -30,6 +30,10 @@ public slots:
 signals:
     void finished(int requestId, const SubtitleTrackList &tracks);
     void failed(int requestId, const QString &reason);
+    // 0-100 while a container is being walked. Emitted only on change, so a
+    // three-gigabyte file sends about a hundred of these rather than one per
+    // packet.
+    void progress(int requestId, int percent);
 
 private:
     bool cancelled(int requestId) const

@@ -232,7 +232,8 @@ src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker t
 src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed tracks
 src/SubtitleLineModel.{h,cpp} QAbstractListModel over one track's cues
 src/SubtitleFilterModel.{h,cpp} search proxy + the row mapping auto-follow needs
-qml/Main.qml                  video + transport + docked subtitle panel
+qml/Main.qml                  video + transport, and the window the panel lives in
+qml/SubtitlePanel.qml         the browser itself, docked or in its own window
 tools/wsl-*.ps1               screenshot and input injection from the Windows side
 ```
 
@@ -250,6 +251,21 @@ The cap is why `MpvObject` sets `setTextureFollowsItemSize(false)`. With it on, 
 compares the FBO's size against the item's every frame and destroys any that disagrees,
 so a capped framebuffer would be recreated forever; with it off, recreation is asked for
 explicitly in `MpvRenderer::synchronize()` when the target size changes.
+
+**Parsing cost is I/O, not cues.** One `av_read_frame` loop collects every subtitle
+stream in a single pass, so 65 tracks cost the same walk as one — but subtitle packets
+are interleaved through the container, so the whole file has to be read. Measured:
+
+| file | tracks / cues | parse |
+|---|---|---|
+| the 3 GB AV1 film on a 9p mount | 65 / 93 350 | **9.4 s** |
+| `huge.mp4` + 200k-cue ASS sidecar, local ext4 | 1 / 200 000 | **0.8 s** |
+| `subs.mkv`, local | 3 / 11 | 0.06 s |
+
+Twice the cues in a ninth of the time, so optimising the text parsing would buy nothing.
+The extractor reports progress by bytes read for the same reason. Because the pass is
+single, no track finishes early — publishing tracks one at a time as they complete would
+not shorten the wait, which is why the panel shows a percentage instead.
 
 `SubtitleManager` runs a `SubtitleExtractor` on its own `QThread` and republishes results
 as bindable properties. Requests carry a monotonic id; bumping it makes an in-flight parse
@@ -502,6 +518,10 @@ Next, in this order:
 
 Loose ends worth folding into whatever touches them next:
 
+- **Parsed cues are not cached.** Reopening the film re-walks 3 GB for the same 93 350
+  cues. Keying a cache the way `PlaybackHistory` hashes paths would make a rewatch
+  instant; invalidation on mtime/size is the only fiddly part. This is the biggest
+  remaining win on load time — progress reporting made the wait legible, not shorter.
 - **The models now have a harness; the QML above them still does not.** `ctest` covers the
   extractor, `indexAt()`, the filter and `rowAt()` mapping, plus mpv's own track selection
   via `sub-text` — see the Tests section. What remains screenshot-only is the QML layer

@@ -49,6 +49,8 @@ SubtitleManager::SubtitleManager(QObject *parent) : QObject(parent)
             &SubtitleExtractor::extract);
     connect(m_worker, &SubtitleExtractor::finished, this,
             &SubtitleManager::onExtractFinished);
+    connect(m_worker, &SubtitleExtractor::progress, this,
+            &SubtitleManager::onExtractProgress);
     connect(m_worker, &SubtitleExtractor::failed, this,
             &SubtitleManager::onExtractFailed);
 
@@ -78,6 +80,8 @@ void SubtitleManager::load(const QString &mediaPath)
 
     ++m_requestId;
     m_worker->setCurrentRequest(m_requestId);
+    m_progress = 0;
+    emit progressChanged();
     setStatus(QStringLiteral("parsing subtitles…"));
     setBusy(true);
 
@@ -127,6 +131,16 @@ void SubtitleManager::onExtractFinished(int requestId, const SubtitleTrackList &
 
     emit tracksChanged();
     emit loaded();
+}
+
+void SubtitleManager::onExtractProgress(int requestId, int percent)
+{
+    // A superseded parse keeps running until its demux loop notices; its
+    // progress must not be shown as the current file's.
+    if (requestId != m_requestId || m_progress == percent)
+        return;
+    m_progress = percent;
+    emit progressChanged();
 }
 
 void SubtitleManager::onExtractFailed(int requestId, const QString &reason)

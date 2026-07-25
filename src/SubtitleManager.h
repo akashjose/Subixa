@@ -24,6 +24,9 @@ class SubtitleManager : public QObject
     Q_PROPERTY(QVariantList tracks READ tracks NOTIFY tracksChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
+    // 0-100 while parsing, so the panel can say how far along it is rather than
+    // just "parsing subtitles…" for nine seconds.
+    Q_PROPERTY(int progress READ progress NOTIFY progressChanged)
 
 public:
     explicit SubtitleManager(QObject *parent = nullptr);
@@ -32,6 +35,7 @@ public:
     QVariantList tracks() const { return m_tracksView; }
     bool busy() const { return m_busy; }
     QString status() const { return m_status; }
+    int progress() const { return m_progress; }
 
     // Parse `mediaPath` plus any sidecars next to it. Supersedes any parse
     // already running.
@@ -52,6 +56,7 @@ signals:
     void tracksChanged();
     void busyChanged();
     void statusChanged();
+    void progressChanged();
     void loaded();
 
     // Queued across to the worker thread.
@@ -60,6 +65,7 @@ signals:
 private slots:
     void onExtractFinished(int requestId, const SubtitleTrackList &tracks);
     void onExtractFailed(int requestId, const QString &reason);
+    void onExtractProgress(int requestId, int percent);
 
 private:
     void setBusy(bool busy);
@@ -77,5 +83,6 @@ private:
     QVector<SubtitleLineModel *> m_models;
     int m_requestId = 0;
     bool m_busy = false;
+    int m_progress = 0;
     QString m_status;
 };

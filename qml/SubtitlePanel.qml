@@ -76,9 +76,14 @@ Rectangle {
                     font.pixelSize: 11
                     // While searching, say how much of the track is showing;
                     // otherwise the parse result.
-                    text: panel.linesModel.pattern !== ""
-                          ? panel.linesModel.count + " of " + panel.linesModel.sourceCount + " lines"
-                          : panel.manager.status
+                    // Parsing a feature-length container takes seconds -- it has
+                    // to be walked end to end whatever the cue count -- so say
+                    // how far along it is rather than just "parsing subtitles…".
+                    text: panel.manager.busy
+                          ? panel.manager.status + " " + panel.manager.progress + "%"
+                          : (panel.linesModel.pattern !== ""
+                             ? panel.linesModel.count + " of " + panel.linesModel.sourceCount + " lines"
+                             : panel.manager.status)
                 }
 
                 Button {

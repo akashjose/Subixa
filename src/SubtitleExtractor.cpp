@@ -426,11 +426,26 @@ bool SubtitleExtractor::readContainer(const QString &path, const QString &videoB
                                               msBase))
             : 0;
 
+    // Progress is measured in bytes read, not cues found. Subtitle packets are
+    // scattered through the container, so the whole file has to be walked
+    // whatever the cue count -- which is why a 3 GB film takes ~9 s while a
+    // 200k-cue sidecar takes under one.
+    const qint64 totalBytes = fmt.ctx->pb ? avio_size(fmt.ctx->pb) : 0;
+    int lastPercent = -1;
+
     int packetsSeen = 0;
     while (av_read_frame(fmt.ctx, pkt) >= 0) {
         // Cancellation is polled rather than checked per packet: the check is
         // cheap, but this loop runs tens of thousands of times on a feature.
-        if ((++packetsSeen & 0xFF) == 0 && cancelled(requestId)) {
+        if ((++packetsSeen & 0xFF) == 0 && totalBytes > 0 && fmt.ctx->pb) {
+            const qint64 done = avio_tell(fmt.ctx->pb) * 100 / totalBytes;
+            const int percent = int(qBound(qint64(0), done, qint64(100)));
+            if (percent != lastPercent) {
+                lastPercent = percent;
+                emit progress(requestId, percent);
+            }
+        }
+        if ((packetsSeen & 0xFF) == 0 && cancelled(requestId)) {
             av_packet_free(&pkt);
             freeDecoders();
             return true;
