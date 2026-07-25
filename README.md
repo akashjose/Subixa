@@ -27,10 +27,12 @@ That is the goal. Playback is the necessary substrate; the subtitle browser is t
 - Open/drag-drop, transport controls, seek bar, volume, playback speed
 - Audio/subtitle track selection
 - Keyboard shortcuts, fullscreen
-- Remembers position per file
+- Remembers position, subtitle track, window and panel layout per file and per session
 
 The browser docks beside the video or detaches into its own window (Ctrl+D), and is
-resizable either way. `CLAUDE.md` lists the keyboard shortcuts.
+resizable either way. `CLAUDE.md` lists the keyboard shortcuts. Its per-session actions —
+detach, export the track as `.srt`, light/dark theme, text size — live behind the **More**
+button in the panel header.
 
 ## Design decisions
 
@@ -71,6 +73,21 @@ The panel and the picture now agree: selecting a tab tells mpv to render that tr
 choosing a track from the transport menu moves the panel to match. Files arrive by
 `argv[1]`, a file dialog, or drag-and-drop, with keyboard shortcuts, fullscreen, volume and
 playback speed alongside.
+
+Reopening a film is now instant. The parse is all I/O — subtitle packets are interleaved
+through the container, so the whole file has to be read whatever the cue count — and
+nothing about the result changes between opens, so the cues are cached on disk against the
+size and mtime of the video *and every sidecar beside it*. The 3 GB film went from **15.7 s
+to about 110 ms**, and the panel says `cached` so a hit is not mistaken for a suspiciously
+quick parse.
+
+The player also remembers what it should: window and panel geometry, docked or detached,
+volume, theme and text size — and, per film, the resume position and **which subtitle track
+was being read**. On a file with 65 tracks that last one is the difference between opening
+where you left off and hunting for the right tab every time; a film with no history of its
+own falls back to the language chosen last. A track can be exported to `.srt`, the panel
+has a light and a dark scheme, and a file that will not play now says so over the picture
+instead of leaving it black.
 
 Software rendering used to fall apart at large window sizes — on Mesa's llvmpipe a video
 pane above roughly 2.9 megapixels rendered black or with a fine mesh of unwritten pixels,
@@ -133,12 +150,22 @@ milestone 1 snapshot cost.
 Milestone 3 also closed the renderer's last correctness bug: the video framebuffer is now
 capped on the software rasterizer, which is what makes fullscreen usable there.
 
-### Milestone 4 — Polish
+### Milestone 4 — Polish ✅
 
-- Settings persistence
-- Error surfaces for unsupported/corrupt files
-- Theming for the browser panel
-- Export a track to `.srt`
+- ✅ Parsed cues cached on disk, keyed by path and invalidated on the size and mtime of the
+  video and every sidecar next to it — a reopen of the 3 GB film costs ~110 ms instead of
+  15.7 s
+- ✅ Settings persistence: window and panel geometry, docked or detached, volume, theme and
+  row text size, plus the subtitle track remembered per file with the last-used language as
+  the fallback for a new one
+- ✅ Error surfaces — mpv's own end-of-file errors and extractor failures are shown over the
+  picture rather than only in the log
+- ✅ Theming for the browser panel, as a QML singleton so both windows follow one switch
+- ✅ Export a track to `.srt`, round-tripped through the parser in the tests
+- ✅ `hwdec` chosen by the same probe that picks the driver, rather than hardcoded off
+
+Under WSL the answer to that last one is still software decode, and now for a stated
+reason: there is no `/dev/dri` render node, and mpv reports `hwdec-current = no` when asked.
 
 ## Build
 
@@ -168,9 +195,10 @@ package, and passing a bad module name aborts the whole install.
 
 ## Development notes
 
-Running under WSLg means software decode *and* software rendering. That is expected and
-fine for development; it is not a bug to chase. It does mean the renderer carries three
-workarounds for Mesa's software rasterizers, all switching themselves off on a real GPU:
+Running under WSLg means software decode — there is no `/dev/dri` render node to hand it
+to — though rendering does reach the GPU through D3D12 passthrough. On the software
+fallback the renderer carries three workarounds for Mesa's software rasterizers, all
+switching themselves off on a real GPU:
 
 - 10-bit video (`yuv420p10`) renders black or striped, so it is converted to 8-bit first.
 - mpv's rendering has to be explicitly finished before Qt samples the framebuffer, or
@@ -192,15 +220,22 @@ visual checks return false negatives until the distro is restarted.
 cd build && ctest --output-on-failure
 ```
 
-Three headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
+Four headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
 layer underneath the browser — the cue binary search, the search filter, and the row mapping
-auto-follow depends on. `tst_mpvtracks` links libmpv with `vo=null` and checks that selecting
+auto-follow depends on — plus the cue cache (a hit has to reproduce a parse exactly, and a
+changed file or a new sidecar has to miss) and the `.srt` export, checked by parsing back
+what it wrote. `tst_mpvtracks` links libmpv with `vo=null` and checks that selecting
 a track changes what mpv would render, comparing its `sub-text` property rather than looking
-at pixels. `tst_playbackhistory` covers the resume-position store and its policy.
+at pixels. `tst_playbackhistory` covers the per-file store and its policy. `tst_qmlpanel`
+loads the real `Main.qml` offscreen and drives the QML layer itself: tab clicks swapping the
+model, search reaching the proxy, follow scrolling the view, a remembered track restored on
+reopen, and view state surviving a detach.
 
-They avoid needing a window on purpose: under WSLg a screenshot is the *least* reliable
-evidence available, since the session can degrade into painting stale frames while mpv and
-the models keep working correctly.
+They avoid needing a rendered frame on purpose: under WSLg a screenshot is the *least*
+reliable evidence available, since the session can degrade into painting stale frames while
+mpv and the models keep working correctly. The QML suite found two real bugs on its first
+run — detaching the panel silently reset the reader's tab, and a handler that does not
+exist on `FileDialog` — neither of which a compiler would have caught.
 
 `testclip.mp4` is a generated 15-second clip with a burned-in timecode, so a screenshot is
 enough to confirm the rendered frame matches the reported playback position. It carries no

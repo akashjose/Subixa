@@ -3,6 +3,7 @@
 #include <QtCore/QAtomicInt>
 #include <QtCore/QObject>
 
+#include "SubtitleCache.h"
 #include "SubtitleTypes.h"
 
 // Demuxes and decodes subtitle streams with libavformat/libavcodec. Lives on a
@@ -24,11 +25,21 @@ public:
     // have to wait for the first to finish.
     void setCurrentRequest(int id) { m_currentRequest.storeRelaxed(id); }
 
+    // Tests point this at a temporary directory so they never read or write the
+    // user's real cache. Must be called before the thread starts extracting.
+    void setCacheDirectory(const QString &directory) { m_cache = SubtitleCache(directory); }
+    // Off means every extract() is a real parse -- which is what the tests for
+    // the parser itself want, and how to time a cold open.
+    void setCacheEnabled(bool enabled) { m_cacheEnabled = enabled; }
+
 public slots:
     void extract(const QString &mediaPath, int requestId);
 
 signals:
-    void finished(int requestId, const SubtitleTrackList &tracks);
+    // `fromCache` is true when the cues came off disk rather than out of the
+    // container, which is worth saying: a 3 GB feature is the difference between
+    // nine seconds and none.
+    void finished(int requestId, const SubtitleTrackList &tracks, bool fromCache);
     void failed(int requestId, const QString &reason);
     // 0-100 while a container is being walked. Emitted only on change, so a
     // three-gigabyte file sends about a hundred of these rather than one per
@@ -48,4 +59,6 @@ private:
                        SubtitleTrackList &out, int requestId, QString *error);
 
     QAtomicInt m_currentRequest{0};
+    SubtitleCache m_cache;
+    bool m_cacheEnabled = true;
 };

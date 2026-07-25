@@ -28,6 +28,8 @@ qt_add_executable(custom_media_player
     src/SubtitleTypes.h
     src/SubtitleExtractor.cpp
     src/SubtitleExtractor.h
+    src/SubtitleCache.cpp
+    src/SubtitleCache.h
     src/SubtitleManager.cpp
     src/SubtitleManager.h
     src/SubtitleLineModel.cpp
@@ -40,12 +42,18 @@ qt_add_executable(custom_media_player
     src/GraphicsSetup.h
 )
 
+# Must precede qt_add_qml_module: the property is read as the module is defined,
+# and a Theme.qml registered without it is an ordinary type that every user would
+# instantiate a private copy of.
+set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(custom_media_player
     URI CustomMediaPlayer
     VERSION 1.0
     QML_FILES
         qml/Main.qml
         qml/SubtitlePanel.qml
+        qml/Theme.qml
 )
 
 # qmltyperegistrar emits `#if __has_include(<MpvObject.h>)`. Without src/ on the
@@ -79,6 +87,7 @@ enable_testing()
 
 set(CMP_MODEL_SOURCES
     src/SubtitleExtractor.cpp
+    src/SubtitleCache.cpp
     src/SubtitleManager.cpp
     src/SubtitleLineModel.cpp
     src/SubtitleFilterModel.cpp
@@ -113,12 +122,60 @@ target_link_libraries(tst_mpvtracks PRIVATE
     PkgConfig::MPV
 )
 
+# The QML layer, loaded for real and driven headlessly. It needs the whole app:
+# the same sources and the same QML module, because the point is to test the
+# wiring in Main.qml rather than a mock of it.
+#
+# The module is declared a second time under the same URI, which is why it needs
+# its own OUTPUT_DIRECTORY -- two targets in one directory would otherwise write
+# their qmldir and type registrations over each other. They are separate
+# binaries, so sharing the URI at runtime costs nothing.
+qt_add_executable(tst_qmlpanel
+    tests/tst_qmlpanel.cpp
+    src/MpvObject.cpp
+    src/MpvObject.h
+    ${CMP_MODEL_SOURCES}
+    src/PlaybackHistory.cpp
+)
+qt_add_qml_module(tst_qmlpanel
+    URI CustomMediaPlayer
+    VERSION 1.0
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qmltest/CustomMediaPlayer
+    QML_FILES
+        qml/Main.qml
+        qml/SubtitlePanel.qml
+        qml/Theme.qml
+)
+target_include_directories(tst_qmlpanel PRIVATE src)
+target_compile_definitions(tst_qmlpanel PRIVATE
+    CMP_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+target_link_libraries(tst_qmlpanel PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Qml
+    Qt6::QuickControls2
+    Qt6::OpenGL
+    Qt6::Test
+    PkgConfig::MPV
+    PkgConfig::FFMPEG
+)
+
 add_test(NAME subtitles COMMAND tst_subtitles)
 add_test(NAME mpvtracks COMMAND tst_mpvtracks)
 add_test(NAME playbackhistory COMMAND tst_playbackhistory)
+add_test(NAME qmlpanel COMMAND tst_qmlpanel)
 
-# Neither test needs a display; make sure they never try to open one.
+# None of these needs a display; make sure they never try to open one.
 set_tests_properties(subtitles mpvtracks playbackhistory PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=minimal"
     TIMEOUT 120
+)
+
+# The QML harness does build an object tree, so it needs a platform that can
+# create a window -- offscreen, which never renders. `minimal` has no scene
+# graph at all and Loaders never instantiate under it.
+set_tests_properties(qmlpanel PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 180
 )

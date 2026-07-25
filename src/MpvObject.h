@@ -105,6 +105,10 @@ signals:
     void mutedChanged();
     void speedChanged();
     void fileLoaded();
+    // A file mpv could not play: unsupported container, missing file, broken
+    // stream. Worth surfacing in the window -- otherwise the picture simply
+    // stays black and the only explanation is in a log nobody is reading.
+    void playbackFailed(const QString &reason);
     void logMessage(const QString &text);
 
 private slots:
@@ -114,6 +118,9 @@ private slots:
     // Invoked from the render thread when GL_RENDERER turns out to be a software
     // rasterizer, which cannot render 10-bit planes correctly.
     void forceEightBitVideo();
+    // The other half of that decision: a real GPU is worth asking to decode as
+    // well as to draw. Whether it can is mpv's call, not ours.
+    void enableHardwareDecoding();
     // Also from the render thread, once, with whatever driver GL actually gave us.
     void reportRenderer(const QString &renderer, const QString &version);
     // From the render thread whenever a capped framebuffer is created, so the
@@ -145,6 +152,8 @@ private:
     // set" and silently drop video, so early requests are queued.
     bool m_renderReady = false;
     QString m_pendingFile;
+    // CMP_HWDEC was set, so the automatic choice must keep its hands off.
+    bool m_hwdecForced = false;
 
     friend class MpvRenderer;
 };

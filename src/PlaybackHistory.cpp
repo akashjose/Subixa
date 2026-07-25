@@ -7,6 +7,10 @@
 namespace {
 
 constexpr auto kGroup = "resume";
+// Separate from kGroup on purpose: finishing a film clears its resume entry, and
+// that must not also forget which track was being read.
+constexpr auto kSubtitleGroup = "subtitle";
+constexpr auto kPreferredLanguageKey = "subtitle/preferredLanguage";
 
 }  // namespace
 
@@ -84,10 +88,66 @@ double PlaybackHistory::resumeFor(const QString &path) const
     return (ok && position > 0.0) ? position : -1.0;
 }
 
+void PlaybackHistory::rememberSubtitle(const QString &path, int streamIndex,
+                                       const QString &sidecarPath,
+                                       const QString &language)
+{
+    if (path.isEmpty() || !m_settings)
+        return;
+
+    const QString key =
+        QString::fromLatin1(kSubtitleGroup) + QLatin1Char('/') + keyFor(path);
+
+    m_settings->setValue(key + QStringLiteral("/streamIndex"), streamIndex);
+    m_settings->setValue(key + QStringLiteral("/sidecarPath"),
+                         sidecarPath.isEmpty()
+                             ? QString()
+                             : QFileInfo(sidecarPath).absoluteFilePath());
+    m_settings->setValue(key + QStringLiteral("/language"), language);
+    m_settings->setValue(key + QStringLiteral("/path"),
+                         QFileInfo(path).absoluteFilePath());
+
+    // The fallback for files with no entry of their own. Only a real language
+    // tag is worth keeping -- "und" would match half a container.
+    if (!language.isEmpty() && language != QLatin1String("und"))
+        m_settings->setValue(QString::fromLatin1(kPreferredLanguageKey), language);
+
+    m_settings->sync();
+}
+
+QVariantMap PlaybackHistory::subtitleFor(const QString &path) const
+{
+    QVariantMap out;
+    if (path.isEmpty() || !m_settings)
+        return out;
+
+    const QString key =
+        QString::fromLatin1(kSubtitleGroup) + QLatin1Char('/') + keyFor(path);
+    const QVariant streamIndex = m_settings->value(key + QStringLiteral("/streamIndex"));
+    if (!streamIndex.isValid())
+        return out;
+
+    out[QStringLiteral("streamIndex")] = streamIndex.toInt();
+    out[QStringLiteral("sidecarPath")] =
+        m_settings->value(key + QStringLiteral("/sidecarPath")).toString();
+    out[QStringLiteral("language")] =
+        m_settings->value(key + QStringLiteral("/language")).toString();
+    return out;
+}
+
+QString PlaybackHistory::preferredLanguage() const
+{
+    if (!m_settings)
+        return {};
+    return m_settings->value(QString::fromLatin1(kPreferredLanguageKey)).toString();
+}
+
 void PlaybackHistory::forget(const QString &path)
 {
     if (path.isEmpty() || !m_settings)
         return;
     m_settings->remove(QString::fromLatin1(kGroup) + QLatin1Char('/') + keyFor(path));
+    m_settings->remove(QString::fromLatin1(kSubtitleGroup) + QLatin1Char('/')
+                       + keyFor(path));
     m_settings->sync();
 }

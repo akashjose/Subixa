@@ -2,19 +2,26 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtCore/QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
 #include <memory>
 
 class QSettings;
 
-// Remembers where playback got to, per file, so reopening a film resumes rather
-// than restarting.
+// Per-file playback state: where playback got to, and which subtitle track was
+// being read. Both are things a player should remember about a film rather than
+// about the application.
 //
-// The policy lives here rather than in QML, and is deliberately conservative:
-// resuming somebody two minutes into a film they finished last week is worse
-// than not resuming at all. An entry that stops being worth keeping is deleted
-// rather than left to go stale, so resumeFor() can stay a plain lookup.
+// The resume policy lives here rather than in QML, and is deliberately
+// conservative: resuming somebody two minutes into a film they finished last
+// week is worse than not resuming at all. An entry that stops being worth
+// keeping is deleted rather than left to go stale, so resumeFor() can stay a
+// plain lookup.
+//
+// The subtitle selection is kept in its own group, not beside the position:
+// finishing a film clears the resume entry, and it would be perverse for that to
+// also forget that this household reads the Latin American Spanish track.
 class PlaybackHistory : public QObject
 {
     Q_OBJECT
@@ -34,6 +41,21 @@ public:
     Q_INVOKABLE double resumeFor(const QString &path) const;
 
     Q_INVOKABLE void forget(const QString &path);
+
+    // Which subtitle track was being read in `path`. Embedded tracks are stored
+    // by ffmpeg stream index and sidecars by absolute path, for the same reason
+    // MpvObject selects them that way: mpv's own numbering follows from neither.
+    Q_INVOKABLE void rememberSubtitle(const QString &path, int streamIndex,
+                                      const QString &sidecarPath,
+                                      const QString &language);
+    // { streamIndex, sidecarPath, language }, or an empty map when this file has
+    // never had a track chosen in it.
+    Q_INVOKABLE QVariantMap subtitleFor(const QString &path) const;
+
+    // The language last chosen anywhere, used to pick a track in a file that has
+    // no entry of its own -- somebody who reads English SDH reads it in the next
+    // film too. Empty when nothing has been chosen yet.
+    Q_INVOKABLE QString preferredLanguage() const;
 
     // Pure policy, static so it can be tested without touching storage.
     static bool worthRemembering(double position, double duration);

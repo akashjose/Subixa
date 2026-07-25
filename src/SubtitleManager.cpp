@@ -3,7 +3,13 @@
 #include "SubtitleExtractor.h"
 #include "SubtitleLineModel.h"
 
+#include <QtCore/QDebug>
+#include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QRegularExpression>
+#include <QtCore/QSaveFile>
+#include <QtCore/QTextStream>
+#include <QtCore/QUrl>
 #include <QtCore/QVariantMap>
 #include <QtQml/QQmlEngine>
 
@@ -33,6 +39,18 @@ QString labelFor(const SubtitleTrack &track)
     if (track.sidecar)
         return QFileInfo(track.sourcePath).fileName();
     return QStringLiteral("Track %1").arg(track.id + 1);
+}
+
+// SubRip wants hh:mm:ss,mmm -- same fields as the browser's timestamp with a
+// comma before the milliseconds. Parsers are strict about that comma, so this
+// cannot just reuse formatSubtitleTimestamp() as it stands.
+QString srtTimestamp(qint64 ms)
+{
+    QString stamp = formatSubtitleTimestamp(ms);
+    const qsizetype dot = stamp.lastIndexOf(QLatin1Char('.'));
+    if (dot >= 0)
+        stamp[dot] = QLatin1Char(',');
+    return stamp;
 }
 
 } // namespace
@@ -80,6 +98,7 @@ void SubtitleManager::load(const QString &mediaPath)
 
     ++m_requestId;
     m_worker->setCurrentRequest(m_requestId);
+    m_elapsed.start();
     m_progress = 0;
     emit progressChanged();
     setStatus(QStringLiteral("parsing subtitles…"));
@@ -102,7 +121,15 @@ void SubtitleManager::clear()
     emit tracksChanged();
 }
 
-void SubtitleManager::onExtractFinished(int requestId, const SubtitleTrackList &tracks)
+void SubtitleManager::setCacheDirectory(const QString &directory)
+{
+    // Safe only while nothing is being parsed, which is why this is documented as
+    // a before-load() call rather than exposed to QML.
+    m_worker->setCacheDirectory(directory);
+}
+
+void SubtitleManager::onExtractFinished(int requestId, const SubtitleTrackList &tracks,
+                                        bool fromCache)
 {
     if (requestId != m_requestId)
         return;  // a newer load superseded this one
@@ -120,14 +147,22 @@ void SubtitleManager::onExtractFinished(int requestId, const SubtitleTrackList &
         totalLines += t.lines.size();
     }
 
-    if (m_tracks.isEmpty())
+    if (m_tracks.isEmpty()) {
         setStatus(QStringLiteral("no subtitle tracks"));
-    else
-        setStatus(QStringLiteral("%1 track%2, %3 line%4")
+    } else {
+        // "cached" is worth saying out loud: it is the difference between a
+        // nine-second wait and none, and without it a hit is indistinguishable
+        // from a parse that was suspiciously quick.
+        setStatus(QStringLiteral("%1 track%2, %3 line%4%5")
                       .arg(textTracks)
                       .arg(textTracks == 1 ? QString() : QStringLiteral("s"))
                       .arg(totalLines)
-                      .arg(totalLines == 1 ? QString() : QStringLiteral("s")));
+                      .arg(totalLines == 1 ? QString() : QStringLiteral("s"))
+                      .arg(fromCache ? QStringLiteral(" · cached") : QString()));
+    }
+
+    qInfo().noquote() << "subtitles:" << m_status << "in" << m_elapsed.elapsed() << "ms"
+                      << (fromCache ? "(cache hit)" : "(parsed)");
 
     emit tracksChanged();
     emit loaded();
@@ -154,6 +189,7 @@ void SubtitleManager::onExtractFailed(int requestId, const QString &reason)
     setBusy(false);
     setStatus(reason);
     emit tracksChanged();
+    emit failed(reason);
 }
 
 void SubtitleManager::rebuildTracksView()
@@ -213,6 +249,77 @@ SubtitleLineModel *SubtitleManager::model(int trackId) const
 QString SubtitleManager::formatTimestamp(qint64 ms)
 {
     return formatSubtitleTimestamp(ms);
+}
+
+QString SubtitleManager::exportTrack(int trackId, const QUrl &target) const
+{
+    if (trackId < 0 || trackId >= m_tracks.size())
+        return QStringLiteral("no such track");
+
+    const SubtitleTrack &track = m_tracks.at(trackId);
+    if (track.lines.isEmpty())
+        return QStringLiteral("that track has no lines to export");
+
+    const QString path = target.isLocalFile() ? target.toLocalFile() : target.toString();
+    if (path.isEmpty())
+        return QStringLiteral("no destination");
+
+    // QSaveFile: an export interrupted halfway would otherwise leave a
+    // half-written .srt sitting next to the film, where it looks like a real one.
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+        return QStringLiteral("cannot write %1: %2")
+            .arg(QFileInfo(path).fileName(), file.errorString());
+
+    QTextStream out(&file);
+    // Explicit, not the locale's: a subtitle file that decodes differently on
+    // the next machine is a broken subtitle file.
+    out.setEncoding(QStringConverter::Utf8);
+
+    for (int i = 0; i < track.lines.size(); ++i) {
+        const SubtitleLine &line = track.lines.at(i);
+        out << (i + 1) << "\n"
+            << srtTimestamp(line.startMs) << " --> " << srtTimestamp(line.endMs) << "\n"
+            << line.text << "\n\n";
+    }
+
+    out.flush();
+    if (out.status() != QTextStream::Ok || !file.commit())
+        return QStringLiteral("could not write %1").arg(QFileInfo(path).fileName());
+
+    return QString();
+}
+
+QString SubtitleManager::suggestedExportName(int trackId, const QString &mediaPath) const
+{
+    const QString base = mediaPath.isEmpty()
+                             ? QStringLiteral("subtitles")
+                             : QFileInfo(mediaPath).completeBaseName();
+    if (trackId < 0 || trackId >= m_tracks.size())
+        return base + QStringLiteral(".srt");
+
+    const SubtitleTrack &track = m_tracks.at(trackId);
+    QString tag = track.language;
+    if (tag.isEmpty() || tag == QLatin1String("und"))
+        tag = QStringLiteral("track%1").arg(track.id + 1);
+    // A title like "Latin American" distinguishes two tracks of one language,
+    // which is exactly the case where an export needs telling apart.
+    if (!track.title.isEmpty() && !track.sidecar) {
+        QString title = track.title;
+        title.replace(QRegularExpression(QStringLiteral("[^\\w]+")), QStringLiteral("-"));
+        title = title.trimmed();
+        if (!title.isEmpty())
+            tag += QLatin1Char('.') + title;
+    }
+    return QStringLiteral("%1.%2.srt").arg(base, tag);
+}
+
+QUrl SubtitleManager::suggestedExportUrl(int trackId, const QString &mediaPath) const
+{
+    const QString name = suggestedExportName(trackId, mediaPath);
+    const QDir dir = mediaPath.isEmpty() ? QDir::current()
+                                         : QFileInfo(mediaPath).absoluteDir();
+    return QUrl::fromLocalFile(dir.absoluteFilePath(name));
 }
 
 void SubtitleManager::setBusy(bool busy)

@@ -29,6 +29,10 @@ private slots:
     void pathsWithSlashesDoNotCollide();
     void relativeAndAbsolutePathsAgree();
 
+    void roundTripsASubtitleSelection();
+    void subtitleSelectionSurvivesFinishingTheFilm();
+    void preferredLanguageFollowsTheLastChoice();
+
 private:
     QString settingsFile() const { return m_dir.filePath(QStringLiteral("history.ini")); }
     QTemporaryDir m_dir;
@@ -156,6 +160,81 @@ void TstPlaybackHistory::relativeAndAbsolutePathsAgree()
     // And the messy spelling of the same path resolves too.
     history.remember(QStringLiteral("./testdata/../testdata/subs.mkv"), 450.0, 3600.0);
     QCOMPARE(history.resumeFor(relative), 450.0);
+}
+
+void TstPlaybackHistory::roundTripsASubtitleSelection()
+{
+    PlaybackHistory history(settingsFile());
+    const QString film = QStringLiteral("/media/films/example.mkv");
+
+    QVERIFY(history.subtitleFor(film).isEmpty());
+
+    history.rememberSubtitle(film, 7, QString(), QStringLiteral("eng"));
+    QVariantMap stored = history.subtitleFor(film);
+    QCOMPARE(stored.value(QStringLiteral("streamIndex")).toInt(), 7);
+    QCOMPARE(stored.value(QStringLiteral("sidecarPath")).toString(), QString());
+    QCOMPARE(stored.value(QStringLiteral("language")).toString(), QStringLiteral("eng"));
+
+    // A sidecar is stored by path instead, and absolutely -- the extractor and
+    // mpv can spell the same file differently.
+    history.rememberSubtitle(film, -1, QStringLiteral("testdata/subs.srt"),
+                             QStringLiteral("fre"));
+    stored = history.subtitleFor(film);
+    QCOMPARE(stored.value(QStringLiteral("sidecarPath")).toString(),
+             QFileInfo(QStringLiteral("testdata/subs.srt")).absoluteFilePath());
+
+    PlaybackHistory reopened(settingsFile());
+    QCOMPARE(reopened.subtitleFor(film).value(QStringLiteral("language")).toString(),
+             QStringLiteral("fre"));
+
+    // Two films must not share a selection, for the same hashing reason as
+    // positions.
+    QVERIFY(history.subtitleFor(QStringLiteral("/media/films/other.mkv")).isEmpty());
+}
+
+void TstPlaybackHistory::subtitleSelectionSurvivesFinishingTheFilm()
+{
+    PlaybackHistory history(settingsFile());
+    const QString film = QStringLiteral("/media/films/example.mkv");
+
+    history.rememberSubtitle(film, 7, QString(), QStringLiteral("eng"));
+    history.remember(film, 1800.0, 8634.0);
+
+    // Watching to the end clears the resume position by design. The track being
+    // read is not part of that: the next viewing should still open on it.
+    history.remember(film, 8630.0, 8634.0);
+    QCOMPARE(history.resumeFor(film), -1.0);
+    QCOMPARE(history.subtitleFor(film).value(QStringLiteral("streamIndex")).toInt(), 7);
+
+    // forget() is the explicit "drop everything about this file", and does.
+    history.forget(film);
+    QVERIFY(history.subtitleFor(film).isEmpty());
+}
+
+void TstPlaybackHistory::preferredLanguageFollowsTheLastChoice()
+{
+    PlaybackHistory history(settingsFile());
+
+    QCOMPARE(history.preferredLanguage(), QString());
+
+    history.rememberSubtitle(QStringLiteral("/media/films/a.mkv"), 3, QString(),
+                             QStringLiteral("eng"));
+    QCOMPARE(history.preferredLanguage(), QStringLiteral("eng"));
+
+    // Chosen in one film, applied to the next -- that is the whole point of it
+    // being global rather than per file.
+    history.rememberSubtitle(QStringLiteral("/media/films/b.mkv"), 9, QString(),
+                             QStringLiteral("spa"));
+    QCOMPARE(history.preferredLanguage(), QStringLiteral("spa"));
+
+    // An untagged track says nothing about what language to prefer next time,
+    // and "und" would match half a container, so neither may overwrite it.
+    history.rememberSubtitle(QStringLiteral("/media/films/c.mkv"), 2, QString(),
+                             QString());
+    QCOMPARE(history.preferredLanguage(), QStringLiteral("spa"));
+    history.rememberSubtitle(QStringLiteral("/media/films/d.mkv"), 2, QString(),
+                             QStringLiteral("und"));
+    QCOMPARE(history.preferredLanguage(), QStringLiteral("spa"));
 }
 
 QTEST_MAIN(TstPlaybackHistory)

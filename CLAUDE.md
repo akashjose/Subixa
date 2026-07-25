@@ -75,8 +75,24 @@ film plays correctly at 30 min with 65 subtitle tracks loaded.
 So llvmpipe is a *fallback*, not the environment. Use `GALLIUM_DRIVER=d3d12` for anything
 about picture quality, large windows or fullscreen; drop it deliberately when testing the
 software path and its workarounds. Note the D3D12 driver reports GL 4.1 rather than 4.5 and
-still prints the EGL dri2 warning — both are harmless here. `hwdec=no` is still hardcoded,
-so decode remains on the CPU either way; revisiting that is now worth doing (see Next up).
+still prints the EGL dri2 warning — both are harmless here.
+
+**`hwdec` is no longer hardcoded, and it changes nothing here.** Decode starts on the CPU
+and `MpvObject::enableHardwareDecoding()` asks for `hwdec=auto-safe` once `GL_RENDERER`
+proves there is a real GPU — the same check that gates the software workarounds, so the two
+decisions cannot disagree. Under WSL the answer is still software, and now for a stated
+reason rather than by assumption: there is **no `/dev/dri`** at all, so there is no VA-API
+render node to decode into, and mpv says so itself in the log:
+
+```
+hardware GL: asking mpv for hardware decoding (hwdec=auto-safe)
+decoder: hwdec-current = no
+```
+
+`auto-safe` falls back silently rather than producing a black picture, so this costs
+nothing, and on a native Linux desktop with a render node it will pick up vaapi/nvdec
+without further work. `CMP_HWDEC=<value>` pins it to anything mpv accepts (`no`, `auto`,
+`vaapi`) and switches the automatic choice off.
 
 ## Build and run
 
@@ -105,7 +121,7 @@ Subtitle fixtures (`testclip.mp4` has no subtitle track):
 cd build && ctest --output-on-failure     # or run ./build/tst_subtitles directly
 ```
 
-Three headless suites, none needing a window, a GL context, or a compositor —
+Four headless suites, none needing a compositor or a rendered frame —
 deliberately, because a screenshot is the least reliable evidence available here
 (see the degraded-state note below). Run these before reaching for the UI.
 
@@ -122,12 +138,32 @@ deliberately, because a screenshot is the least reliable evidence available here
   strings. Note `vo=null` rather than `QT_QPA_PLATFORM=offscreen`: offscreen never
   creates a render context, so the queued `loadfile` never flushes and mpv loads
   nothing at all (trap 2).
+- **`tst_qmlpanel`** — the QML layer, which until now had no harness at all. It
+  loads the real `Main.qml` (not a mock) under `QT_QPA_PLATFORM=offscreen` and
+  drives it through the object tree: a tab click swaps the model, the search box
+  reaches the proxy after its debounce, `currentRow` scrolls the view and stops
+  when follow is off, a remembered track is restored on the next open, detaching
+  keeps search text and tab, and the theme singleton reaches a panel in either
+  window. Nothing in it asserts a pixel. It needs `offscreen` rather than
+  `minimal` — `minimal` has no scene graph, so Loaders never instantiate and the
+  panel never exists. It writes into a temporary `XDG_CONFIG_HOME`/`XDG_CACHE_HOME`,
+  since the player now remembers things and a test that quietly wrote into the
+  developer's own settings would be the exact bug this suite exists to catch.
+
+  It earned its keep on the first run, twice. It caught detaching the panel
+  silently resetting the reader's tab (trap 13), and then caught an
+  `onOpened` handler on `FileDialog` that does not exist — a QML error that
+  would have reached a screenshot, not a compiler.
+
 - **`tst_playbackhistory`** — the resume-position store against a temporary ini file,
   and mostly its policy: too short, barely started, and near-the-end all mean *do
   not resume*, and finishing a file clears a position saved earlier. Also that two
   films with the same basename in different directories do not collide — paths are
   hashed because `QSettings` reads `/` as a group separator — and that the same file
-  named relatively and absolutely resolves to one entry.
+  named relatively and absolutely resolves to one entry. Since the same store now
+  also remembers the subtitle track being read, it covers that the two are kept in
+  separate groups: finishing a film clears the position and must *not* forget that
+  this household reads the Latin American Spanish track.
 
 The harness found one real bug on its first run, since fixed: search did not fold
 U+00A0 to a plain space, so a phrase spanning an ASS `\h` matched nothing. The
@@ -179,6 +215,11 @@ clears the text instead.
 | Ctrl+F | focus the search box |
 | Ctrl+O | open a file |
 | [ / ] | playback speed, Backspace resets |
+| Ctrl+= / Ctrl+- | subtitle row text size, remembered |
+
+The panel's per-session actions — detach/dock, export this track as `.srt`, light/dark
+theme, text size — live behind the **More** button in its header rather than as buttons.
+The header has to survive a 240 px panel, and each of them is reached once a session.
 
 The transport bar drops controls as it narrows — speed first, then the volume slider, mute,
 fullscreen, and the track menus — so a wide panel does not clip them off the right-hand
@@ -229,6 +270,14 @@ left thinking ALT is held, and then every `-Text` character arrives as an accele
 (Alt+A, Alt+L, …) that a QML `TextField` ignores. The symptom is a click that demonstrably
 worked — a tab switches — beside typing that vanishes with no error.
 
+**Thin light-on-dark text captures in false colour.** Panel rows that are `#d0d0dc` on
+`#12121a` come back as saturated yellow and green in the PNG — the glyph pixels are
+literally `#ffff00`, not fringed grey. Flat fills in the same capture are *exact*
+(`#12121a`, `#23324a`, `#42618f` all match the theme to the byte), and dark-on-light text
+captures correctly, so this is chroma loss in the msrdc/RDP path rather than anything the
+app or the driver is doing. Consequence: **verify colours on rectangles, never on glyphs**,
+and do not go hunting a text-rendering bug that a screenshot alone appears to show.
+
 Two things to know before believing a black window:
 
 - **The whole WSLg session can degrade into painting black, and stays that way.** Runs
@@ -276,6 +325,7 @@ src/main.cpp                  forces OpenGL RHI, passes argv[1] to QML as `initi
 src/GraphicsSetup.{h,cpp}     picks a GL driver before Qt makes a context, probing first
 src/SubtitleTypes.h           SubtitleLine / SubtitleTrack plain structs
 src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker thread
+src/SubtitleCache.{h,cpp}     parsed cues on disk, so a reopen costs nothing
 src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed tracks
 src/SubtitleLineModel.{h,cpp} QAbstractListModel over one track's cues
 src/SubtitleFilterModel.{h,cpp} search proxy + the row mapping auto-follow needs
@@ -284,6 +334,7 @@ src/FboCap.h                  how large a framebuffer to give mpv on a software 
 src/MpvTrackList.h            maps browser tracks onto mpv's, header-only so it is testable
 qml/Main.qml                  video + transport, and the window the panel lives in
 qml/SubtitlePanel.qml         the browser itself, docked or in its own window
+qml/Theme.qml                 every colour, in two schemes, as a QML singleton
 tools/wsl-*.ps1               screenshot and input injection from the Windows side
 ```
 
@@ -314,8 +365,38 @@ the models are C++-side and passed by reference; a detach re-creates delegates, 
 Two QML details that bite here. A property named `lines` on the panel shadows the caller's
 `lines` id inside the component's scope, so `lines: lines` silently binds to itself —
 hence `linesModel`. And `TabBar` and `TextField` assign their own `currentIndex`/`text` on
-interaction, which destroys a binding, so both are restored in `Component.onCompleted` and
-pushed back to `ui` by hand instead.
+interaction, which destroys a binding, so both are pushed back to `ui` by hand instead of
+being bound. The tab index is the awkward one, and trap 13 explains why it is restored on
+`populated` rather than in `Component.onCompleted`.
+
+**What is remembered, and where.** Two stores, one file
+(`~/.config/custom_media_player/custom_media_player.conf`):
+
+- *Per application*, through the QML `Settings` type (`import QtCore`) in the `[ui]` group:
+  window geometry and maximised state, panel width, visible, detached, the detached
+  window's own geometry, volume and mute, theme and row text size. Restored in
+  `Component.onCompleted` and saved on close rather than two-way bound — a binding from a
+  window's width to a stored value is broken by the first resize anyway, and saving only
+  while `Windowed` is what stops a fullscreen session writing the screen's size back as the
+  window size. Volume and mute are written through immediately instead, so a `kill -9`
+  cannot lose them.
+- *Per file*, in `PlaybackHistory`: the resume position, and now **which subtitle track was
+  being read**. In separate groups on purpose — finishing a film clears its position by
+  design, and that must not also forget the track. Embedded tracks are stored by ffmpeg
+  stream index and sidecars by absolute path, the same split `MpvObject` uses to select
+  them, because mpv's own numbering follows from neither.
+
+A new file with no entry of its own falls back to the language last chosen anywhere, then
+to the first browsable track. Only an explicit choice is remembered — a tab click or the
+transport's Subs menu — never what the sync handlers do, or mpv's default would overwrite
+the reader's track on every open.
+
+**Theming is a QML singleton** (`Theme.qml`, `QT_QML_SINGLETON_TYPE` set *before*
+`qt_add_qml_module` or it is registered as an ordinary type). Two schemes derived from one
+`dark` property, so one assignment restyles both windows — which matters because the panel
+is destroyed and rebuilt on every detach and would otherwise have to be told again. The
+window pushes the saved value in at startup and writes it back on change. The video's
+surround stays black in both schemes: it is letterbox area, not chrome.
 
 **Parsing cost is I/O, not cues.** One `av_read_frame` loop collects every subtitle
 stream in a single pass, so 65 tracks cost the same walk as one — but subtitle packets
@@ -331,6 +412,30 @@ Twice the cues in a ninth of the time, so optimising the text parsing would buy 
 The extractor reports progress by bytes read for the same reason. Because the pass is
 single, no track finishes early — publishing tracks one at a time as they complete would
 not shorten the wait, which is why the panel shows a percentage instead.
+
+**So the parse is cached instead** (`SubtitleCache`). Nothing about the result changes
+between opens, and the cost is all I/O, so the cues are written to
+`~/.cache/custom_media_player/custom_media_player/subtitles/<sha1 of path>.cues` and read
+back on the next open. Measured on the film:
+
+| | cold | cached |
+|---|---|---|
+| 65 tracks / 93 350 cues | 15.7 s | **27 ms** headless, ~110 ms in the window |
+
+The entry is 11.7 MB, written through `QSaveFile` — a half-written entry surviving a crash
+would read back as a *short* track list, and the reader cannot tell "the file ends here"
+from "the track ends here". The directory is pruned oldest-first past 512 MB.
+
+Validation is a stamp per contributing file — path, size, mtime — for the media **and every
+sidecar found next to it**, so dropping a `.srt` beside the film invalidates the entry
+rather than being ignored. Not a content hash: hashing three gigabytes to decide whether to
+re-read three gigabytes saves nothing. A truncated or garbled entry is a miss, not a
+partial result, and the format carries a version that is bumped when the layout changes.
+`CMP_NO_SUBTITLE_CACHE=1` forces a real parse, which is how the timings above were taken.
+
+The status line says which happened — `65 tracks, 93350 lines · cached` — and the log gives
+the elapsed time either way, because a cache hit is otherwise indistinguishable from a
+parse that was suspiciously quick.
 
 `SubtitleManager` runs a `SubtitleExtractor` on its own `QThread` and republishes results
 as bindable properties. Requests carry a monotonic id; bumping it makes an in-flight parse
@@ -517,9 +622,40 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     libass renders `&amp;` literally over the video while the same cue reads `&` in the
     list. Both are behaving as designed (trap 7) — it is not a parsing regression.
 
+13. **A `TabBar` writes its own resets back into whatever you sync it with.** The panel's
+    tab index lives in the caller's `ui` object because the panel is destroyed and rebuilt
+    on every detach — so the outgoing copy's last word is what the incoming one restores
+    from. Two things make that dangerous, and both bit:
+
+    - The tabs come from a `Repeater` over the track list, so the bar is **empty** when
+      `Component.onCompleted` runs. Restoring there does nothing, and then a `Container`
+      adopts index 0 the moment it receives its first item — which the `onCurrentIndexChanged`
+      handler dutifully stored, losing the reader's tab on a 66-tab film.
+    - A bar being torn down drops its tabs first, resetting `currentIndex` on the way out.
+
+    Fixed by gating **both directions** on the bar being finished:
+    `count > 0 && count === manager.tracks.length`. A bar still filling up, or emptying,
+    has no opinion about which track the reader chose. `tst_qmlpanel` covers it, and found
+    it in the first place — it is invisible in a screenshot unless you happen to notice
+    which tab is lit.
+
+    A second-order version of the same thing: `TabBar` scrolls its strip to `currentIndex`
+    itself, but only once the strip has been laid out, so a restore lands with the strip at
+    the start and tab 65 off the end. The panel positions it explicitly after a 50 ms
+    timer — `Qt.callLater` is too early, `contentWidth` is not final yet.
+
+Known-harmless: Qt's fallback `FileDialog` will not prefill the name field for a
+`SaveFile`, whatever `selectedFile`/`currentFile` are set to and whenever they are set —
+the file being named does not exist yet, so nothing in the listing matches it. The export
+dialog therefore opens in the right folder with the right filter and appends `.srt` on its
+own, but the name is typed. There is no xdg-desktop-portal under WSLg, so the native
+dialog that would honour it is not in play here.
+
 Known-harmless: CMake warns `QTP0004` about qmldir files for `qml/`. Cosmetic.
-mpv logs `Suspected software renderer`, EGL/DRM/Vulkan probe failures, and
-`Cannot load libcuda.so.1` — all expected under WSL with `hwdec=no`.
+mpv logs `Suspected software renderer`, EGL/DRM/Vulkan probe failures,
+`Cannot load libcuda.so.1` and `Failed to open VDPAU backend` — all expected under WSL.
+The VDPAU line is new only in the sense that the player now asks for hardware decoding at
+all; it is mpv ruling out a backend, not a failure.
 
 ## Conventions
 
@@ -554,9 +690,10 @@ needs judging — naturally after milestone 3.
 
 **Native Linux** needs no porting: the 10-bit workaround in trap 9 disables itself on a
 real GPU (`GL_RENDERER` stops matching), and the screenshot tooling is simply replaced by
-`grim`/`import`. The one thing left hardcoded for WSL's sake is `hwdec=no` — on a machine
-with a GPU that leaves vaapi/nvdec unused and burns CPU for nothing. Making it conditional
-on the same software-rasterizer check is the obvious follow-up.
+`grim`/`import`. Nothing is hardcoded for WSL's sake any more — `hwdec` follows the same
+software-rasterizer check as the workarounds, so a machine with a render node should pick
+up vaapi/nvdec on its own. That is reasoned, not measured: WSL has no `/dev/dri` to try it
+against, so **`hwdec-current` on a native Linux desktop is worth a look at port time.**
 
 ## Next up
 
@@ -571,6 +708,17 @@ rather than at the bottom edge, parsing reports progress, the framebuffer is cap
 software rasterizer, and the GPU is selected automatically instead of by hand. All verified
 on the film: capped fullscreen renders correctly, D3D12 renders 10-bit natively, and
 switching between its two English tracks picks the right one through `ff-index`.
+
+**Milestone 4 is in the tree** (uncommitted at the time of writing): parsed cues are
+cached, settings persist, files that will not play say so, a track exports to `.srt`, the
+panel is themed, `hwdec` is chosen rather than hardcoded, and the QML layer has a harness.
+Verified on the film in a real window, in this order: reopening it takes ~110 ms instead of
+15.7 s and the status says `cached`; picking a Chinese track, closing, and reopening comes
+back on that track with the tab scrolled to it, the right cues, and mpv burning the same
+track over the picture; click-to-seek lands on the clicked cue; export writes 87 KB of
+valid UTF-8 SubRip; the light theme reaches both windows and survives a restart. The
+`[ui]`, `[resume]` and `[subtitle]` groups in the settings file were read back to confirm
+what is stored rather than inferred from behaviour.
 
 **Not verified: drag-and-drop.** There is no way to synthesise a drag from Windows into a
 WSLg surface with the current tooling, so it is compile-and-parse only. Everything else in
@@ -587,27 +735,17 @@ one, so fullscreen works on the software path as well as on D3D12.
 
 Next, in this order:
 
-1. **Cache parsed cues.** The biggest remaining win in daily use: reopening the film costs
-   9.4 s to rediscover the same 93 350 cues. See the first loose end.
-2. **Milestone 4: polish.** Settings persistence beyond resume position — window size,
-   panel width, docked-or-detached, volume, and *subtitle track selection*, which today
-   resets to mpv's default on every open. Then error surfaces for unsupported or corrupt
-   files, theming for the panel, and exporting a track to `.srt`.
-3. **`hwdec=no`**, now that a GPU is reachable — see the loose end below.
-4. **A QML-level test harness**, if UI regressions start costing time.
+1. **A render canary**, which is now the biggest gap in the harness — see the loose end
+   below. Everything else has a headless test; the picture does not.
+2. **Playlists, or at least "next file in the folder".** A drop of several files currently
+   plays the last one and ignores the rest, which is the most obviously missing behaviour
+   left in ordinary use.
+3. **Styling in the browser** — the raw ASS payload is already kept per cue (`rawText`),
+   so italics and speaker colours could be rendered in the list rather than stripped.
+4. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. See the platform section.
 
 Loose ends worth folding into whatever touches them next:
 
-- **Parsed cues are not cached.** Reopening the film re-walks 3 GB for the same 93 350
-  cues. Keying a cache the way `PlaybackHistory` hashes paths would make a rewatch
-  instant; invalidation on mtime/size is the only fiddly part. This is the biggest
-  remaining win on load time — progress reporting made the wait legible, not shorter.
-- **The models now have a harness; the QML above them still does not.** `ctest` covers the
-  extractor, `indexAt()`, the filter and `rowAt()` mapping, plus mpv's own track selection
-  via `sub-text` — see the Tests section. What remains screenshot-only is the QML layer
-  itself: that a tab click swaps the model, that follow scrolls the view, that the search
-  box is wired to the proxy. A `QQuickTest`/`QQuickView` harness could reach those without
-  a compositor and is the obvious next step if UI regressions start costing time.
 - **No render canary yet.** Visual checks still have to be sanity-checked by hand against a
   known-good file, which is how the degraded state went unnoticed for a whole film test
   once. Playing `testclip.mp4` and diffing the grab against an `ffmpeg`-extracted reference
@@ -623,11 +761,18 @@ Loose ends worth folding into whatever touches them next:
   failure depends on render load as well as area, and a threshold sitting on the measured
   edge would not hold. Nobody has mapped whether the real variable is area, height, or
   something else; two panes of matched area and different shapes would answer it.
-- **`hwdec=no` is worth revisiting now that a GPU is reachable.** It was hardcoded because
-  WSL had no usable GPU path; `GALLIUM_DRIVER=d3d12` shows it does. Rendering is already on
-  the GPU there while decode stays on the CPU, so the 3 GB AV1 film still burns cores for
-  no reason. Whether Intel's WSL D3D12 exposes a usable vaapi/`d3d11va` decode path is
-  untested.
+- **Hardware decode is asked for but never granted here.** `hwdec=auto-safe` is now
+  requested on the D3D12 path and mpv answers `hwdec-current = no`, because WSL exposes no
+  `/dev/dri` render node. So the film still decodes on the CPU under WSL and there is
+  nothing further to try short of a native Linux desktop or a Windows build.
+- **The cue cache is never invalidated by anything but the files it was built from.** A
+  format bump handles a layout change, but if the *extractor's* output changes — a fix to
+  tag stripping, say — old entries stay valid and quietly serve the old text. Bumping
+  `kFormatVersion` alongside such a fix is the whole remedy, and it is easy to forget.
+- **The QML harness cannot see anything that needs pixels.** It runs `offscreen`, so
+  delegate geometry, the FBO cap, and whether the panel actually *scrolled* are all
+  outside it — `tst_qmlpanel` asserts `currentIndex`, not `contentY`. The tab-strip
+  positioning in trap 13 was verified by screenshot for exactly that reason.
 
 ## Related context
 

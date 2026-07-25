@@ -99,9 +99,14 @@ public:
 
                 // Queued before onRenderContextReady on purpose: the workaround has
                 // to be in place before the pending file starts playing, or the
-                // filter chain gets rebuilt mid-playback.
+                // filter chain gets rebuilt mid-playback. The same goes for
+                // hwdec, which mpv does accept at runtime but only by tearing the
+                // decoder down and rebuilding it.
                 if (usingSoftwareRasterizer()) {
                     QMetaObject::invokeMethod(m_obj, "forceEightBitVideo",
+                                              Qt::QueuedConnection);
+                } else {
+                    QMetaObject::invokeMethod(m_obj, "enableHardwareDecoding",
                                               Qt::QueuedConnection);
                 }
                 // Tell the item it can now safely start playback.
@@ -246,9 +251,19 @@ MpvObject::MpvObject(QQuickItem *parent) : QQuickFramebufferObject(parent)
     mpv_set_option_string(m_mpv, "vo", "libmpv");
 
     mpv_set_option_string(m_mpv, "terminal", "no");
-    // WSL has no usable GPU decode path; probing just wastes time and can fail
-    // in confusing ways. Software decode is fine for development.
-    mpv_set_option_string(m_mpv, "hwdec", "no");
+
+    // Decode starts on the CPU and is only moved off it once GL_RENDERER has
+    // proved there is a real GPU underneath (see enableHardwareDecoding). Doing
+    // it the other way round means probing hardware decoders on a software
+    // rasterizer, which wastes time at startup and fails in confusing ways.
+    //
+    // CMP_HWDEC pins the setting to any value mpv accepts -- no, auto, auto-safe,
+    // vaapi -- and switches the automatic choice off, which is how to test a
+    // decoder this machine would not have picked.
+    const QByteArray forcedHwdec = qgetenv("CMP_HWDEC");
+    m_hwdecForced = !forcedHwdec.isEmpty();
+    mpv_set_option_string(m_mpv, "hwdec",
+                          m_hwdecForced ? forcedHwdec.constData() : "no");
     mpv_set_option_string(m_mpv, "keep-open", "yes");
 
     if (mpv_initialize(m_mpv) < 0)
@@ -272,6 +287,10 @@ MpvObject::MpvObject(QQuickItem *parent) : QQuickFramebufferObject(parent)
     // content gives the size actually drawn rather than the stored one.
     mpv_observe_property(m_mpv, 0, "dwidth", MPV_FORMAT_INT64);
     mpv_observe_property(m_mpv, 0, "dheight", MPV_FORMAT_INT64);
+    // What mpv actually ended up using, which is the only honest answer about
+    // whether decode left the CPU -- asking for hardware decoding and getting it
+    // are different things, and mpv falls back silently.
+    mpv_observe_property(m_mpv, 0, "hwdec-current", MPV_FORMAT_STRING);
 
     mpv_request_log_messages(m_mpv, "info");
     mpv_set_wakeup_callback(m_mpv, &MpvObject::onMpvWakeup, this);
@@ -341,6 +360,16 @@ void MpvObject::handleMpvEvent(void *ev)
 
         if (!prop->data)
             break;
+        if (name == "hwdec-current") {
+            // Logged rather than exposed: nothing in the UI depends on it, and
+            // the question it answers -- did decode actually leave the CPU --
+            // only ever comes up while looking at a log anyway.
+            const QString value =
+                QString::fromUtf8(*static_cast<char **>(prop->data));
+            if (!value.isEmpty())
+                emit logMessage(QStringLiteral("decoder: hwdec-current = %1").arg(value));
+            break;
+        }
         if (name == "sid" || name == "aid") {
             // "no" when off, "auto" before a track is chosen: both mean "no
             // selection" to QML, which wants a number.
@@ -385,6 +414,14 @@ void MpvObject::handleMpvEvent(void *ev)
     case MPV_EVENT_FILE_LOADED:
         emit fileLoaded();
         break;
+    case MPV_EVENT_END_FILE: {
+        // Reaching the end of a file is not news; failing to play one is. mpv
+        // reports both through this event, distinguished only by the reason.
+        auto *end = static_cast<mpv_event_end_file *>(event->data);
+        if (end && end->reason == MPV_END_FILE_REASON_ERROR)
+            emit playbackFailed(QString::fromUtf8(mpv_error_string(end->error)));
+        break;
+    }
     case MPV_EVENT_LOG_MESSAGE: {
         auto *msg = static_cast<mpv_event_log_message *>(event->data);
         if (msg)
@@ -597,6 +634,22 @@ void MpvObject::forceEightBitVideo()
     mpv_set_property_string(m_mpv, "vf", "format=yuv420p");
     emit logMessage(QStringLiteral(
         "software rasterizer detected: converting video to 8-bit before upload"));
+}
+
+void MpvObject::enableHardwareDecoding()
+{
+    if (!m_mpv || m_hwdecForced)
+        return;
+
+    // auto-safe rather than auto: it only picks methods known to work with the
+    // current VO, and falls back to software rather than producing a black
+    // picture when the driver claims a decoder it cannot deliver. Whether
+    // anything is available at all is mpv's problem -- under WSL there is no
+    // /dev/dri render node, so this is expected to come to nothing there and to
+    // pick up vaapi or nvdec on a native Linux desktop.
+    mpv_set_property_string(m_mpv, "hwdec", "auto-safe");
+    emit logMessage(QStringLiteral(
+        "hardware GL: asking mpv for hardware decoding (hwdec=auto-safe)"));
 }
 
 void MpvObject::setOption(const QString &name, const QString &value)

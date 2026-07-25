@@ -267,6 +267,30 @@ void SubtitleExtractor::extract(const QString &mediaPath, int requestId)
     if (cancelled(requestId))
         return;
 
+    // Every file that will contribute cues, stamped before anything is read: the
+    // cache is only valid for exactly this set, so a sidecar dropped next to the
+    // film after the last open has to invalidate it.
+    const QStringList sidecars = findSidecars(mediaPath);
+    SubtitleSourceStamps sources;
+    sources.reserve(sidecars.size() + 1);
+    sources.append(SubtitleCache::stampFor(mediaPath));
+    for (const QString &sidecar : sidecars)
+        sources.append(SubtitleCache::stampFor(sidecar));
+
+    // CMP_NO_SUBTITLE_CACHE=1 forces a real parse, which is how to time one and
+    // how to check the cache reproduces it.
+    const bool useCache =
+        m_cacheEnabled && !qEnvironmentVariableIsSet("CMP_NO_SUBTITLE_CACHE");
+
+    if (useCache) {
+        SubtitleTrackList cached;
+        if (m_cache.load(mediaPath, sources, &cached)) {
+            if (!cancelled(requestId))
+                emit finished(requestId, cached, /*fromCache=*/true);
+            return;
+        }
+    }
+
     SubtitleTrackList tracks;
     QString error;
 
@@ -277,7 +301,7 @@ void SubtitleExtractor::extract(const QString &mediaPath, int requestId)
     }
 
     const QString videoBase = QFileInfo(mediaPath).completeBaseName();
-    for (const QString &sidecar : findSidecars(mediaPath)) {
+    for (const QString &sidecar : sidecars) {
         if (cancelled(requestId))
             return;
         // A broken sidecar must not sink the embedded tracks, so a failure here
@@ -299,7 +323,13 @@ void SubtitleExtractor::extract(const QString &mediaPath, int requestId)
     for (int i = 0; i < tracks.size(); ++i)
         tracks[i].id = i;
 
-    emit finished(requestId, tracks);
+    // After the cancellation check above, so a parse that was abandoned halfway
+    // through the container cannot leave a truncated track list on disk to be
+    // served as a complete one next time.
+    if (useCache)
+        m_cache.store(mediaPath, sources, tracks);
+
+    emit finished(requestId, tracks, /*fromCache=*/false);
 }
 
 // `videoBase` non-empty means `path` is a sidecar file: it is the base name of

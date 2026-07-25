@@ -13,9 +13,17 @@
 
 #include <QtTest>
 
+#include <QtCore/QDateTime>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QTemporaryDir>
 
+#include <QtCore/QUrl>
+
+#include "SubtitleCache.h"
 #include "SubtitleExtractor.h"
+#include "SubtitleManager.h"
 #include "SubtitleFilterModel.h"
 #include "SubtitleLineModel.h"
 #include "SubtitleTypes.h"
@@ -29,9 +37,15 @@ QString fixture(const QString &name)
 
 // Runs the extractor synchronously. It is a plain QObject; the worker thread it
 // normally lives on is SubtitleManager's business, not the parser's.
+//
+// The cue cache is off here: every test below is about what the parser produces,
+// and a cached answer would let a parser regression through while also writing
+// into the user's real cache directory. The cache has its own tests, which point
+// it at a temporary directory.
 SubtitleTrackList parse(const QString &path, QString *error = nullptr)
 {
     SubtitleExtractor extractor;
+    extractor.setCacheEnabled(false);
     SubtitleTrackList result;
     QString failure;
 
@@ -46,6 +60,54 @@ SubtitleTrackList parse(const QString &path, QString *error = nullptr)
     if (error)
         *error = failure;
     return result;
+}
+
+// Same, but with the cache live in `cacheDir`. Reports whether the cues came off
+// disk, which is the thing worth asserting.
+SubtitleTrackList parseCached(const QString &path, const QString &cacheDir,
+                              bool *fromCache)
+{
+    SubtitleExtractor extractor;
+    extractor.setCacheDirectory(cacheDir);
+    SubtitleTrackList result;
+    bool cached = false;
+
+    QObject::connect(&extractor, &SubtitleExtractor::finished, &extractor,
+                     [&](int, const SubtitleTrackList &tracks, bool hit) {
+                         result = tracks;
+                         cached = hit;
+                     });
+
+    extractor.setCurrentRequest(1);
+    extractor.extract(path, 1);
+
+    if (fromCache)
+        *fromCache = cached;
+    return result;
+}
+
+bool sameCues(const SubtitleTrackList &a, const SubtitleTrackList &b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (int t = 0; t < a.size(); ++t) {
+        if (a[t].id != b[t].id || a[t].streamIndex != b[t].streamIndex
+            || a[t].language != b[t].language || a[t].title != b[t].title
+            || a[t].codecName != b[t].codecName || a[t].kind != b[t].kind
+            || a[t].sidecar != b[t].sidecar || a[t].sourcePath != b[t].sourcePath
+            || a[t].note != b[t].note || a[t].lines.size() != b[t].lines.size()) {
+            return false;
+        }
+        for (int i = 0; i < a[t].lines.size(); ++i) {
+            const SubtitleLine &x = a[t].lines[i];
+            const SubtitleLine &y = b[t].lines[i];
+            if (x.startMs != y.startMs || x.endMs != y.endMs || x.text != y.text
+                || x.rawText != y.rawText) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 const SubtitleTrack *trackByLanguage(const SubtitleTrackList &tracks, const QString &lang)
@@ -73,6 +135,14 @@ private slots:
     void wholesaleOffsetRebasesToZero();
     void subtitlesAlreadyAtZeroAreNotRebased();
     void sidecarsAreFoundNextToTheVideo();
+
+    void cacheReproducesTheParseExactly();
+    void cacheMissesWhenTheMediaChanges();
+    void cacheMissesWhenASidecarAppears();
+    void corruptCacheEntryIsIgnored();
+
+    void exportedSrtReparsesToTheSameCues();
+    void exportRejectsWhatItCannotWrite();
 
     void indexAtFindsTheCurrentCue();
     void indexAtOnEmptyModel();
@@ -241,6 +311,198 @@ void TstSubtitles::sidecarsAreFoundNextToTheVideo()
     // The language suffix in sidecar.fr.srt is where a sidecar's tag comes from.
     QVERIFY(trackByLanguage(tracks, QStringLiteral("fr"))
             || trackByLanguage(tracks, QStringLiteral("fre")));
+}
+
+void TstSubtitles::cacheReproducesTheParseExactly()
+{
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    const QString path = fixture(QStringLiteral("subs.mkv"));
+
+    bool hit = true;
+    const SubtitleTrackList cold = parseCached(path, cache.path(), &hit);
+    QVERIFY2(!hit, "first open cannot be a hit -- the cache directory is empty");
+    QCOMPARE(cold.size(), 3);
+
+    const SubtitleTrackList warm = parseCached(path, cache.path(), &hit);
+    QVERIFY2(hit, "second open should have come off disk");
+
+    // The point of the cache is that it is indistinguishable from a parse: same
+    // tracks, same metadata, same cues, same raw payloads.
+    QVERIFY(sameCues(cold, warm));
+    QVERIFY(sameCues(parse(path), warm));
+}
+
+void TstSubtitles::cacheMissesWhenTheMediaChanges()
+{
+    QTemporaryDir cache;
+    QTemporaryDir media;
+    QVERIFY(cache.isValid() && media.isValid());
+
+    const QString copy = media.filePath(QStringLiteral("film.mkv"));
+    QVERIFY(QFile::copy(fixture(QStringLiteral("subs.mkv")), copy));
+
+    bool hit = true;
+    parseCached(copy, cache.path(), &hit);
+    QVERIFY(!hit);
+    parseCached(copy, cache.path(), &hit);
+    QVERIFY(hit);
+
+    // mtime alone, with the content untouched: a re-encode that happens to land
+    // on the same byte count still has to invalidate the entry.
+    {
+        QFile file(copy);
+        QVERIFY(file.open(QIODevice::ReadWrite));
+        QVERIFY(file.setFileTime(QDateTime::currentDateTime().addSecs(120),
+                                 QFileDevice::FileModificationTime));
+    }
+    parseCached(copy, cache.path(), &hit);
+    QVERIFY2(!hit, "a changed mtime must invalidate the entry");
+
+    // And the fresh entry is usable again.
+    parseCached(copy, cache.path(), &hit);
+    QVERIFY(hit);
+}
+
+void TstSubtitles::cacheMissesWhenASidecarAppears()
+{
+    QTemporaryDir cache;
+    QTemporaryDir media;
+    QVERIFY(cache.isValid() && media.isValid());
+
+    const QString copy = media.filePath(QStringLiteral("film.mkv"));
+    QVERIFY(QFile::copy(fixture(QStringLiteral("subs.mkv")), copy));
+
+    bool hit = true;
+    const SubtitleTrackList before = parseCached(copy, cache.path(), &hit);
+    QVERIFY(!hit);
+    QCOMPARE(before.size(), 3);
+    parseCached(copy, cache.path(), &hit);
+    QVERIFY(hit);
+
+    // Dropping a subtitle file next to the video is the ordinary way a track
+    // appears, and it changes nothing about the video the entry is keyed on.
+    {
+        QFile srt(media.filePath(QStringLiteral("film.en.srt")));
+        QVERIFY(srt.open(QIODevice::WriteOnly));
+        srt.write("1\n00:00:01,000 --> 00:00:03,000\nA new sidecar line.\n\n");
+    }
+
+    const SubtitleTrackList after = parseCached(copy, cache.path(), &hit);
+    QVERIFY2(!hit, "a new sidecar must invalidate the entry");
+    QCOMPARE(after.size(), 4);
+    QCOMPARE(after[3].lines.size(), 1);
+    QCOMPARE(after[3].lines[0].text, QStringLiteral("A new sidecar line."));
+
+    parseCached(copy, cache.path(), &hit);
+    QVERIFY(hit);
+}
+
+void TstSubtitles::corruptCacheEntryIsIgnored()
+{
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    const QString path = fixture(QStringLiteral("subs.mkv"));
+
+    bool hit = true;
+    parseCached(path, cache.path(), &hit);
+    QVERIFY(!hit);
+
+    // Truncate the entry in place. A half-written file is what a crash mid-store
+    // would leave behind, and reading one back as a short track list would be
+    // worse than any reparse -- the browser would simply be missing cues.
+    const QFileInfoList entries = QDir(cache.path())
+                                      .entryInfoList({QStringLiteral("*.cues")},
+                                                     QDir::Files);
+    QCOMPARE(entries.size(), 1);
+    {
+        QFile entry(entries.first().absoluteFilePath());
+        QVERIFY(entry.open(QIODevice::ReadWrite));
+        QVERIFY(entry.resize(entry.size() / 2));
+    }
+
+    const SubtitleTrackList recovered = parseCached(path, cache.path(), &hit);
+    QVERIFY2(!hit, "a truncated entry must not be served");
+    QVERIFY(sameCues(parse(path), recovered));
+
+    // A garbled header is the other shape of the same problem.
+    {
+        QFile entry(entries.first().absoluteFilePath());
+        QVERIFY(entry.open(QIODevice::ReadWrite));
+        QVERIFY(entry.write("junk") == 4);
+    }
+    parseCached(path, cache.path(), &hit);
+    QVERIFY(!hit);
+}
+
+void TstSubtitles::exportedSrtReparsesToTheSameCues()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    SubtitleManager manager;
+    manager.setCacheDirectory(dir.filePath(QStringLiteral("cache")));
+    QSignalSpy loaded(&manager, &SubtitleManager::loaded);
+    manager.load(fixture(QStringLiteral("subs.mkv")));
+    QVERIFY2(loaded.wait(20000), "the extractor never reported a result");
+
+    const SubtitleTrack &source = manager.trackData().at(0);
+    const QString out = dir.filePath(QStringLiteral("export.srt"));
+    QCOMPARE(manager.exportTrack(0, QUrl::fromLocalFile(out)), QString());
+
+    // The real check is a round trip: what we write has to come back through our
+    // own parser as the cues we started with. An .srt that only looks right is
+    // the failure mode here -- a missing comma in the timestamp is enough to
+    // make every player reject it silently.
+    const SubtitleTrackList back = parse(out);
+    QCOMPARE(back.size(), 1);
+    QCOMPARE(back[0].lines.size(), source.lines.size());
+    for (int i = 0; i < source.lines.size(); ++i) {
+        QCOMPARE(back[0].lines[i].text, source.lines[i].text);
+        QCOMPARE(back[0].lines[i].startMs, source.lines[i].startMs);
+        QCOMPARE(back[0].lines[i].endMs, source.lines[i].endMs);
+    }
+
+    // And it is a plain SubRip file, not just something ffmpeg tolerates.
+    QFile written(out);
+    QVERIFY(written.open(QIODevice::ReadOnly));
+    const QString text = QString::fromUtf8(written.readAll());
+    QVERIFY(text.startsWith(QStringLiteral("1\n")));
+    QVERIFY(text.contains(QStringLiteral(" --> ")));
+    QVERIFY2(!text.contains(QRegularExpression(QStringLiteral(R"(\d\d:\d\d:\d\d\.\d)"))),
+             "milliseconds must be comma-separated in SubRip, not dotted");
+
+    // The suggested name carries the language, which is what tells two exports
+    // of one film apart.
+    QVERIFY(manager.suggestedExportName(0, QStringLiteral("/films/Movie.2026.mkv"))
+                .startsWith(QStringLiteral("Movie.2026.eng")));
+}
+
+void TstSubtitles::exportRejectsWhatItCannotWrite()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    SubtitleManager manager;
+    manager.setCacheDirectory(dir.filePath(QStringLiteral("cache")));
+
+    // Nothing loaded: every id is out of range, and saying so beats writing an
+    // empty file the user then tries to load.
+    QVERIFY(!manager.exportTrack(0, QUrl::fromLocalFile(dir.filePath(
+                                        QStringLiteral("none.srt")))).isEmpty());
+
+    QSignalSpy loaded(&manager, &SubtitleManager::loaded);
+    manager.load(fixture(QStringLiteral("subs.mkv")));
+    QVERIFY(loaded.wait(20000));
+
+    QVERIFY(!manager.exportTrack(99, QUrl::fromLocalFile(dir.filePath(
+                                         QStringLiteral("none.srt")))).isEmpty());
+    // An undirectable destination has to come back as a message, not a crash or
+    // a silent no-op.
+    QVERIFY(!manager
+                 .exportTrack(0, QUrl::fromLocalFile(dir.filePath(
+                                     QStringLiteral("no/such/dir/out.srt"))))
+                 .isEmpty());
 }
 
 void TstSubtitles::indexAtFindsTheCurrentCue()
