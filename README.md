@@ -48,6 +48,18 @@ overflow menu holds whatever the width has dropped, and **Settings** (Ctrl+,) co
 playback, subtitle appearance and timing, the browser, hotkeys and the interface.
 `CLAUDE.md` lists the default shortcuts.
 
+## Documentation
+
+| | |
+|---|---|
+| `CLAUDE.md` | the entry point: environment, build, conventions, trap index |
+| `docs/roadmap.md` | current state and what is next |
+| `docs/architecture.md` | modules and the design system |
+| `docs/traps.md` | 23 things that have already cost time |
+| `docs/testing.md` | the suites, the render canary, WSL tooling |
+| `docs/graphics.md` | driver selection under WSL |
+| `docs/keyboard.md` | default bindings |
+
 ## Design decisions
 
 **Built from scratch, not forked.** VLC, Haruna, and SMPlayer all carry architecture
