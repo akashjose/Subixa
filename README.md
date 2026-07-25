@@ -63,15 +63,17 @@ choosing a track from the transport menu moves the panel to match. Files arrive 
 `argv[1]`, a file dialog, or drag-and-drop, with keyboard shortcuts, fullscreen, volume and
 playback speed alongside.
 
-One known defect, confined to software rendering: on Mesa's llvmpipe a video pane above
-roughly 2.9 megapixels renders black or with a fine mesh of unwritten pixels, so fullscreen
-and very large windows show a corrupt picture there. `glFinish()` before Qt samples the
-framebuffer fixed that at ordinary window sizes and stops short at large ones.
+Software rendering used to fall apart at large window sizes — on Mesa's llvmpipe a video
+pane above roughly 2.9 megapixels rendered black or with a fine mesh of unwritten pixels,
+which made fullscreen unusable. The framebuffer is now capped there, to the video's own
+size and to a safe area, with Qt scaling the result: a 2560 px pane renders into 1280x720
+and comes out correct, for about 1.7x less CPU and a softer picture. The cap is off on any
+real GPU, where it would only blur subtitles for no reason.
 
-Under WSL this is avoidable rather than inherent — `GALLIUM_DRIVER=d3d12` gets real
-hardware GL through the host GPU, and on that path the same 2560 px pane is clean and 10-bit
-video renders natively with no workarounds engaged. The app logs its `GL_RENDERER` at
-startup so which path is in use is never a guess. See `CLAUDE.md` for both.
+Under WSL the software path is avoidable entirely — `GALLIUM_DRIVER=d3d12` gets real
+hardware GL through the host GPU, where a 2560 px pane is clean at full resolution and
+10-bit video renders natively with no workarounds engaged. The app logs its `GL_RENDERER`
+at startup so which path is in use is never a guess. See `CLAUDE.md` for both.
 
 ## Roadmap
 
@@ -108,7 +110,7 @@ milestone 1 snapshot cost.
   directions. Tracks are matched by ffmpeg stream index through mpv's `ff-index`, since
   neither side's numbering follows from the other and language strings collide (the test
   film carries two English tracks)
-- ✅ Fullscreen + keyboard shortcuts — works, but see the renderer defect under Status
+- ✅ Fullscreen + keyboard shortcuts
 - ✅ File open dialog + drag-and-drop
 - ✅ Volume, playback speed
 - ✅ Resume position per file — kept per file with a deliberately conservative policy: a
@@ -116,11 +118,8 @@ milestone 1 snapshot cost.
   unremembered, and finishing a film clears the position rather than dropping you back
   into the credits next time
 
-Still open in the renderer: **cap the video framebuffer on the software rasterizer.**
-Fullscreen turned a known CPU cost into a correctness bug there. It needs to be
-`min(pane, native, safe area)` and gated on the software check — libass draws subtitles into
-the same framebuffer, so an unconditional cap would blur the one thing this player exists
-to show.
+Milestone 3 also closed the renderer's last correctness bug: the video framebuffer is now
+capped on the software rasterizer, which is what makes fullscreen usable there.
 
 ### Milestone 4 — Polish
 
@@ -158,12 +157,14 @@ package, and passing a bad module name aborts the whole install.
 ## Development notes
 
 Running under WSLg means software decode *and* software rendering. That is expected and
-fine for development; it is not a bug to chase. It does mean the renderer carries two
-workarounds for Mesa's software rasterizers, both switching themselves off on a real GPU:
+fine for development; it is not a bug to chase. It does mean the renderer carries three
+workarounds for Mesa's software rasterizers, all switching themselves off on a real GPU:
 
 - 10-bit video (`yuv420p10`) renders black or striped, so it is converted to 8-bit first.
 - mpv's rendering has to be explicitly finished before Qt samples the framebuffer, or
   anything wider than ~2048 px composites as a partially drawn frame.
+- The framebuffer is capped, because even with that the picture falls apart above roughly
+  2.9 megapixels — and rendering a 720p file into a 2560 px surface costs CPU for nothing.
 
 `CLAUDE.md` traps 9 and 10 record how each was diagnosed and what was ruled out. Neither
 should be removed without reading those; both look like arbitrary sledgehammers otherwise.

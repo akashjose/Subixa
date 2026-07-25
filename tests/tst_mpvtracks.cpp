@@ -19,6 +19,7 @@
 
 #include <mpv/client.h>
 
+#include "FboCap.h"
 #include "MpvTrackList.h"
 
 namespace {
@@ -42,6 +43,12 @@ private slots:
     void audioTrackIsSelectable();
     void selectingSidChangesWhatMpvWouldRender();
     void mpvLeavesEntitiesEncoded();
+
+    // Pure arithmetic, no mpv handle needed.
+    void fboCapLeavesOrdinaryWindowsAlone();
+    void fboCapHoldsTheAreaLimit();
+    void fboCapStopsAtTheVideoSize();
+    void fboCapNeverUpscalesOrInverts();
 
     // Pure mapping, no mpv handle needed.
     void mapsStreamIndexToSid();
@@ -248,6 +255,75 @@ void TstMpvTracks::mpvLeavesEntitiesEncoded()
     // future comparison between panel text and mpv's text has to expect it.
     const QString text = subTextAfterSeek(4.0);
     QVERIFY2(text.contains(QStringLiteral("&amp;")), qPrintable(text));
+}
+
+void TstMpvTracks::fboCapLeavesOrdinaryWindowsAlone()
+{
+    // A normal window is well under the area limit and under the video size, so
+    // nothing is capped and the picture stays exactly as sharp as before.
+    const QSize video(1920, 1080);
+    QCOMPARE(FboCap::cappedSize(QSize(1186, 733), video), QSize(1186, 733));
+    QCOMPARE(FboCap::cappedSize(QSize(1920, 1040), video), QSize(1920, 1040));
+}
+
+void TstMpvTracks::fboCapHoldsTheAreaLimit()
+{
+    // 4K source, so the video size never engages -- this is the term that saves a
+    // 4K file, where capping to the native size would do nothing at all.
+    const QSize uhd(3840, 2160);
+
+    const QSize fullscreen = FboCap::cappedSize(QSize(2560, 1345), uhd);
+    QVERIFY2(fullscreen.width() * fullscreen.height() <= FboCap::SafeArea,
+             qPrintable(QStringLiteral("%1x%2").arg(fullscreen.width())
+                            .arg(fullscreen.height())));
+
+    // Aspect ratio is preserved: mpv letterboxes inside the framebuffer and Qt
+    // stretches it back over the pane, so a changed aspect would distort.
+    const double before = 2560.0 / 1345.0;
+    const double after = double(fullscreen.width()) / double(fullscreen.height());
+    QVERIFY2(qAbs(before - after) < 0.01,
+             qPrintable(QStringLiteral("%1 vs %2").arg(before).arg(after)));
+
+    // The sizes measured as corrupt in trap 10 must all come out under the limit.
+    for (const QSize &pane : {QSize(2560, 1345), QSize(2220, 1345), QSize(2560, 1440)}) {
+        const QSize capped = FboCap::cappedSize(pane, uhd);
+        QVERIFY2(capped.width() * capped.height() <= FboCap::SafeArea,
+                 qPrintable(QStringLiteral("pane %1x%2").arg(pane.width())
+                                .arg(pane.height())));
+    }
+}
+
+void TstMpvTracks::fboCapStopsAtTheVideoSize()
+{
+    // 720p in a 2560 px pane: rendering at pane size buys nothing over rendering
+    // at the video's own size and letting Qt scale, so the framebuffer collapses
+    // to roughly the video's width.
+    const QSize capped = FboCap::cappedSize(QSize(2560, 1345), QSize(1280, 720));
+    QVERIFY2(capped.width() <= 1400, qPrintable(QString::number(capped.width())));
+    QVERIFY(capped.width() >= 1200);
+    QVERIFY(capped.width() * capped.height() <= FboCap::SafeArea);
+
+    // A 4:3 video in a wide pane occupies only part of that pane, so the limit has
+    // to come from the width the video actually covers, not the pane's width.
+    const QSize narrow = FboCap::cappedSize(QSize(2560, 1345), QSize(640, 480));
+    QVERIFY2(narrow.width() < 1200, qPrintable(QString::number(narrow.width())));
+}
+
+void TstMpvTracks::fboCapNeverUpscalesOrInverts()
+{
+    // 4K video in a small window: the framebuffer must stay the window's size, not
+    // grow to the video's.
+    QCOMPARE(FboCap::cappedSize(QSize(800, 450), QSize(3840, 2160)), QSize(800, 450));
+
+    // Before mpv reports a video size, only the area limit applies.
+    QCOMPARE(FboCap::cappedSize(QSize(1000, 600), QSize()), QSize(1000, 600));
+    const QSize big = FboCap::cappedSize(QSize(2560, 1440), QSize());
+    QVERIFY(big.width() * big.height() <= FboCap::SafeArea);
+
+    // Degenerate input must not produce a zero or negative framebuffer.
+    QCOMPARE(FboCap::cappedSize(QSize(0, 0), QSize(1920, 1080)), QSize(0, 0));
+    const QSize tiny = FboCap::cappedSize(QSize(1, 1), QSize(1920, 1080));
+    QVERIFY(tiny.width() >= 1 && tiny.height() >= 1);
 }
 
 namespace {

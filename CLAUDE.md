@@ -240,11 +240,16 @@ tools/wsl-*.ps1               screenshot and input injection from the Windows si
 `mpv_render_context` and draws into the FBO. mpv state reaches QML through observed
 properties (`time-pos`, `duration`, `pause`) surfaced as Qt properties.
 
-`MpvRenderer` also carries two workarounds for Mesa's software rasterizers, both keyed off
+`MpvRenderer` carries three workarounds for Mesa's software rasterizers, all keyed off
 `usingSoftwareRasterizer()` (a `GL_RENDERER` string check) so a real GPU is untouched:
-8-bit conversion for 10-bit video, and a `glFinish()` before Qt samples the FBO. Traps 9
-and 10 explain why each is needed and what was ruled out first — do not remove either
-without reading those.
+8-bit conversion for 10-bit video, a `glFinish()` before Qt samples the FBO, and the
+framebuffer cap in `FboCap.h`. Traps 9 and 10 explain why each is needed and what was
+ruled out first — do not remove any of them without reading those.
+
+The cap is why `MpvObject` sets `setTextureFollowsItemSize(false)`. With it on, Qt
+compares the FBO's size against the item's every frame and destroys any that disagrees,
+so a capped framebuffer would be recreated forever; with it off, recreation is asked for
+explicitly in `MpvRenderer::synchronize()` when the target size changes.
 
 `SubtitleManager` runs a `SubtitleExtractor` on its own `QThread` and republishes results
 as bindable properties. Requests carry a monotonic id; bumping it makes an in-flight parse
@@ -380,13 +385,25 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     a threshold in total FBO area, not a width cliff, so do not trust a single
     resolution to tell you the path is healthy.
 
-    **The intended fix is to cap the FBO to the video's native size** and let Qt scale
-    the result, which is already listed under "Next up" for a different reason — it also
-    cuts the ~1000% CPU that software-rendering a 2560 px pane costs. Capping keeps the
-    FBO at 1280x720 (or 1920x800 for the film), far below the threshold, so this failure
-    mode stops being reachable at all rather than being pushed slightly further out. The
-    price is a softer picture when the window exceeds the video, which is the normal
-    trade every player makes.
+    **Fixed by capping the FBO** (`FboCap.h`), which is what makes fullscreen usable on
+    the software path: a 2560x1388 pane now renders into 1280x720 and Qt scales it, so
+    the corrupt regime stops being reachable rather than being pushed slightly further
+    out. Verified at the size that produced the mesh. The price is a softer picture when
+    the window exceeds the video, which is the trade every player makes.
+
+    Two terms, both needed. The *native* term stops a 720p file being rendered into a
+    2560 px surface for no gain. The *area* term is what saves 4K, where the native size
+    is above the pane and the native term would never engage at all. Both are gated on
+    `usingSoftwareRasterizer()`: libass draws subtitles into this same FBO, so capping
+    renders subtitle text at video resolution and upscales it — the last thing to blur in
+    a player built around subtitles, and pointless on a GPU that has no need of it.
+    `CMP_NO_FBO_CAP=1` disables the cap, the way `CMP_NO_SYNC=1` disables the glFinish.
+
+    It also cuts CPU, though **not by as much as this file used to claim**. Measured on a
+    3-minute 720p clip, fullscreen, steady state: **1435% CPU uncapped, 826% capped** —
+    about 1.7x, not the ~6x guessed at before the cap existed. The remainder is Qt
+    compositing a 2560x1440 scene through llvmpipe plus software decode, neither of which
+    the cap touches.
 
     **Is this llvmpipe generally, or WSLg?** Unresolved, and worth knowing before spending
     much on the cap. It is *not* the Wayland surface specifically: switching to XWayland
@@ -473,15 +490,15 @@ play a fixture in a real window to confirm the picture appears. On the software 
 black or partial frame may be the degraded WSLg state rather than a real bug, and every
 visual check will lie until the distro is restarted.
 
+The renderer has no known correctness bugs left: the FBO cap (`FboCap.h`) closed the last
+one, so fullscreen works on the software path as well as on D3D12.
+
 Next, in this order:
 
-1. **Cap the video FBO on the software rasterizer.** The only correctness bug still open,
-   and the one thing standing between the software fallback and usable fullscreen. Shape it
-   as `min(pane, native, safe area)` and gate it on `usingSoftwareRasterizer()` — see the
-   loose end below for why a blanket cap is wrong.
-2. **Milestone 4: polish.** Settings persistence beyond resume position, error surfaces for
+1. **Milestone 4: polish.** Settings persistence beyond resume position, error surfaces for
    unsupported or corrupt files, theming for the panel, and exporting a track to `.srt`.
-3. **A QML-level test harness**, if UI regressions start costing time — see the loose end.
+2. **A QML-level test harness**, if UI regressions start costing time — see the loose end.
+3. **`hwdec=no`**, now that a GPU is reachable — see the loose end below.
 
 Loose ends worth folding into whatever touches them next:
 
@@ -503,15 +520,12 @@ Loose ends worth folding into whatever touches them next:
   five lines. See the platform section.
 - **Search is a linear scan per keystroke**, coalesced by a 150 ms timer in QML. Fine at
   the 200k-cue fixture; if it ever is not, the fix is an index, not a longer timer.
-- **The video pane is capped by nothing.** On the software path this is a correctness bug,
-  not just the ~1000% CPU it was filed as: above roughly 2.9 MP of FBO the picture goes
-  black or meshed even with `glFinish()` (trap 10, second half). On the D3D12 path it is
-  neither — a 2560 px pane is clean. So capping the FBO to the video's native size is a
-  software-fallback fix plus a CPU win, and must stay gated on `usingSoftwareRasterizer()`:
-  libass renders into the same FBO, so capping blurs subtitle text, which is the one thing
-  this player should not blur. A cap also needs a third term to help 4K at all —
-  `min(pane, native, safe area)` — since for 4K the native size is *above* the pane and the
-  cap would never engage.
+- **The FBO cap's threshold is a guess, if a conservative one.** `FboCap::SafeArea` is 2.0
+  MP, chosen below the observed boundary (2.86 MP clean, 2.99 MP corrupt) rather than at
+  it, because trap 10 also records that a *trivial* draw at those sizes is fine — so the
+  failure depends on render load as well as area, and a threshold sitting on the measured
+  edge would not hold. Nobody has mapped whether the real variable is area, height, or
+  something else; two panes of matched area and different shapes would answer it.
 - **`hwdec=no` is worth revisiting now that a GPU is reachable.** It was hardcoded because
   WSL had no usable GPU path; `GALLIUM_DRIVER=d3d12` shows it does. Rendering is already on
   the GPU there while decode stays on the CPU, so the 3 GB AV1 film still burns cores for

@@ -1,5 +1,6 @@
 #include "MpvObject.h"
 
+#include "FboCap.h"
 #include "MpvTrackList.h"
 
 #include <mpv/client.h>
@@ -38,6 +39,24 @@ public:
     {
         if (m_mpvGL)
             mpv_render_context_free(m_mpvGL);
+    }
+
+    // Qt asks for an FBO the size of the item; on the software rasterizer we hand
+    // back a smaller one and let Qt scale it over the item (trap 10, and the CPU
+    // cost). That is only safe because MpvObject turns textureFollowsItemSize
+    // off: with it on, Qt compares the FBO's size against the item's every frame
+    // and destroys any FBO that disagrees, so a capped one would be recreated
+    // forever. With it off, recreation is ours to ask for -- see synchronize().
+    QSize targetFboSize(const QSize &itemSize) const
+    {
+        if (!usingSoftwareRasterizer())
+            return itemSize;
+        // CMP_NO_FBO_CAP=1 renders at full pane size on the software path, which
+        // is how to A/B the cap -- both the corruption it prevents and the CPU it
+        // saves. Same idea as CMP_NO_SYNC for the glFinish().
+        if (qEnvironmentVariableIsSet("CMP_NO_FBO_CAP"))
+            return itemSize;
+        return FboCap::cappedSize(itemSize, m_videoSize);
     }
 
     QOpenGLFramebufferObject *createFramebufferObject(const QSize &size) override
@@ -90,7 +109,28 @@ public:
                                           Qt::QueuedConnection);
             }
         }
-        return QQuickFramebufferObject::Renderer::createFramebufferObject(size);
+        const QSize target = targetFboSize(size);
+        if (target != size) {
+            QMetaObject::invokeMethod(
+                m_obj, "reportFboCap", Qt::QueuedConnection,
+                Q_ARG(QSize, size), Q_ARG(QSize, target));
+        }
+        m_fboSize = target;
+        return QQuickFramebufferObject::Renderer::createFramebufferObject(target);
+    }
+
+    // Runs on the render thread with the GUI thread blocked, so reading the item
+    // is safe. This is where a resize -- or mpv finally reporting the video size --
+    // turns into a new framebuffer, since Qt no longer does it for us.
+    void synchronize(QQuickFramebufferObject *item) override
+    {
+        m_videoSize = m_obj->videoSize();
+
+        const QSize itemSize = QSize(int(item->width()), int(item->height()));
+        if (itemSize.isEmpty())
+            return;
+        if (targetFboSize(itemSize) != m_fboSize)
+            invalidateFramebufferObject();
     }
 
     void render() override
@@ -181,10 +221,21 @@ private:
     MpvObject *m_obj = nullptr;
     mpv_render_context *m_mpvGL = nullptr;
     int m_needsFinish = -1;  // -1 until GL_RENDERER has been read
+    QSize m_fboSize;         // what we actually created, which may be capped
+    QSize m_videoSize;       // copied from the item under synchronize()
 };
 
 MpvObject::MpvObject(QQuickItem *parent) : QQuickFramebufferObject(parent)
 {
+    // The renderer may hand back a framebuffer smaller than this item (see
+    // FboCap.h). With textureFollowsItemSize left on, Qt compares the FBO's size
+    // against the item's on every frame and destroys any that disagrees, so a
+    // capped framebuffer would be recreated forever. Off, recreation is asked for
+    // explicitly in MpvRenderer::synchronize(); Qt still stretches the texture
+    // across the item either way, which is what makes the cap invisible except as
+    // a softer picture.
+    setTextureFollowsItemSize(false);
+
     m_mpv = mpv_create();
     if (!m_mpv)
         qFatal("could not create mpv context");
@@ -216,6 +267,11 @@ MpvObject::MpvObject(QQuickItem *parent) : QQuickFramebufferObject(parent)
     mpv_observe_property(m_mpv, 0, "volume", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "mute", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, 0, "speed", MPV_FORMAT_DOUBLE);
+    // Decoded size, used to avoid rendering a 720p file into a 2560 px surface on
+    // the software rasterizer. dwidth/dheight are the display size, so anamorphic
+    // content gives the size actually drawn rather than the stored one.
+    mpv_observe_property(m_mpv, 0, "dwidth", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, 0, "dheight", MPV_FORMAT_INT64);
 
     mpv_request_log_messages(m_mpv, "info");
     mpv_set_wakeup_callback(m_mpv, &MpvObject::onMpvWakeup, this);
@@ -319,6 +375,10 @@ void MpvObject::handleMpvEvent(void *ev)
         } else if (name == "speed" && prop->format == MPV_FORMAT_DOUBLE) {
             m_speed = *static_cast<double *>(prop->data);
             emit speedChanged();
+        } else if (name == "dwidth" && prop->format == MPV_FORMAT_INT64) {
+            m_videoSize.setWidth(int(*static_cast<int64_t *>(prop->data)));
+        } else if (name == "dheight" && prop->format == MPV_FORMAT_INT64) {
+            m_videoSize.setHeight(int(*static_cast<int64_t *>(prop->data)));
         }
         break;
     }
@@ -514,6 +574,16 @@ void MpvObject::onRenderContextReady()
 void MpvObject::reportRenderer(const QString &renderer, const QString &version)
 {
     emit logMessage(QStringLiteral("GL_RENDERER: %1 | %2").arg(renderer, version));
+}
+
+void MpvObject::reportFboCap(const QSize &pane, const QSize &fbo)
+{
+    emit logMessage(QStringLiteral("software rasterizer: rendering %1x%2 into a "
+                                   "%3x%4 framebuffer, scaled to fit")
+                        .arg(pane.width())
+                        .arg(pane.height())
+                        .arg(fbo.width())
+                        .arg(fbo.height()));
 }
 
 void MpvObject::forceEightBitVideo()

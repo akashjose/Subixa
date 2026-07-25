@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QtCore/QSize>
 #include <QtCore/QStringList>
 #include <QtCore/QVariantList>
 #include <QtQml/qqmlregistration.h>
@@ -51,6 +52,9 @@ public:
     double volume() const { return m_volume; }
     bool muted() const { return m_muted; }
     double speed() const { return m_speed; }
+    // Decoded video size, empty until mpv reports it. Read by the renderer to
+    // decide how large a framebuffer is worth creating.
+    QSize videoSize() const { return m_videoSize; }
 
     Q_INVOKABLE void loadFile(const QString &file);
     Q_INVOKABLE void command(const QStringList &args);
@@ -112,6 +116,9 @@ private slots:
     void forceEightBitVideo();
     // Also from the render thread, once, with whatever driver GL actually gave us.
     void reportRenderer(const QString &renderer, const QString &version);
+    // From the render thread whenever a capped framebuffer is created, so the
+    // cap is visible in the log rather than being silently softer picture.
+    void reportFboCap(const QSize &pane, const QSize &fbo);
 
 private:
     static void onMpvRedraw(void *ctx);
@@ -131,6 +138,7 @@ private:
     double m_volume = 100.0;
     bool m_muted = false;
     double m_speed = 1.0;
+    QSize m_videoSize;
 
     // The render context only exists once the item has been rendered at least
     // once. Loading before that makes mpv's VO fail with "No render context
