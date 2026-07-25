@@ -28,6 +28,7 @@ That is the goal. Playback is the necessary substrate; the subtitle browser is t
 - Audio/subtitle track selection
 - Keyboard shortcuts, fullscreen
 - Remembers position, subtitle track, window and panel layout per file and per session
+- Plays on to the next file in the folder, in the order a person would put them in
 
 The browser docks beside the video or detaches into its own window (Ctrl+D), and is
 resizable either way. `CLAUDE.md` lists the keyboard shortcuts. Its per-session actions —
@@ -80,6 +81,13 @@ nothing about the result changes between opens, so the cues are cached on disk a
 size and mtime of the video *and every sidecar beside it*. The 3 GB film went from **15.7 s
 to about 110 ms**, and the panel says `cached` so a hit is not mistaken for a suspiciously
 quick parse.
+
+When a file finishes, the next one starts. Opening anything makes its folder the queue, so
+an episode is followed by the next episode without anyone building a playlist — `ep2` before
+`ep10`, which plain alphabetical order gets backwards. Dropping several files at once makes
+exactly those the queue, in the order they were dropped. There is no playlist panel, and
+that is deliberate: the subtitle browser is what this player is for, and a second list
+competing with it would be the wrong thing to build.
 
 The player also remembers what it should: window and panel geometry, docked or detached,
 volume, theme and text size — and, per film, the resume position and **which subtitle track
@@ -167,6 +175,15 @@ capped on the software rasterizer, which is what makes fullscreen usable there.
 Under WSL the answer to that last one is still software decode, and now for a stated
 reason: there is no `/dev/dri` render node, and mpv reports `hwdec-current = no` when asked.
 
+### Milestone 5 — What plays next ✅
+
+- ✅ The folder is the queue: opening a file queues its siblings in natural order, so `ep2`
+  comes before `ep10`
+- ✅ A drop of several files becomes the queue instead, in the order dropped
+- ✅ Auto-advance at the end of a file, `<` and `>` to move by hand, and a `2/3` readout in
+  the transport so an advance does not look like the player wandering off
+- ✅ The current file is in the window title
+
 ## Build
 
 Requires Qt 6.9 (system Qt 6.4 on Ubuntu 24.04 is too old), libmpv, and FFmpeg dev
@@ -220,13 +237,15 @@ visual checks return false negatives until the distro is restarted.
 cd build && ctest --output-on-failure
 ```
 
-Four headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
+Five headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
 layer underneath the browser — the cue binary search, the search filter, and the row mapping
 auto-follow depends on — plus the cue cache (a hit has to reproduce a parse exactly, and a
 changed file or a new sidecar has to miss) and the `.srt` export, checked by parsing back
 what it wrote. `tst_mpvtracks` links libmpv with `vo=null` and checks that selecting
 a track changes what mpv would render, comparing its `sub-text` property rather than looking
-at pixels. `tst_playbackhistory` covers the per-file store and its policy. `tst_qmlpanel`
+at pixels. `tst_playbackhistory` covers the per-file store and its policy, and `tst_playlist` what
+plays next — mostly the ordering and the boundaries, since a queue that wraps round to the
+first file is how you watch episode one twice. `tst_qmlpanel`
 loads the real `Main.qml` offscreen and drives the QML layer itself: tab clicks swapping the
 model, search reaching the proxy, follow scrolling the view, a remembered track restored on
 reopen, and view state surviving a detach.

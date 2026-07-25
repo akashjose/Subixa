@@ -55,6 +55,8 @@ private slots:
     void searchReachesTheProxy();
     void followMovesTheView();
     void followOffLeavesTheViewAlone();
+    void openingAFileQueuesItsFolder();
+    void aDroppedSetBecomesTheQueue();
     void remembersTheTrackPerFile();
     void detachingKeepsTheViewState();
     void themeReachesBothWindows();
@@ -66,6 +68,10 @@ private:
     // parse to land -- the same path a drop or the dialog takes.
     bool openFixture(const QString &name);
     QObject *panel() const { return named(m_root, "subtitlePanel"); }
+    // A folder of exactly two playable files, so "what plays next" has one
+    // answer. The real testdata folder cannot serve: which fixture follows
+    // which depends on whether the big ones were generated.
+    QString queueFolderFile(const QString &name);
 
     QTemporaryDir m_home;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
@@ -234,6 +240,86 @@ void TstQmlPanel::followOffLeavesTheViewAlone()
     ui->setProperty("following", true);
     m_root->setProperty("currentRow", 3);
     QTRY_COMPARE(list->property("currentIndex").toInt(), 3);
+}
+
+QString TstQmlPanel::queueFolderFile(const QString &name)
+{
+    const QString dir = m_home.filePath(QStringLiteral("queue"));
+    QDir().mkpath(dir);
+    const QString path = dir + QLatin1Char('/') + name;
+    if (!QFileInfo::exists(path))
+        QFile::copy(fixture(QStringLiteral("subs.mkv")), path);
+    return path;
+}
+
+void TstQmlPanel::openingAFileQueuesItsFolder()
+{
+    const QString first = queueFolderFile(QStringLiteral("ep1.mkv"));
+    const QString second = queueFolderFile(QStringLiteral("ep2.mkv"));
+
+    QSignalSpy parsed(named(m_root, "subtitleManager"), SIGNAL(loaded()));
+    QMetaObject::invokeMethod(m_root, "openFile", Q_ARG(QVariant, first));
+    QVERIFY(parsed.wait(20000));
+
+    QObject *playlist = named(m_root, "playlist");
+    QVERIFY(playlist);
+    // Nobody built a playlist; opening one file is what queued the folder.
+    QCOMPARE(playlist->property("count").toInt(), 2);
+    QCOMPARE(playlist->property("currentPath").toString(), first);
+    QVERIFY(playlist->property("hasNext").toBool());
+    QVERIFY(!playlist->property("hasPrevious").toBool());
+
+    // The path a finished file takes. Playback cannot actually reach the end
+    // here -- offscreen never renders, so mpv never plays -- which is why this
+    // drives the same function the end-of-file handler calls.
+    parsed.clear();
+    QMetaObject::invokeMethod(m_root, "playNext");
+    QVERIFY(parsed.wait(20000));
+    QCOMPARE(m_root->property("currentFile").toString(), second);
+    QCOMPARE(playlist->property("currentPath").toString(), second);
+    QVERIFY(!playlist->property("hasNext").toBool());
+
+    // Advancing must not rebuild the queue from the new file's folder -- it is
+    // the same folder here, but a queue that reshuffles itself on every advance
+    // would lose a dropped set at the first boundary.
+    QCOMPARE(playlist->property("count").toInt(), 2);
+
+    parsed.clear();
+    QMetaObject::invokeMethod(m_root, "playPrevious");
+    QVERIFY(parsed.wait(20000));
+    QCOMPARE(m_root->property("currentFile").toString(), first);
+}
+
+void TstQmlPanel::aDroppedSetBecomesTheQueue()
+{
+    const QString a = queueFolderFile(QStringLiteral("ep1.mkv"));
+    const QString b = queueFolderFile(QStringLiteral("ep2.mkv"));
+    queueFolderFile(QStringLiteral("ep3.mkv"));  // in the folder, not in the drop
+
+    QObject *playlist = named(m_root, "playlist");
+    QVERIFY(playlist);
+    // Hoisted: a braced list inside Q_ARG would split on its own comma.
+    const QStringList dropped{b, a};
+    QVERIFY(QMetaObject::invokeMethod(playlist, "setFiles",
+                                      Q_ARG(QStringList, dropped)));
+
+    QSignalSpy parsed(named(m_root, "subtitleManager"), SIGNAL(loaded()));
+    QMetaObject::invokeMethod(m_root, "openFile",
+                              Q_ARG(QVariant, playlist->property("currentPath")));
+    QVERIFY(parsed.wait(20000));
+
+    // Exactly what was dropped, in that order -- the third file in the folder is
+    // not in the queue, and opening the first of the dropped pair must not
+    // replace the queue with the folder.
+    QCOMPARE(playlist->property("count").toInt(), 2);
+    QCOMPARE(playlist->property("currentPath").toString(), b);
+    QCOMPARE(playlist->property("currentIndex").toInt(), 0);
+
+    parsed.clear();
+    QMetaObject::invokeMethod(m_root, "playNext");
+    QVERIFY(parsed.wait(20000));
+    QCOMPARE(m_root->property("currentFile").toString(), a);
+    QCOMPARE(playlist->property("count").toInt(), 2);
 }
 
 void TstQmlPanel::remembersTheTrackPerFile()

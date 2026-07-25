@@ -38,6 +38,8 @@ qt_add_executable(custom_media_player
     src/SubtitleFilterModel.h
     src/PlaybackHistory.cpp
     src/PlaybackHistory.h
+    src/Playlist.cpp
+    src/Playlist.h
     src/GraphicsSetup.cpp
     src/GraphicsSetup.h
 )
@@ -99,6 +101,13 @@ qt_add_executable(tst_playbackhistory tests/tst_playbackhistory.cpp src/Playback
 target_include_directories(tst_playbackhistory PRIVATE src)
 target_link_libraries(tst_playbackhistory PRIVATE Qt6::Core Qt6::Qml Qt6::Test)
 
+# What plays next. Pure file-system reasoning, so it needs neither mpv nor a
+# window -- and the ordering it has to get right ("ep2" before "ep10") is exactly
+# the kind of thing that looks fine until a folder of episodes proves otherwise.
+qt_add_executable(tst_playlist tests/tst_playlist.cpp src/Playlist.cpp)
+target_include_directories(tst_playlist PRIVATE src)
+target_link_libraries(tst_playlist PRIVATE Qt6::Core Qt6::Qml Qt6::Test)
+
 qt_add_executable(tst_subtitles tests/tst_subtitles.cpp ${CMP_MODEL_SOURCES})
 target_include_directories(tst_subtitles PRIVATE src)
 target_compile_definitions(tst_subtitles PRIVATE
@@ -136,6 +145,7 @@ qt_add_executable(tst_qmlpanel
     src/MpvObject.h
     ${CMP_MODEL_SOURCES}
     src/PlaybackHistory.cpp
+    src/Playlist.cpp
 )
 qt_add_qml_module(tst_qmlpanel
     URI CustomMediaPlayer
@@ -164,10 +174,11 @@ target_link_libraries(tst_qmlpanel PRIVATE
 add_test(NAME subtitles COMMAND tst_subtitles)
 add_test(NAME mpvtracks COMMAND tst_mpvtracks)
 add_test(NAME playbackhistory COMMAND tst_playbackhistory)
+add_test(NAME playlist COMMAND tst_playlist)
 add_test(NAME qmlpanel COMMAND tst_qmlpanel)
 
 # None of these needs a display; make sure they never try to open one.
-set_tests_properties(subtitles mpvtracks playbackhistory PROPERTIES
+set_tests_properties(subtitles mpvtracks playbackhistory playlist PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=minimal"
     TIMEOUT 120
 )

@@ -121,7 +121,7 @@ Subtitle fixtures (`testclip.mp4` has no subtitle track):
 cd build && ctest --output-on-failure     # or run ./build/tst_subtitles directly
 ```
 
-Four headless suites, none needing a compositor or a rendered frame —
+Five headless suites, none needing a compositor or a rendered frame —
 deliberately, because a screenshot is the least reliable evidence available here
 (see the degraded-state note below). Run these before reaching for the UI.
 
@@ -154,6 +154,15 @@ deliberately, because a screenshot is the least reliable evidence available here
   silently resetting the reader's tab (trap 13), and then caught an
   `onOpened` handler on `FileDialog` that does not exist — a QML error that
   would have reached a screenshot, not a compiler.
+
+- **`tst_playlist`** — what plays next, which is pure file-system reasoning and so
+  needs neither mpv nor a window. Mostly ordering (`ep2` before `ep10`, padded
+  and unpadded spellings of the same number adjacent) and boundaries: the last
+  file does not wrap to the first, a drop keeps the order it was dropped in with
+  duplicates collapsed, sidecars and posters are not things to play next, and the
+  file being opened is queued even when its extension is not on the list. The QML
+  harness covers the other half — that opening a file queues its folder and that
+  advancing does not rebuild the queue.
 
 - **`tst_playbackhistory`** — the resume-position store against a temporary ini file,
   and mostly its policy: too short, barely started, and near-the-end all mean *do
@@ -257,6 +266,7 @@ clears the text instead.
 | Ctrl+F | focus the search box |
 | Ctrl+O | open a file |
 | [ / ] | playback speed, Backspace resets |
+| < / > | previous/next file in the queue |
 | Ctrl+= / Ctrl+- | subtitle row text size, remembered |
 
 The panel's per-session actions — detach/dock, export this track as `.srt`, light/dark
@@ -372,6 +382,7 @@ src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed trac
 src/SubtitleLineModel.{h,cpp} QAbstractListModel over one track's cues
 src/SubtitleFilterModel.{h,cpp} search proxy + the row mapping auto-follow needs
 src/PlaybackHistory.{h,cpp}   per-file resume positions in QSettings, and their policy
+src/Playlist.{h,cpp}          what plays next: the folder as a queue, in natural order
 src/FboCap.h                  how large a framebuffer to give mpv on a software rasterizer
 src/MpvTrackList.h            maps browser tracks onto mpv's, header-only so it is testable
 qml/Main.qml                  video + transport, and the window the panel lives in
@@ -432,6 +443,29 @@ A new file with no entry of its own falls back to the language last chosen anywh
 to the first browsable track. Only an explicit choice is remembered — a tab click or the
 transport's Subs menu — never what the sync handlers do, or mpv's default would overwrite
 the reader's track on every open.
+
+**What plays next is a folder, not a playlist.** Opening any file makes its folder the
+queue with that file current; dropping several files makes exactly those the queue, in the
+order they were dropped. `openFile()` rebuilds the queue only for a file that is not
+already in it, which is what keeps a dropped set from being replaced by its folder at the
+first advance. There is no playlist panel and there should not be one — the subtitle
+browser is the feature this player exists for, and a second list competing with it would be
+the wrong thing to build.
+
+Two details worth knowing:
+
+- **The end of a file is a property, not an event.** `keep-open=yes` means mpv never
+  unloads the file and so never emits `MPV_EVENT_END_FILE` for a normal finish; it pauses
+  on the last frame and sets `eof-reached`. `MpvObject` observes that and emits `endOfFile`
+  on the rising edge only, because mpv clears it again on the seek an advance performs.
+- **`pause` is a player property, not a per-file one.** keep-open pauses at the end of the
+  outgoing file, so the incoming one arrives paused unless told otherwise — which is why
+  the end-of-file handler calls `setPaused(false)` and a *manual* skip does not.
+
+Ordering is ours rather than `QCollator`'s: numeric mode there depends on ICU and on the
+runtime locale, and in this C.UTF-8 session it silently sorted `E10` ahead of `E2` with no
+warning. `Playlist`'s comparison walks runs of digits as numbers and everything else
+case-folded, so a folder of episodes cannot reorder itself because `LANG` changed.
 
 **Theming is a QML singleton** (`Theme.qml`, `QT_QML_SINGLETON_TYPE` set *before*
 `qt_add_qml_module` or it is registered as an ordinary type). Two schemes derived from one
@@ -762,9 +796,16 @@ valid UTF-8 SubRip; the light theme reaches both windows and survives a restart.
 `[ui]`, `[resume]` and `[subtitle]` groups in the settings file were read back to confirm
 what is stored rather than inferred from behaviour.
 
+**Playing on to the next file is in too**, with the folder as the queue and no playlist
+panel. Verified in a real window on three generated clips: ep1 → ep2 → ep10, in that order,
+advancing on its own and stopping on the last frame of the last one. That run also found
+the bug worth remembering — `pause` is a player property, so keep-open's pause at the end
+of one file arrived with the next one still paused.
+
 **Not verified: drag-and-drop.** There is no way to synthesise a drag from Windows into a
-WSLg surface with the current tooling, so it is compile-and-parse only. Everything else in
-milestone 3 was exercised in a real window.
+WSLg surface with the current tooling, so it is compile-and-parse only — including the
+multi-file drop that builds a queue, whose *effect* is covered in `tst_qmlpanel` by calling
+the same functions the drop handler calls.
 
 **First thing in a new session:** run `./tools/render-canary.sh`. It plays `testclip.mp4`
 in a window and says whether the picture is being painted, whether it is moving, and
@@ -778,12 +819,13 @@ one, so fullscreen works on the software path as well as on D3D12.
 
 Next, in this order:
 
-1. **Playlists, or at least "next file in the folder".** A drop of several files currently
-   plays the last one and ignores the rest, which is the most obviously missing behaviour
-   left in ordinary use.
-2. **Styling in the browser** — the raw ASS payload is already kept per cue (`rawText`),
+1. **Styling in the browser** — the raw ASS payload is already kept per cue (`rawText`),
    so italics and speaker colours could be rendered in the list rather than stripped.
-3. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. See the platform section.
+   The nearest thing to a feature the browser is missing.
+2. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. See the platform section.
+3. **A visible queue**, if the folder-as-a-queue behaviour turns out to want one. It
+   deliberately has no panel — see the architecture note — so this is a decision to
+   revisit rather than work that is pending.
 
 Loose ends worth folding into whatever touches them next:
 

@@ -60,6 +60,7 @@ public:
     Q_INVOKABLE void command(const QStringList &args);
     Q_INVOKABLE void setOption(const QString &name, const QString &value);
     Q_INVOKABLE void togglePause();
+    Q_INVOKABLE void setPaused(bool paused);
     Q_INVOKABLE void seek(double seconds);
     // Relative seeks are their own command rather than position+delta: mpv
     // clamps at the file's bounds, and time-pos can lag a keypress repeat.
@@ -105,6 +106,9 @@ signals:
     void mutedChanged();
     void speedChanged();
     void fileLoaded();
+    // Playback reached the end of the file. Emitted on the edge only, and the
+    // player uses it to move to the next file in the queue.
+    void endOfFile();
     // A file mpv could not play: unsupported container, missing file, broken
     // stream. Worth surfacing in the window -- otherwise the picture simply
     // stays black and the only explanation is in a log nobody is reading.
@@ -154,6 +158,7 @@ private:
     QString m_pendingFile;
     // CMP_HWDEC was set, so the automatic choice must keep its hands off.
     bool m_hwdecForced = false;
+    bool m_endOfFile = false;
 
     friend class MpvRenderer;
 };

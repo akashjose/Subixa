@@ -291,6 +291,12 @@ MpvObject::MpvObject(QQuickItem *parent) : QQuickFramebufferObject(parent)
     // whether decode left the CPU -- asking for hardware decoding and getting it
     // are different things, and mpv falls back silently.
     mpv_observe_property(m_mpv, 0, "hwdec-current", MPV_FORMAT_STRING);
+    // How the end of a file is noticed here. With keep-open=yes mpv does *not*
+    // unload the file and so never emits MPV_EVENT_END_FILE for a normal
+    // finish -- it pauses on the last frame and sets this instead. Watching for
+    // the event would mean waiting for something that by construction never
+    // arrives.
+    mpv_observe_property(m_mpv, 0, "eof-reached", MPV_FORMAT_FLAG);
 
     mpv_request_log_messages(m_mpv, "info");
     mpv_set_wakeup_callback(m_mpv, &MpvObject::onMpvWakeup, this);
@@ -404,6 +410,14 @@ void MpvObject::handleMpvEvent(void *ev)
         } else if (name == "speed" && prop->format == MPV_FORMAT_DOUBLE) {
             m_speed = *static_cast<double *>(prop->data);
             emit speedChanged();
+        } else if (name == "eof-reached" && prop->format == MPV_FORMAT_FLAG) {
+            const bool reached = *static_cast<int *>(prop->data) != 0;
+            // Only the transition into it: mpv sets this false again on the
+            // seek that a playlist advance performs, and a second edge would
+            // skip a file.
+            if (reached && !m_endOfFile)
+                emit endOfFile();
+            m_endOfFile = reached;
         } else if (name == "dwidth" && prop->format == MPV_FORMAT_INT64) {
             m_videoSize.setWidth(int(*static_cast<int64_t *>(prop->data)));
         } else if (name == "dheight" && prop->format == MPV_FORMAT_INT64) {
@@ -662,6 +676,17 @@ void MpvObject::setOption(const QString &name, const QString &value)
 void MpvObject::togglePause()
 {
     command({QStringLiteral("cycle"), QStringLiteral("pause")});
+}
+
+void MpvObject::setPaused(bool paused)
+{
+    if (!m_mpv)
+        return;
+    // Needed as well as togglePause() because pause is a *player* property, not
+    // a per-file one: keep-open pauses at the end of a file and the next one
+    // would start out paused, having been given no say in it.
+    int flag = paused ? 1 : 0;
+    mpv_set_property(m_mpv, "pause", MPV_FORMAT_FLAG, &flag);
 }
 
 void MpvObject::seek(double seconds)

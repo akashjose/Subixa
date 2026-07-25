@@ -11,7 +11,12 @@ ApplicationWindow {
     width: 1180
     height: 700
     visible: true
-    title: "custom media player"
+    // The file, not just the application: with a queue that advances on its own,
+    // a title bar that never changes is the player being coy about what it is
+    // playing.
+    title: root.currentFile === ""
+           ? "custom media player"
+           : root.fileLabel(root.currentFile) + " — custom media player"
     color: Theme.windowBackground
 
     // Everything the player should look the same way it did last time: window
@@ -138,6 +143,44 @@ ApplicationWindow {
     PlaybackHistory {
         id: history
         objectName: "playbackHistory"
+    }
+
+    // What plays after this file. Opening anything makes its folder the queue,
+    // so the next episode follows without anyone building a playlist; dropping
+    // several files makes exactly those the queue instead.
+    Playlist {
+        id: playlist
+        objectName: "playlist"
+    }
+
+    function playNext() {
+        var path = playlist.next()
+        if (path !== "")
+            root.openFile(path)
+    }
+
+    function playPrevious() {
+        var path = playlist.previous()
+        if (path !== "")
+            root.openFile(path)
+    }
+
+    Connections {
+        target: mpv
+        // Reaching the end moves to the next file, and stops at the last one --
+        // keep-open leaves the final frame up, which is a better ending than a
+        // black window. A file that failed to load never reports a duration, so
+        // this cannot turn a broken file into a run through the whole folder.
+        function onEndOfFile() {
+            if (mpv.duration <= 0 || !playlist.hasNext)
+                return
+            root.playNext()
+            // keep-open paused playback at the end of the outgoing file, and
+            // pause is a player property rather than a per-file one -- without
+            // this the next file arrives already paused, having never been
+            // asked. A manual skip is left alone: someone who paused meant it.
+            mpv.setPaused(false)
+        }
     }
 
     // View state the panel must not lose when it moves between windows, since
@@ -287,6 +330,16 @@ ApplicationWindow {
         root.rememberPosition()
         root.currentFile = path
         root.pendingResume = history.resumeFor(path)
+
+        // A file already in the queue keeps it -- that is a playlist advance, or
+        // someone reopening a file they dropped. Anything else starts a new
+        // queue from its own folder, which is what makes "next" work without
+        // ever building a playlist by hand.
+        if (playlist.contains(path))
+            playlist.setCurrentPath(path)
+        else
+            playlist.openFolderOf(path)
+
         mpv.loadFile(path)
         subs.load(path)
     }
@@ -452,8 +505,9 @@ ApplicationWindow {
     FileDialog {
         id: openDialog
         title: "Open media"
-        nameFilters: ["Media files (*.mkv *.mp4 *.avi *.mov *.webm *.m4v *.ts *.flac *.mp3 *.opus)",
-                      "All files (*)"]
+        // From the playlist, so the dialog and the folder scan cannot disagree
+        // about what counts as media.
+        nameFilters: playlist.dialogNameFilters()
         onAccepted: root.openFile(mpv.localFile(selectedFile))
     }
 
@@ -618,6 +672,18 @@ ApplicationWindow {
         onActivated: openDialog.open()
     }
     Shortcut {
+        // mpv's own bindings for this, and the only pair of keys near the
+        // transport that nothing else has claimed.
+        sequence: ">"
+        enabled: !root.typing
+        onActivated: root.playNext()
+    }
+    Shortcut {
+        sequence: "<"
+        enabled: !root.typing
+        onActivated: root.playPrevious()
+    }
+    Shortcut {
         sequence: "]"
         enabled: !root.typing
         onActivated: mpv.setSpeed(mpv.speed + 0.25)
@@ -689,9 +755,18 @@ ApplicationWindow {
         onDropped: (drop) => {
             if (!drop.hasUrls || drop.urls.length === 0)
                 return
-            // Extra files in one drop are ignored rather than queued: there is
-            // no playlist yet, and silently playing the last one would be worse.
-            root.openFile(mpv.localFile(drop.urls[0]))
+            if (drop.urls.length === 1) {
+                root.openFile(mpv.localFile(drop.urls[0]))
+            } else {
+                // Several files are a queue in the order they were dropped, not
+                // one file and a shrug. The order is kept rather than sorted:
+                // dropping them in a particular order means that order.
+                var paths = []
+                for (var i = 0; i < drop.urls.length; ++i)
+                    paths.push(mpv.localFile(drop.urls[i]))
+                playlist.setFiles(paths)
+                root.openFile(playlist.currentPath)
+            }
             drop.acceptProposedAction()
         }
     }
@@ -856,11 +931,52 @@ ApplicationWindow {
                     readonly property bool showMute: width > 560
                     readonly property bool showFullscreen: width > 520
                     readonly property bool showTracks: width > 440
+                    // Kept longest of the optional controls: with a queue
+                    // loaded these are the buttons being reached for.
+                    readonly property bool showQueue: width > 400 && playlist.count > 1
+
+                    Button {
+                        text: "‹"
+                        font.pixelSize: 13
+                        padding: 6
+                        flat: true
+                        visible: transport.showQueue
+                        enabled: playlist.hasPrevious
+                        onClicked: root.playPrevious()
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Previous file in the folder (<)"
+                    }
 
                     Button {
                         text: mpv.paused ? "Play" : "Pause"
                         enabled: mpv.duration > 0
                         onClicked: mpv.togglePause()
+                    }
+
+                    Button {
+                        text: "›"
+                        font.pixelSize: 13
+                        padding: 6
+                        flat: true
+                        visible: transport.showQueue
+                        enabled: playlist.hasNext
+                        onClicked: root.playNext()
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Next file in the folder (>)"
+                    }
+
+                    // Says there is a queue at all, and where in it you are.
+                    // Without it, auto-advancing to another file looks like the
+                    // player wandering off on its own.
+                    Label {
+                        visible: transport.showQueue
+                        color: Theme.textDim
+                        font.pixelSize: 11
+                        text: (playlist.currentIndex + 1) + "/" + playlist.count
+                        ToolTip.visible: queueHover.hovered
+                        ToolTip.text: root.fileLabel(root.currentFile)
+
+                        HoverHandler { id: queueHover }
                     }
 
                     // One label rather than two flanking the slider: the transport
