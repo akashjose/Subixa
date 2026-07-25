@@ -6,6 +6,7 @@
 #include <mpv/render_gl.h>
 
 #include <QtCore/QMetaObject>
+#include <QtCore/QUrl>
 #include <QtCore/QVarLengthArray>
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QOpenGLFunctions>
@@ -191,6 +192,9 @@ MpvObject::MpvObject(QQuickItem *parent) : QQuickFramebufferObject(parent)
     // MPV_FORMAT_INT64 simply fails on those and the change would be missed.
     mpv_observe_property(m_mpv, 0, "sid", MPV_FORMAT_STRING);
     mpv_observe_property(m_mpv, 0, "aid", MPV_FORMAT_STRING);
+    mpv_observe_property(m_mpv, 0, "volume", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 0, "mute", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, 0, "speed", MPV_FORMAT_DOUBLE);
 
     mpv_request_log_messages(m_mpv, "info");
     mpv_set_wakeup_callback(m_mpv, &MpvObject::onMpvWakeup, this);
@@ -285,6 +289,15 @@ void MpvObject::handleMpvEvent(void *ev)
         } else if (name == "pause" && prop->format == MPV_FORMAT_FLAG) {
             m_paused = *static_cast<int *>(prop->data) != 0;
             emit pausedChanged();
+        } else if (name == "volume" && prop->format == MPV_FORMAT_DOUBLE) {
+            m_volume = *static_cast<double *>(prop->data);
+            emit volumeChanged();
+        } else if (name == "mute" && prop->format == MPV_FORMAT_FLAG) {
+            m_muted = *static_cast<int *>(prop->data) != 0;
+            emit mutedChanged();
+        } else if (name == "speed" && prop->format == MPV_FORMAT_DOUBLE) {
+            m_speed = *static_cast<double *>(prop->data);
+            emit speedChanged();
         }
         break;
     }
@@ -506,4 +519,40 @@ void MpvObject::seek(double seconds)
 {
     command({QStringLiteral("seek"), QString::number(seconds),
              QStringLiteral("absolute")});
+}
+
+void MpvObject::seekRelative(double seconds)
+{
+    command({QStringLiteral("seek"), QString::number(seconds),
+             QStringLiteral("relative")});
+}
+
+void MpvObject::setVolume(double volume)
+{
+    if (!m_mpv)
+        return;
+    // mpv would accept more, but nothing here offers amplification and a
+    // keyboard repeat should stop at the ends rather than wrap or error.
+    double clamped = qBound(0.0, volume, 100.0);
+    mpv_set_property(m_mpv, "volume", MPV_FORMAT_DOUBLE, &clamped);
+}
+
+void MpvObject::toggleMute()
+{
+    command({QStringLiteral("cycle"), QStringLiteral("mute")});
+}
+
+void MpvObject::setSpeed(double speed)
+{
+    if (!m_mpv)
+        return;
+    // Below ~0.25 audio filters start dropping out and above 4 it is unusable;
+    // both ends are mpv's practical limits rather than hard ones.
+    double clamped = qBound(0.25, speed, 4.0);
+    mpv_set_property(m_mpv, "speed", MPV_FORMAT_DOUBLE, &clamped);
+}
+
+QString MpvObject::localFile(const QUrl &url) const
+{
+    return url.isLocalFile() ? url.toLocalFile() : url.toString();
 }

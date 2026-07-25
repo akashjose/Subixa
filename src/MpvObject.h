@@ -32,6 +32,10 @@ class MpvObject : public QQuickFramebufferObject
     Q_PROPERTY(int subtitleTrack READ subtitleTrack NOTIFY subtitleTrackChanged)
     Q_PROPERTY(int audioTrack READ audioTrack NOTIFY audioTrackChanged)
 
+    Q_PROPERTY(double volume READ volume NOTIFY volumeChanged)
+    Q_PROPERTY(bool muted READ muted NOTIFY mutedChanged)
+    Q_PROPERTY(double speed READ speed NOTIFY speedChanged)
+
 public:
     explicit MpvObject(QQuickItem *parent = nullptr);
     ~MpvObject() override;
@@ -44,12 +48,26 @@ public:
     QVariantList tracks() const { return m_tracks; }
     int subtitleTrack() const { return m_subtitleTrack; }
     int audioTrack() const { return m_audioTrack; }
+    double volume() const { return m_volume; }
+    bool muted() const { return m_muted; }
+    double speed() const { return m_speed; }
 
     Q_INVOKABLE void loadFile(const QString &file);
     Q_INVOKABLE void command(const QStringList &args);
     Q_INVOKABLE void setOption(const QString &name, const QString &value);
     Q_INVOKABLE void togglePause();
     Q_INVOKABLE void seek(double seconds);
+    // Relative seeks are their own command rather than position+delta: mpv
+    // clamps at the file's bounds, and time-pos can lag a keypress repeat.
+    Q_INVOKABLE void seekRelative(double seconds);
+
+    Q_INVOKABLE void setVolume(double volume);
+    Q_INVOKABLE void toggleMute();
+    Q_INVOKABLE void setSpeed(double speed);
+
+    // QUrl -> local path, for a drop or a file dialog. Kept here so QML never
+    // has to take a URL apart by hand.
+    Q_INVOKABLE QString localFile(const QUrl &url) const;
 
     // -1 turns the stream off. Named rather than exposed as a WRITE on the
     // property so QML cannot bind them into a loop with mpv's own notifications.
@@ -79,6 +97,9 @@ signals:
     void tracksChanged();
     void subtitleTrackChanged();
     void audioTrackChanged();
+    void volumeChanged();
+    void mutedChanged();
+    void speedChanged();
     void fileLoaded();
     void logMessage(const QString &text);
 
@@ -105,6 +126,9 @@ private:
     QVariantList m_tracks;
     int m_subtitleTrack = -1;
     int m_audioTrack = -1;
+    double m_volume = 100.0;
+    bool m_muted = false;
+    double m_speed = 1.0;
 
     // The render context only exists once the item has been rendered at least
     // once. Loading before that makes mpv's VO fail with "No render context

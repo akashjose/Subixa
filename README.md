@@ -58,10 +58,17 @@ Exercised on a real 3 GB AV1 film carrying **65 subtitle tracks and 93 350 cues*
 matching sidecar `.srt` picked up as a 66th: tabs per language, search across the track,
 and follow landing on the correct cue after arbitrary seeks.
 
-Player controls are still minimal: playback comes from the file passed as `argv[1]`, and
-there is no open dialog, track switching, volume, or fullscreen yet. The panel is also
-independent of what mpv renders — selecting a tab changes what you *read*, not the
-subtitles burned over the video. Wiring those together is the next task.
+The panel and the picture now agree: selecting a tab tells mpv to render that track, and
+choosing a track from the transport menu moves the panel to match. Files arrive by
+`argv[1]`, a file dialog, or drag-and-drop, with keyboard shortcuts, fullscreen, volume and
+playback speed alongside.
+
+One known defect, and it is in the renderer rather than any of that: under WSL's software
+rasterizer a video pane above roughly 2.9 megapixels renders black or with a fine mesh of
+unwritten pixels, so **fullscreen and very large windows currently show a corrupt picture**.
+`glFinish()` before Qt samples the framebuffer fixed this at ordinary window sizes and
+stops short at large ones. The fix is to cap the framebuffer to the video's native size and
+let Qt scale — see `CLAUDE.md` trap 10. A real GPU is unaffected.
 
 ## Roadmap
 
@@ -92,14 +99,19 @@ The model shares each track's line buffer instead of copying it, so switching ta
 refcount bump — the 200k-cue fixture browses and follows without the ~600 ms GUI stall the
 milestone 1 snapshot cost.
 
-### Milestone 3 — Player usability (next)
+### Milestone 3 — Player usability (in progress)
 
-- Audio/subtitle track switching wired to mpv — first, since it is what makes the panel
-  and the picture agree
-- Fullscreen + keyboard shortcuts
-- File open dialog + drag-and-drop
-- Volume, playback speed
+- ✅ Audio/subtitle track switching wired to mpv — the panel and the picture agree, in both
+  directions. Tracks are matched by ffmpeg stream index through mpv's `ff-index`, since
+  neither side's numbering follows from the other and language strings collide (the test
+  film carries two English tracks)
+- ✅ Fullscreen + keyboard shortcuts — works, but see the renderer defect under Status
+- ✅ File open dialog + drag-and-drop
+- ✅ Volume, playback speed
 - Resume position per file
+
+Ahead of the last item: **cap the video framebuffer to the video's native size.** Fullscreen
+turned a known CPU cost into a correctness bug, and capping fixes both.
 
 ### Milestone 4 — Polish
 

@@ -314,8 +314,37 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     real GPU is not stalled every frame for a bug it does not have. `CMP_NO_SYNC=1`
     disables the call, which is how to A/B it.
 
-    **Fullscreen depends on this being right** — fullscreen is just a very wide window,
-    so it would have hit this immediately.
+    **`glFinish()` is necessary but NOT sufficient — the fix is incomplete.** Adding
+    fullscreen exposed this immediately, and it is not a fullscreen bug: it tracks FBO
+    size, in a window as much as out of one. Measured on `testclip.mp4`, software
+    rasterizer, sync on unless stated:
+
+    | video pane | mode | result |
+    |---|---|---|
+    | 2216x1290 | windowed | clean |
+    | 2220x1345 | fullscreen | fine mesh of unwritten pixels |
+    | 2560x1345 | windowed | **fully black** |
+    | 2560x1345 | fullscreen | fine mesh |
+    | 2560x1345 | fullscreen, `CMP_NO_SYNC=1` | fully black |
+
+    So `glFinish()` still buys a great deal — without it a large pane is black rather
+    than meshed — but somewhere above roughly 2.9 megapixels of FBO it stops being
+    enough, and the symptom becomes exactly what `glFlush()` alone used to produce.
+    Note how close the clean and broken cases are (2216x1290 versus 2220x1345): this is
+    a threshold in total FBO area, not a width cliff, so do not trust a single
+    resolution to tell you the path is healthy.
+
+    **The intended fix is to cap the FBO to the video's native size** and let Qt scale
+    the result, which is already listed under "Next up" for a different reason — it also
+    cuts the ~1000% CPU that software-rendering a 2560 px pane costs. Capping keeps the
+    FBO at 1280x720 (or 1920x800 for the film), far below the threshold, so this failure
+    mode stops being reachable at all rather than being pushed slightly further out. The
+    price is a softer picture when the window exceeds the video, which is the normal
+    trade every player makes.
+
+    Until that lands, **fullscreen and very large windows show a corrupt picture under
+    WSL's software rasterizer**. A real GPU is unaffected: this whole family of bugs is
+    llvmpipe-specific and the workarounds disable themselves elsewhere.
 
 ### Browser UI
 
@@ -410,10 +439,13 @@ Loose ends worth folding into whatever touches them next:
   five lines. See the platform section.
 - **Search is a linear scan per keystroke**, coalesced by a 150 ms timer in QML. Fine at
   the 200k-cue fixture; if it ever is not, the fix is an index, not a longer timer.
-- **The video pane is capped by nothing.** With trap 10 fixed this is no longer a
-  correctness issue, but software rendering still costs ~1000% CPU at 2560 px. Capping the
-  FBO to the video's native size and letting Qt scale would cut that ~6x, at the price of
-  a softer image when the window exceeds the video.
+- **The video pane is capped by nothing, and that is now a correctness bug.** It was
+  filed here as a CPU concern — software rendering costs ~1000% CPU at 2560 px, and
+  capping the FBO to the video's native size would cut that ~6x for a softer upscale.
+  Adding fullscreen showed it is more than that: above roughly 2.9 MP of FBO the picture
+  goes black or meshed even with `glFinish()` in place (trap 10, second half). Capping is
+  therefore the next renderer task, not an optimisation to get to eventually — it removes
+  the failure mode instead of moving it. **This is the top priority in the renderer.**
 
 ## Related context
 

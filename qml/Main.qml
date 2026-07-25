@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
+import QtQuick.Window
 import CustomMediaPlayer
 
 ApplicationWindow {
@@ -32,6 +34,34 @@ ApplicationWindow {
     // View row of the cue playing right now, or -1 when playback is before the
     // first cue or that cue is filtered out.
     property int currentRow: -1
+
+    readonly property bool fullscreen: visibility === Window.FullScreen
+    property bool panelVisible: true
+    // Fullscreen means "just the picture", so the panel goes away -- but Tab can
+    // bring it back without leaving fullscreen, which is the point of it being a
+    // property rather than a binding on `fullscreen`.
+    onFullscreenChanged: panelVisible = !fullscreen
+
+    // Transport and panel stay put in a window; fullscreen hides them until the
+    // mouse moves, then gives them a few seconds.
+    readonly property bool showChrome: !fullscreen || chromeTimer.running
+
+    Timer {
+        id: chromeTimer
+        interval: 2500
+    }
+
+    // One way in for every source of a file: argv[1], the dialog, and a drop.
+    function openFile(path) {
+        if (path === "")
+            return
+        mpv.loadFile(path)
+        subs.load(path)
+    }
+
+    function toggleFullscreen() {
+        visibility = root.fullscreen ? Window.Windowed : Window.FullScreen
+    }
 
     // Rows of the selected track, filtered by the search box. Switching tracks
     // just repoints the proxy at another model -- no rows are copied, which is
@@ -141,6 +171,115 @@ ApplicationWindow {
         }
     }
 
+    // ---- keyboard ------------------------------------------------------
+    // Every shortcut is gated on the search box not having focus: these are
+    // plain letters and arrows, and a TextField sees key events first only for
+    // keys it claims. Space and Left/Right it does claim; F and M it does not,
+    // so without the guard typing "film" in the search box would toggle
+    // fullscreen and mute.
+    readonly property bool typing: searchField.activeFocus
+
+    FileDialog {
+        id: openDialog
+        title: "Open media"
+        nameFilters: ["Media files (*.mkv *.mp4 *.avi *.mov *.webm *.m4v *.ts *.flac *.mp3 *.opus)",
+                      "All files (*)"]
+        onAccepted: root.openFile(mpv.localFile(selectedFile))
+    }
+
+    Shortcut {
+        sequences: ["Space", "K"]
+        enabled: !root.typing
+        onActivated: mpv.togglePause()
+    }
+    Shortcut {
+        sequence: "Right"
+        enabled: !root.typing
+        onActivated: mpv.seekRelative(5)
+    }
+    Shortcut {
+        sequence: "Left"
+        enabled: !root.typing
+        onActivated: mpv.seekRelative(-5)
+    }
+    Shortcut {
+        sequence: "Shift+Right"
+        enabled: !root.typing
+        onActivated: mpv.seekRelative(1)
+    }
+    Shortcut {
+        sequence: "Shift+Left"
+        enabled: !root.typing
+        onActivated: mpv.seekRelative(-1)
+    }
+    Shortcut {
+        sequence: "L"
+        enabled: !root.typing
+        onActivated: mpv.seekRelative(10)
+    }
+    Shortcut {
+        sequence: "J"
+        enabled: !root.typing
+        onActivated: mpv.seekRelative(-10)
+    }
+    Shortcut {
+        sequence: "Up"
+        enabled: !root.typing
+        onActivated: mpv.setVolume(mpv.volume + 5)
+    }
+    Shortcut {
+        sequence: "Down"
+        enabled: !root.typing
+        onActivated: mpv.setVolume(mpv.volume - 5)
+    }
+    Shortcut {
+        sequence: "M"
+        enabled: !root.typing
+        onActivated: mpv.toggleMute()
+    }
+    Shortcut {
+        sequences: ["F", "F11"]
+        enabled: !root.typing
+        onActivated: root.toggleFullscreen()
+    }
+    Shortcut {
+        // Only leaves fullscreen -- Escape in the search box clears it instead,
+        // which is handled on the field itself.
+        sequence: "Escape"
+        enabled: root.fullscreen && !root.typing
+        onActivated: root.visibility = Window.Windowed
+    }
+    Shortcut {
+        sequence: "Ctrl+O"
+        onActivated: openDialog.open()
+    }
+    Shortcut {
+        sequence: "]"
+        enabled: !root.typing
+        onActivated: mpv.setSpeed(mpv.speed + 0.25)
+    }
+    Shortcut {
+        sequence: "["
+        enabled: !root.typing
+        onActivated: mpv.setSpeed(mpv.speed - 0.25)
+    }
+    Shortcut {
+        sequence: "Backspace"
+        enabled: !root.typing
+        onActivated: mpv.setSpeed(1.0)
+    }
+    Shortcut {
+        // Tab rather than a letter: the panel is worth toggling while fullscreen
+        // and every letter near it is already spoken for.
+        sequence: "Tab"
+        enabled: !root.typing
+        onActivated: root.panelVisible = !root.panelVisible
+    }
+    Shortcut {
+        sequence: "Ctrl+F"
+        onActivated: searchField.forceActiveFocus()
+    }
+
     function fmt(t) {
         if (!isFinite(t) || t < 0)
             return "--:--"
@@ -150,6 +289,25 @@ ApplicationWindow {
         var mm = (m < 10 && h > 0 ? "0" : "") + m
         var ss = (s < 10 ? "0" : "") + s
         return (h > 0 ? h + ":" : "") + mm + ":" + ss
+    }
+
+    // Drag and drop, over the whole window rather than just the video: dropping
+    // on the subtitle panel plainly means "open this" too.
+    DropArea {
+        anchors.fill: parent
+        onEntered: (drag) => {
+            // Only take it if it is actually a file. Refusing here is what stops
+            // the cursor promising a drop that would do nothing.
+            drag.accepted = drag.hasUrls && drag.urls.length > 0
+        }
+        onDropped: (drop) => {
+            if (!drop.hasUrls || drop.urls.length === 0)
+                return
+            // Extra files in one drop are ignored rather than queued: there is
+            // no playlist yet, and silently playing the last one would be worse.
+            root.openFile(mpv.localFile(drop.urls[0]))
+            drop.acceptProposedAction()
+        }
     }
 
     RowLayout {
@@ -172,12 +330,22 @@ ApplicationWindow {
                     anchors.fill: parent
 
                     Component.onCompleted: {
-                        if (initialFile !== "") {
-                            mpv.loadFile(initialFile)
-                            subs.load(initialFile)
-                        }
+                        if (initialFile !== "")
+                            root.openFile(initialFile)
                     }
                     onLogMessage: (text) => console.log("[mpv]", text)
+                }
+
+                // Double-click for fullscreen, and any movement wakes the chrome
+                // back up while fullscreen. Deliberately no click-to-pause: the
+                // window has to be clicked to focus it under WSLg, and pausing
+                // on that is infuriating.
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onPositionChanged: chromeTimer.restart()
+                    onDoubleClicked: root.toggleFullscreen()
+                    cursorShape: root.showChrome ? Qt.ArrowCursor : Qt.BlankCursor
                 }
 
                 // Proves QML composites over the video surface -- the whole
@@ -195,7 +363,7 @@ ApplicationWindow {
                         id: hint
                         anchors.centerIn: parent
                         color: "#c8c8d4"
-                        text: "no media loaded\npass a file path as argv[1]"
+                        text: "no media loaded\ndrop a file here, or press Ctrl+O"
                         horizontalAlignment: Text.AlignHCenter
                     }
                 }
@@ -205,12 +373,13 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 implicitHeight: 52
                 color: "#16161d"
+                visible: root.showChrome
 
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 12
                     anchors.rightMargin: 12
-                    spacing: 12
+                    spacing: 8
 
                     Button {
                         text: mpv.paused ? "Play" : "Pause"
@@ -218,24 +387,28 @@ ApplicationWindow {
                         onClicked: mpv.togglePause()
                     }
 
+                    // One label rather than two flanking the slider: the transport
+                    // is crowded enough that the seek bar was being squeezed to
+                    // its minimum in a default-sized window.
                     Label {
                         color: "#9a9aa8"
-                        text: root.fmt(mpv.position)
+                        font.pixelSize: 11
+                        text: root.fmt(mpv.position) + " / " + root.fmt(mpv.duration)
                     }
 
                     Slider {
                         id: seekBar
                         Layout.fillWidth: true
+                        // The transport carries enough fixed-width controls that
+                        // fillWidth alone leaves the seek bar unusably narrow in
+                        // a small window; it is the one control that must stay
+                        // draggable, so the rest can overflow instead.
+                        Layout.minimumWidth: 150
                         from: 0
                         to: Math.max(mpv.duration, 0.1)
                         enabled: mpv.duration > 0
                         value: pressed ? value : mpv.position
                         onMoved: mpv.seek(value)
-                    }
-
-                    Label {
-                        color: "#9a9aa8"
-                        text: root.fmt(mpv.duration)
                     }
 
                     // mpv's own track selection. The panel's tabs cover browsable
@@ -274,6 +447,63 @@ ApplicationWindow {
                         }
                     }
 
+                    // Words, not glyphs: WSL images ship no emoji font, so a
+                    // speaker icon renders as a tofu box. Also doubles as the
+                    // mute readout -- the slider alone cannot show that 60% is
+                    // muted.
+                    Button {
+                        text: mpv.muted ? "Muted" : "Vol"
+                        font.pixelSize: 11
+                        padding: 6
+                        flat: true
+                        onClicked: mpv.toggleMute()
+                        ToolTip.visible: hovered
+                        ToolTip.text: mpv.muted ? "Muted — click or M to unmute"
+                                                : Math.round(mpv.volume) + "% (M to mute)"
+                    }
+
+                    Slider {
+                        id: volumeSlider
+                        Layout.preferredWidth: 80
+                        from: 0
+                        to: 100
+                        // Follows mpv rather than owning the value, so the
+                        // keyboard and the slider cannot disagree.
+                        value: mpv.muted ? 0 : mpv.volume
+                        onMoved: {
+                            if (mpv.muted)
+                                mpv.toggleMute()
+                            mpv.setVolume(value)
+                        }
+                    }
+
+                    Button {
+                        text: mpv.speed.toFixed(2).replace(/0$/, "") + "×"
+                        font.pixelSize: 11
+                        padding: 6
+                        onClicked: speedMenu.popup(0, -speedMenu.height)
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Playback speed ([ and ], Backspace resets)"
+
+                        Menu {
+                            id: speedMenu
+
+                            Repeater {
+                                model: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+                                MenuItem {
+                                    required property var modelData
+                                    text: modelData + "×"
+                                    checkable: true
+                                    // Float comparison with a tolerance: [ and ]
+                                    // step by 0.25 and land on these values but
+                                    // not necessarily on the same bit pattern.
+                                    checked: Math.abs(mpv.speed - modelData) < 0.01
+                                    onTriggered: mpv.setSpeed(modelData)
+                                }
+                            }
+                        }
+                    }
+
                     Button {
                         text: "Subs"
                         font.pixelSize: 11
@@ -305,6 +535,17 @@ ApplicationWindow {
                             }
                         }
                     }
+
+                    Button {
+                        text: root.fullscreen ? "Exit" : "Full"
+                        font.pixelSize: 11
+                        padding: 6
+                        flat: true
+                        onClicked: root.toggleFullscreen()
+                        ToolTip.visible: hovered
+                        ToolTip.text: root.fullscreen ? "Leave fullscreen (Esc)"
+                                                      : "Fullscreen (F)"
+                    }
                 }
             }
         }
@@ -316,6 +557,7 @@ ApplicationWindow {
             Layout.preferredWidth: 340
             Layout.fillHeight: true
             color: "#12121a"
+            visible: root.panelVisible
 
             ColumnLayout {
                 anchors.fill: parent
