@@ -10,8 +10,11 @@ ApplicationWindow {
     id: root
     // Wide enough that the video keeps a usable pane with the browser docked at
     // its default 360, which is the arrangement this player is for.
-    width: 1980
-    height: 1200
+    readonly property int defaultWindowWidth: 1980
+    readonly property int defaultWindowHeight: 1200
+    readonly property int defaultPanelWidth: 360
+    width: root.defaultWindowWidth
+    height: root.defaultWindowHeight
     minimumWidth: 680
     minimumHeight: 420
     visible: true
@@ -65,6 +68,10 @@ ApplicationWindow {
 
         property int windowWidth: 1980
         property int windowHeight: 1200
+        // Off, and a stored geometry stops shadowing the default -- which is the
+        // confusing half of remembering it: raising the default does nothing for
+        // anyone who has ever moved the window.
+        property bool rememberGeometry: true
         property int windowX: -1
         property int windowY: -1
         property bool windowMaximized: false
@@ -164,7 +171,7 @@ ApplicationWindow {
         root.height = prefs.windowHeight
         // -1 means "never saved": let the window manager place it rather than
         // dropping it at the top-left corner.
-        if (prefs.windowX >= 0 && prefs.windowY >= 0) {
+        if (prefs.rememberGeometry && prefs.windowX >= 0 && prefs.windowY >= 0) {
             root.x = prefs.windowX
             root.y = prefs.windowY
         }
@@ -186,10 +193,24 @@ ApplicationWindow {
         }
     }
 
+    function resetWindowSize() {
+        root.visibility = Window.Windowed
+        root.width = root.defaultWindowWidth
+        root.height = root.defaultWindowHeight
+        dockedPanel.SplitView.preferredWidth = root.defaultPanelWidth
+        prefs.windowWidth = root.defaultWindowWidth
+        prefs.windowHeight = root.defaultWindowHeight
+        prefs.panelWidth = root.defaultPanelWidth
+        // -1 is "never saved", so the window manager places it rather than the
+        // stored corner.
+        prefs.windowX = -1
+        prefs.windowY = -1
+    }
+
     function savePreferences() {
         // Only a windowed geometry is worth keeping: saving while maximised or
         // fullscreen would store the screen and reopen edge to edge forever.
-        if (root.visibility === Window.Windowed) {
+        if (root.visibility === Window.Windowed && prefs.rememberGeometry) {
             prefs.windowWidth = root.width
             prefs.windowHeight = root.height
             prefs.windowX = root.x
@@ -969,6 +990,7 @@ ApplicationWindow {
         id: settingsLoader
         active: false
         sourceComponent: SettingsWindow {
+            player: root
             mpv: root.mpv
             prefs: root.prefsStore
             subStyle: root.subStyleStore

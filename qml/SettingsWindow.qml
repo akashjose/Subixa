@@ -19,6 +19,7 @@ import CustomMediaPlayer
 Window {
     id: win
 
+    required property var player
     required property var mpv
     required property var prefs
     required property var subStyle
@@ -741,6 +742,34 @@ Window {
                         AppSwitch {
                             checked: Theme.reducedMotion
                             onToggled: Theme.reducedMotion = checked
+                        }
+                    }
+
+                    FormRow {
+                        label: "Window size"
+                        help: "The size a new window opens at."
+                        readout: win.player.width + "×" + win.player.height
+                        RowLayout {
+                            spacing: Theme.space.sm
+                            TextButton {
+                                text: "Reset to " + win.player.defaultWindowWidth
+                                      + "×" + win.player.defaultWindowHeight
+                                variant: "tonal"
+                                onClicked: win.player.resetWindowSize()
+                            }
+                        }
+                    }
+
+                    FormRow {
+                        label: "Remember size and position"
+                        // Worth saying plainly: this is why raising the default
+                        // does nothing for anyone who has already moved the
+                        // window, which is confusing enough to be worth a line.
+                        help: "When off, every launch uses the default size "
+                              + "instead of wherever you last left the window."
+                        AppSwitch {
+                            checked: win.prefs.rememberGeometry
+                            onToggled: win.prefs.rememberGeometry = checked
                         }
                     }
 
