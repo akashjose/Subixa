@@ -5,3 +5,10 @@ compile_commands.json
 *.autosave
 .qtc_clangd/
 CMakeLists.txt.user*
+
+# Generated subtitle fixtures -- rebuild with testdata/make-fixtures.sh.
+# Only the small .srt/.ass sources are tracked.
+testdata/*.mkv
+testdata/*.mp4
+testdata/sidecar.*
+testdata/huge.en.ass

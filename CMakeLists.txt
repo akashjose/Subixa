@@ -11,12 +11,25 @@ find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 OpenG
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
 
+# Subtitle text is demuxed and decoded directly rather than read from mpv: mpv
+# only exposes the line currently on screen, which cannot build a browsable list.
+pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
+    libavformat
+    libavcodec
+    libavutil
+)
+
 qt_standard_project_setup(REQUIRES 6.5)
 
 qt_add_executable(custom_media_player
     src/main.cpp
     src/MpvObject.cpp
     src/MpvObject.h
+    src/SubtitleTypes.h
+    src/SubtitleExtractor.cpp
+    src/SubtitleExtractor.h
+    src/SubtitleManager.cpp
+    src/SubtitleManager.h
 )
 
 qt_add_qml_module(custom_media_player
@@ -40,4 +53,5 @@ target_link_libraries(custom_media_player PRIVATE
     Qt6::QuickControls2
     Qt6::OpenGL
     PkgConfig::MPV
+    PkgConfig::FFMPEG
 )

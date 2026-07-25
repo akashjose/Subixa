@@ -45,14 +45,16 @@ demuxed and decoded separately with libavformat/libavcodec.
 
 ## Status
 
-Foundation complete and verified. Video renders inside the window via the render API,
-QML composites over it, transport controls track playback.
+Video renders inside the window via the render API, QML composites over it, transport
+controls track playback.
 
-The subtitle panel is a **static placeholder** — no parsing yet.
+Subtitle extraction works: embedded and sidecar tracks are demuxed, decoded to timestamped
+rows, and listed in the docked panel. Clicking a row seeks to it. Search, per-track tabs
+and auto-follow are still to come.
 
 ## Roadmap
 
-### Milestone 1 — Subtitle extraction (next)
+### Milestone 1 — Subtitle extraction ✅
 
 - Enumerate `AVMEDIA_TYPE_SUBTITLE` streams with libavformat; expose track list + language
   metadata
@@ -64,7 +66,10 @@ The subtitle panel is a **static placeholder** — no parsing yet.
 - Load sidecar files (`.srt`/`.ass` next to the video) alongside embedded tracks
 - Run parsing off the GUI thread; large ASS tracks are slow enough to stutter the UI
 
-### Milestone 2 — Browser UI
+Measured on the fixtures: 200 000 cues (27 MB ASS) parse in ~1.2 s on the worker thread,
+with playback ticking normally throughout.
+
+### Milestone 2 — Browser UI (next)
 
 - `QAbstractListModel` of subtitle lines, one model per track, tabs across tracks
 - `QSortFilterProxyModel` for incremental search
@@ -119,7 +124,15 @@ Running under WSLg means software video decode. That is expected and fine for
 development; it is not a bug to chase.
 
 `testclip.mp4` is a generated 15-second clip with a burned-in timecode, so a screenshot is
-enough to confirm the rendered frame matches the reported playback position.
+enough to confirm the rendered frame matches the reported playback position. It carries no
+subtitles; `testdata/make-fixtures.sh` builds files that do — embedded SRT/ASS/`mov_text`
+tracks, sidecar files, and containers with shifted timelines. Only the small `.srt`/`.ass`
+sources are in git; run the script to rebuild the rest.
+
+```bash
+./testdata/make-fixtures.sh          # normal fixtures
+./testdata/make-fixtures.sh --big    # plus a 200k-cue stress file
+```
 
 See `CLAUDE.md` for build gotchas that have already cost time — particularly `vo=libmpv`
 and render-context ordering.

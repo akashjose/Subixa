@@ -1,0 +1,11 @@
+1
+00:00:01,000 --> 00:00:04,000
+Première ligne en français.
+
+2
+00:00:05,000 --> 00:00:08,000
+Deuxième réplique, accentuée : déjà vu.
+
+3
+00:00:09,000 --> 00:00:13,000
+Dernière ligne.

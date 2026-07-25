@@ -11,6 +11,28 @@ ApplicationWindow {
     title: "custom media player"
     color: "#0e0e12"
 
+    // Parsed subtitle tracks. Independent of mpv by necessity -- see
+    // SubtitleExtractor.
+    SubtitleManager {
+        id: subs
+        onLoaded: {
+            // Land on the first track that actually has text.
+            root.currentTrack = -1
+            for (var i = 0; i < subs.tracks.length; ++i) {
+                if (subs.tracks[i].browsable) {
+                    root.currentTrack = subs.tracks[i].id
+                    break
+                }
+            }
+        }
+    }
+
+    property int currentTrack: -1
+    // Snapshot of the selected track's rows, taken on the GUI thread. Fine at
+    // feature-film scale (~110 ms for 40k cues) but it does stall: 200k cues cost
+    // ~600 ms. Milestone 2's QAbstractListModel removes the copy entirely.
+    property var currentLines: currentTrack >= 0 ? subs.lines(currentTrack) : []
+
     function fmt(t) {
         if (!isFinite(t) || t < 0)
             return "--:--"
@@ -42,8 +64,10 @@ ApplicationWindow {
                     anchors.fill: parent
 
                     Component.onCompleted: {
-                        if (initialFile !== "")
+                        if (initialFile !== "") {
                             mpv.loadFile(initialFile)
+                            subs.load(initialFile)
+                        }
                     }
                     onLogMessage: (text) => console.log("[mpv]", text)
                 }
@@ -109,7 +133,10 @@ ApplicationWindow {
             }
         }
 
-        // ---- docked subtitle browser (shell only) ----------------------
+        // ---- docked subtitle browser -----------------------------------
+        // Milestone 1 readout: real parsed tracks and rows, but still driven by
+        // plain QVariantList snapshots. Search, tabs and auto-follow arrive with
+        // the QAbstractListModel in milestone 2.
         Rectangle {
             Layout.preferredWidth: 340
             Layout.fillHeight: true
@@ -123,13 +150,53 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     implicitHeight: 40
                     color: "#1b1b25"
-                    Label {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
+
+                    RowLayout {
+                        anchors.fill: parent
                         anchors.leftMargin: 12
-                        color: "#d0d0dc"
-                        text: "Subtitles"
-                        font.bold: true
+                        anchors.rightMargin: 12
+
+                        Label {
+                            color: "#d0d0dc"
+                            text: "Subtitles"
+                            font.bold: true
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Label {
+                            color: subs.busy ? "#c8a45c" : "#6a6a7a"
+                            font.pixelSize: 11
+                            text: subs.status
+                        }
+                    }
+                }
+
+                // One button per track. Becomes a TabBar once tracks carry their
+                // own models.
+                Flow {
+                    Layout.fillWidth: true
+                    Layout.margins: 8
+                    spacing: 6
+                    visible: subs.tracks.length > 0
+
+                    Repeater {
+                        model: subs.tracks
+
+                        Button {
+                            required property var modelData
+                            text: modelData.label + " (" + modelData.lineCount + ")"
+                            enabled: modelData.browsable
+                            checkable: true
+                            checked: root.currentTrack === modelData.id
+                            font.pixelSize: 11
+                            padding: 4
+                            ToolTip.visible: hovered
+                            ToolTip.text: modelData.codec + " · " + modelData.kind
+                                          + (modelData.sidecar ? " · sidecar " + modelData.source : "")
+                                          + (modelData.note !== "" ? "\n" + modelData.note : "")
+                            onClicked: root.currentTrack = modelData.id
+                        }
                     }
                 }
 
@@ -140,17 +207,53 @@ ApplicationWindow {
                     enabled: false
                 }
 
-                Label {
+                ListView {
+                    id: lineList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.margins: 12
-                    color: "#6a6a7a"
-                    wrapMode: Text.WordWrap
-                    verticalAlignment: Text.AlignTop
-                    text: "Not wired up yet.\n\nSubtitle text does not come from mpv — it only "
-                          + "exposes the currently displayed line. Tracks get parsed separately "
-                          + "with libavformat/libavcodec, then listed here as timestamped rows "
-                          + "with click-to-seek and auto-follow."
+                    Layout.margins: 8
+                    clip: true
+                    spacing: 2
+                    model: root.currentLines
+
+                    ScrollBar.vertical: ScrollBar {}
+
+                    delegate: ItemDelegate {
+                        required property var modelData
+                        width: lineList.width
+                        // Clicking a row seeks there. testclip has a burned-in
+                        // timecode, so the frame that lands is a direct check on
+                        // the parsed timestamp.
+                        onClicked: mpv.seek(modelData.startMs / 1000)
+
+                        contentItem: ColumnLayout {
+                            spacing: 1
+                            Label {
+                                color: "#6f6f85"
+                                font.pixelSize: 10
+                                font.family: "monospace"
+                                text: modelData.start
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                color: "#d0d0dc"
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                                text: modelData.text
+                            }
+                        }
+                    }
+
+                    Label {
+                        anchors.fill: parent
+                        visible: lineList.count === 0
+                        color: "#6a6a7a"
+                        wrapMode: Text.WordWrap
+                        verticalAlignment: Text.AlignTop
+                        text: subs.tracks.length === 0
+                              ? "No subtitle tracks in this file."
+                              : "Select a track above."
+                    }
                 }
             }
         }

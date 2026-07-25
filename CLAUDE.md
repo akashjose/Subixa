@@ -39,33 +39,59 @@ cmake --build build
 you can visually confirm the rendered frame matches the seek bar. It has **no subtitle
 track**; generate one when working on the browser.
 
-Headless smoke test (no window, exits clean, good for CI-ish checks):
+Subtitle fixtures (`testclip.mp4` has no subtitle track):
 
 ```bash
-QT_QPA_PLATFORM=offscreen timeout 6 ./build/custom_media_player testclip.mp4
+./testdata/make-fixtures.sh          # embedded, sidecar, shifted-timeline cases
+./testdata/make-fixtures.sh --big    # plus huge.mp4, a 200k-cue ASS sidecar
 ```
 
-To verify rendering visually you need a screenshot — the window is a real WSLg window on
-the Windows desktop. Check the log for `VO: [libmpv]`; anything else means the render
-path is broken (see trap 1).
+Headless run:
+
+```bash
+QT_QPA_PLATFORM=offscreen timeout 6 ./build/custom_media_player testdata/subs.mkv
+```
+
+**Know what this does and does not check.** `offscreen` never renders the scene graph, so
+`createFramebufferObject()` never runs, the mpv render context is never created, and the
+queued `loadFile` is never flushed — mpv does not load the file at all (zero `[mpv]` log
+lines). It verifies that the app starts and the QML parses, nothing about playback.
+Subtitle parsing *does* run, because it never touches the render context, so this is a
+real check on the extractor.
+
+Anything about playback or rendering needs a real window. Check the log for
+`VO: [libmpv]`; anything else means the render path is broken (see trap 1). Note that
+WSLg windows are Wayland surfaces and do **not** show up in an XWayland root grab
+(`ffmpeg -f x11grab -i :0.0` comes back black, with or without `QT_QPA_PLATFORM=xcb`) —
+screenshots have to be taken from the Windows side.
 
 ## Architecture
 
 ```
-src/MpvObject.{h,cpp}   QQuickFramebufferObject + libmpv OpenGL render API
-src/main.cpp            forces OpenGL RHI, passes argv[1] to QML as `initialFile`
-qml/Main.qml            video + transport + docked subtitle panel (placeholder)
+src/MpvObject.{h,cpp}         QQuickFramebufferObject + libmpv OpenGL render API
+src/main.cpp                  forces OpenGL RHI, passes argv[1] to QML as `initialFile`
+src/SubtitleTypes.h           SubtitleLine / SubtitleTrack plain structs
+src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker thread
+src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed tracks
+qml/Main.qml                  video + transport + docked subtitle panel
 ```
 
 `MpvObject` owns an `mpv_handle`; the nested `MpvRenderer` (render thread) owns the
 `mpv_render_context` and draws into the FBO. mpv state reaches QML through observed
 properties (`time-pos`, `duration`, `pause`) surfaced as Qt properties.
 
+`SubtitleManager` runs a `SubtitleExtractor` on its own `QThread` and republishes results
+as bindable properties. Requests carry a monotonic id; bumping it makes an in-flight parse
+abandon its demux loop, so opening a second file does not wait on the first. The two
+`QVariantList` accessors (`tracks`, `lines()`) are a stopgap — `lines()` copies the whole
+track on the GUI thread (~110 ms for 40k cues, ~600 ms for 200k) and milestone 2's
+`QAbstractListModel` replaces it.
+
 **Why the render API and not `--wid`:** with `--wid`, mpv draws into a separate native
 surface *above* the scene graph, so QML cannot reliably paint over it. The whole feature
 premise is QML chrome composited on the video, so `--wid` is not an option.
 
-## Traps — all four of these have already cost time
+## Traps — all of these have already cost time
 
 1. **`vo=libmpv` must be set before `mpv_initialize`.** Without it mpv picks a native VO
    (`wlshm` under WSLg), creates **its own Wayland surface**, and never touches the FBO.
@@ -83,6 +109,29 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
 4. **`QOpenGLFramebufferObject` is in QtOpenGL, not QtGui** (Qt 6 moved it;
    `QOpenGLContext` stayed in QtGui).
 
+### Subtitle extraction
+
+5. **Every ffmpeg text subtitle decoder emits ASS, and the field layout is not the one in
+   an `.ass` file.** SRT, ASS and `mov_text` all come back as
+   `ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text` — the text starts
+   after the **8th** comma, and the first field is a read order counter, *not* a
+   timestamp. Timings come from the packet, not the payload. Splitting as if it were a
+   file's `Dialogue:` line silently eats the first words of every cue.
+6. **Rebase against the container start time per track, not wholesale.** mpv shifts
+   playback to start at zero (`--rebase-start-time`, on by default), so an MPEG-TS that
+   starts an hour in needs the same shift or every seek lands 3600 s out. But muxers do
+   produce files whose video starts at 1 h while the subtitle stream still starts at 0
+   (`testdata/shifted.mp4`); subtracting there flattens every cue onto `00:00:00`. Only
+   shift a track whose own first cue is at or past the offset.
+7. **ffmpeg does not decode character entities.** Its SRT/WebVTT decoders convert `<i>`
+   into ASS override tags but leave `&amp;`, `&#39;` and friends literal — they would show
+   up raw in the browser *and* break search. Decoding is on our side.
+8. **Bitmap vs text is a codec property, not a name list.** `avcodec_descriptor_get()`
+   exposes `AV_CODEC_PROP_TEXT_SUB` / `AV_CODEC_PROP_BITMAP_SUB`; use those rather than
+   matching codec names, and the classification stays right as codecs are added.
+   (ffmpeg cannot transcode text to bitmap, so there is no way to *generate* a PGS/VOBSUB
+   fixture locally — that path is verified against the codec table, not a file.)
+
 Known-harmless: CMake warns `QTP0004` about qmldir files for `qml/`. Cosmetic.
 mpv logs `Suspected software renderer`, EGL/DRM/Vulkan probe failures, and
 `Cannot load libcuda.so.1` — all expected under WSL with `hwdec=no`.
@@ -98,10 +147,15 @@ mpv logs `Suspected software renderer`, EGL/DRM/Vulkan probe failures, and
 
 ## Next up
 
-See `README.md` → Roadmap. Immediate task is **Milestone 1: subtitle extraction** —
-enumerate subtitle streams with libavformat and decode them to timestamped rows.
-Subtitle text cannot come from mpv: it only exposes the currently displayed line, which
-is useless for a browsable list. Parse the streams separately.
+See `README.md` → Roadmap. Milestone 1 (subtitle extraction) is done: embedded and sidecar
+tracks parse to timestamped rows off the GUI thread, and the docked panel lists them with
+click-to-seek.
+
+Immediate task is **Milestone 2: browser UI** — a `QAbstractListModel` per track fed from
+`SubtitleManager::trackData()`, a `QSortFilterProxyModel` for incremental search, tabs
+across tracks, and auto-follow driven by `lineIndexAt()` (already a binary search) with a
+toggle so manual scrolling does not fight playback. Landing the model also removes the
+`QVariantList` copy that currently stalls the GUI on track switch.
 
 ## Related context
 
