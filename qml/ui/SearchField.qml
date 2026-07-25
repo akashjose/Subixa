@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Templates as T
-import CustomMediaPlayer
+import Subixa
 
 // A search box with a leading icon and a clear button.
 //

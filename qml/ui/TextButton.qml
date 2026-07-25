@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Templates as T
-import CustomMediaPlayer
+import Subixa
 
 // A labelled button, optionally with a leading icon. Same variants and the same
 // state table as IconButton, so the two sit beside each other without arguing.

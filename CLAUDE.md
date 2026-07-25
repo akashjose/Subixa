@@ -35,7 +35,7 @@ itself** — no environment variable to remember:
 ```
 graphics: hardware GL confirmed by probe: D3D12 (Intel(R) UHD Graphics 770)
 graphics: hardware GL (remembered)
-graphics: CMP_NO_GPU set, leaving the driver alone
+graphics: SUBIXA_NO_GPU set, leaving the driver alone
 ```
 
 `GraphicsSetup::configure()` runs before `QGuiApplication`, because Mesa reads
@@ -49,13 +49,13 @@ prints `GL_RENDERER` and exits non-zero if it got a software rasterizer.
 The child matters. A forced `GALLIUM_DRIVER` does not fall back — if the driver cannot
 load, context creation simply fails — so the risky attempt happens in a throwaway process
 rather than in the player. The answer is cached in `QSettings`, keyed by kernel version, so
-only the first launch pays for it. `CMP_NO_GPU=1` opts out and stays on software, which is
+only the first launch pays for it. `SUBIXA_NO_GPU=1` opts out and stays on software, which is
 how to test the workarounds.
 
 Setting `GALLIUM_DRIVER` by hand still works and is honoured as-is:
 
 ```bash
-GALLIUM_DRIVER=d3d12 ./build/custom_media_player testclip.mp4
+GALLIUM_DRIVER=d3d12 ./build/subixa testclip.mp4
 ```
 
 That one variable is sufficient — `/dev/dxg`, Mesa's `d3d12_dri.so` and the host's
@@ -91,17 +91,17 @@ decoder: hwdec-current = no
 
 `auto-safe` falls back silently rather than producing a black picture, so this costs
 nothing, and on a native Linux desktop with a render node it will pick up vaapi/nvdec
-without further work. `CMP_HWDEC=<value>` pins it to anything mpv accepts (`no`, `auto`,
+without further work. `SUBIXA_HWDEC=<value>` pins it to anything mpv accepts (`no`, `auto`,
 `vaapi`) and switches the automatic choice off.
 
 ## Build and run
 
 ```bash
-cd ~/code/custom_media_player
+cd ~/code/subixa
 export CMAKE_PREFIX_PATH="$HOME/Qt/6.9.3/gcc_64"     # required, or CMake finds Qt 6.4
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
-./build/custom_media_player testclip.mp4
+./build/subixa testclip.mp4
 ```
 
 `testclip.mp4` is a generated 15 s testsrc2 clip with burned-in timecode — useful because
@@ -249,7 +249,7 @@ be trusted at all. When it fails, restart the distro before debugging the app.
 Headless run of the app itself:
 
 ```bash
-QT_QPA_PLATFORM=offscreen timeout 6 ./build/custom_media_player testdata/subs.mkv
+QT_QPA_PLATFORM=offscreen timeout 6 ./build/subixa testdata/subs.mkv
 ```
 
 **Know what this does and does not check.** `offscreen` never renders the scene graph, so
@@ -327,7 +327,7 @@ things that have no button of their own, so nothing is keyboard-only.
 WSLg windows are Wayland surfaces and do **not** show up in an XWayland root grab
 (`ffmpeg -f x11grab -i :0.0` comes back black, with or without `QT_QPA_PLATFORM=xcb`).
 They *are* ordinary Win32 windows on the Windows side, hosted by `msrdc` and titled
-`custom media player (<distro>)`, so drive the capture from there:
+`Subixa (<distro>)`, so drive the capture from there:
 
 ```bash
 T=$(powershell.exe -NoProfile -Command '$env:TEMP' | tr -d '\r')
@@ -392,7 +392,7 @@ is the likely mechanism, which is consistent with fills, shapes and video all be
 
 Neither `QQuickWindow::setTextRenderType(QtTextRendering)` nor
 `QFont::NoSubpixelAntialias` fixes it; both are set anyway because both are right
-independently. **The only known workaround is to avoid the driver: `CMP_NO_GPU=1` renders
+independently. **The only known workaround is to avoid the driver: `SUBIXA_NO_GPU=1` renders
 the UI correctly.**
 
 That leaves a genuine trade, unresolved at the time of writing, and it should be settled
@@ -426,7 +426,7 @@ Two things to know before believing a black window:
   frame: `ffmpeg -ss <t> -i <file> -frames:v 1 out.png`, plus
   `-vf signalstats,metadata=print:key=lavfi.signalstats.YAVG` for average luma (on 10-bit
   the scale is 0..1023, so ~307 is a normally lit shot, not a black one). What it is **not**: not the
-  sync bug in trap 10 (it reproduces with `CMP_NO_SYNC=1` and without, identically), not
+  sync bug in trap 10 (it reproduces with `SUBIXA_NO_SYNC=1` and without, identically), not
   instance count (one process alone still fails), not memory (10 GB free), and weston.log
   shows nothing. Still unexplained.
 
@@ -445,7 +445,7 @@ Two things to know before believing a black window:
   starting the next.
 - The app must be launched detached from the tool call that starts it, or it dies with
   the shell and the screenshot catches nothing.
-- **`pkill -f custom_media_player` kills the shell running it** — the pattern matches that
+- **`pkill -f subixa` kills the shell running it** — the pattern matches that
   shell's own command line, so the call dies with exit 144 before doing anything useful.
   Match on the argument instead (`pkill -f '[c]ustom_media_player /mnt'`).
 
@@ -605,7 +605,7 @@ being bound. The tab index is the awkward one, and trap 13 explains why it is re
 `populated` rather than in `Component.onCompleted`.
 
 **What is remembered, and where.** Two stores, one file
-(`~/.config/custom_media_player/custom_media_player.conf`):
+(`~/.config/subixa/subixa.conf`):
 
 - *Per application*, through the QML `Settings` type (`import QtCore`) in the `[ui]` group:
   window geometry and maximised state, panel width, visible, detached, the detached
@@ -696,7 +696,7 @@ not shorten the wait, which is why the panel shows a percentage instead.
 
 **So the parse is cached instead** (`SubtitleCache`). Nothing about the result changes
 between opens, and the cost is all I/O, so the cues are written to
-`~/.cache/custom_media_player/custom_media_player/subtitles/<sha1 of path>.cues` and read
+`~/.cache/subixa/subixa/subtitles/<sha1 of path>.cues` and read
 back on the next open. Measured on the film:
 
 | | cold | cached |
@@ -712,7 +712,7 @@ sidecar found next to it**, so dropping a `.srt` beside the film invalidates the
 rather than being ignored. Not a content hash: hashing three gigabytes to decide whether to
 re-read three gigabytes saves nothing. A truncated or garbled entry is a miss, not a
 partial result, and the format carries a version that is bumped when the layout changes.
-`CMP_NO_SUBTITLE_CACHE=1` forces a real parse, which is how the timings above were taken.
+`SUBIXA_NO_SUBTITLE_CACHE=1` forces a real parse, which is how the timings above were taken.
 
 The status line says which happened — `65 tracks, 93350 lines · cached` — and the log gives
 the elapsed time either way, because a cache hit is otherwise indistinguishable from a
@@ -829,7 +829,7 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     `glFinish()` after `mpv_render_context_render()` fixes it. `glFlush()` is **not**
     enough — it submits the work without waiting, which visibly improves the frame but
     leaves a fine grid of unwritten pixels. Gated on `usingSoftwareRasterizer()` so a
-    real GPU is not stalled every frame for a bug it does not have. `CMP_NO_SYNC=1`
+    real GPU is not stalled every frame for a bug it does not have. `SUBIXA_NO_SYNC=1`
     disables the call, which is how to A/B it.
 
     **`glFinish()` is necessary but NOT sufficient — the fix is incomplete.** Adding
@@ -843,7 +843,7 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     | 2220x1345 | fullscreen | fine mesh of unwritten pixels |
     | 2560x1345 | windowed | **fully black** |
     | 2560x1345 | fullscreen | fine mesh |
-    | 2560x1345 | fullscreen, `CMP_NO_SYNC=1` | fully black |
+    | 2560x1345 | fullscreen, `SUBIXA_NO_SYNC=1` | fully black |
 
     So `glFinish()` still buys a great deal — without it a large pane is black rather
     than meshed — but somewhere above roughly 2.9 megapixels of FBO it stops being
@@ -864,7 +864,7 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
     `usingSoftwareRasterizer()`: libass draws subtitles into this same FBO, so capping
     renders subtitle text at video resolution and upscales it — the last thing to blur in
     a player built around subtitles, and pointless on a GPU that has no need of it.
-    `CMP_NO_FBO_CAP=1` disables the cap, the way `CMP_NO_SYNC=1` disables the glFinish.
+    `SUBIXA_NO_FBO_CAP=1` disables the cap, the way `SUBIXA_NO_SYNC=1` disables the glFinish.
 
     It also cuts CPU, though **not by as much as this file used to claim**. Measured on a
     3-minute 720p clip, fullscreen, steady state: **1435% CPU uncapped, 826% capped** —

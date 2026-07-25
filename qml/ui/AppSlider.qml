@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Templates as T
-import CustomMediaPlayer
+import Subixa
 
 // A slider for settings and volume. The thumb appears on hover rather than
 // living permanently on the track: on a 72px volume control a always-visible

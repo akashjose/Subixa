@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import CustomMediaPlayer
+import Subixa
 
 // A titled group of settings rows.
 //

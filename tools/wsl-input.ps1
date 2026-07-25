@@ -16,7 +16,7 @@
 
 # A modal dialog becomes the process's main window, so while one is open the
 # player title matches nothing -- pass -Title 'Open media' to reach the dialog.
-param([int]$X, [int]$Y, [string]$Text = "", [string]$Title = "custom media player")
+param([int]$X, [int]$Y, [string]$Text = "", [string]$Title = "Subixa")
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
@@ -57,8 +57,8 @@ $cb = [Inp+EnumProc]{
         $t = $sb.ToString()
         if ($t -like "*$Title*" -and $t -match '\(.+\)$') {
             # Prefer a window whose title *starts* with the requested text. With
-            # the browser detached there are two matches -- "custom media player"
-            # and "Subtitles - custom media player" -- and only this tells them
+            # the browser detached there are two matches -- "Subixa"
+            # and "Subtitles - Subixa" -- and only this tells them
             # apart.
             if ($t.StartsWith($Title)) {
                 $script:found = $h

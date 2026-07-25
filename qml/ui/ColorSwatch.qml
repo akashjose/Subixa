@@ -1,5 +1,5 @@
 import QtQuick
-import CustomMediaPlayer
+import Subixa
 
 // A colour button that opens a small palette. Used for subtitle text, outline
 // and shadow colours.

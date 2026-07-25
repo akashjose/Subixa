@@ -231,10 +231,10 @@ void SubtitleExtractor::extract(const QString &mediaPath, int requestId)
     for (const QString &sidecar : sidecars)
         sources.append(SubtitleCache::stampFor(sidecar));
 
-    // CMP_NO_SUBTITLE_CACHE=1 forces a real parse, which is how to time one and
+    // SUBIXA_NO_SUBTITLE_CACHE=1 forces a real parse, which is how to time one and
     // how to check the cache reproduces it.
     const bool useCache =
-        m_cacheEnabled && !qEnvironmentVariableIsSet("CMP_NO_SUBTITLE_CACHE");
+        m_cacheEnabled && !qEnvironmentVariableIsSet("SUBIXA_NO_SUBTITLE_CACHE");
 
     if (useCache) {
         SubtitleTrackList cached;

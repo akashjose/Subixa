@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Templates as T
-import CustomMediaPlayer
+import Subixa
 
 T.MenuSeparator {
     padding: Theme.space.xs

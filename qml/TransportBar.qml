@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import CustomMediaPlayer
+import Subixa
 
 // The transport: a full-bleed seek strip over a row of grouped controls.
 //

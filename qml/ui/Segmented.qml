@@ -1,5 +1,5 @@
 import QtQuick
-import CustomMediaPlayer
+import Subixa
 
 // A two-to-four way selector. Used wherever a setting has a small fixed set of
 // answers and a dropdown would be heavier than the choice deserves.

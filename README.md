@@ -1,4 +1,4 @@
-# custom media player
+# Subixa
 
 A desktop media player built on **Qt 6.9 + QML + libmpv**, with a first-class
 **subtitle browser** as its reason for existing.
@@ -131,7 +131,7 @@ before creating a context it checks whether D3D12 passthrough is available, veri
 probing in a throwaway child process, and only then switches to hardware GL — where a
 2560 px pane is clean at full resolution and 10-bit video renders natively with no
 workarounds engaged. The result is cached, so only the first launch pays for the probe, and
-`CMP_NO_GPU=1` forces the software path back for testing. The app logs both the choice it
+`SUBIXA_NO_GPU=1` forces the software path back for testing. The app logs both the choice it
 made and its `GL_RENDERER`, so which path is in use is never a guess.
 
 ## Roadmap
@@ -225,7 +225,7 @@ sudo apt install -y build-essential cmake ninja-build pkg-config \
 export CMAKE_PREFIX_PATH="$HOME/Qt/6.9.3/gcc_64"
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
-./build/custom_media_player /path/to/video.mkv
+./build/subixa /path/to/video.mkv
 ```
 
 Qt itself is installed via [aqtinstall](https://github.com/miurahr/aqtinstall):

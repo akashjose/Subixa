@@ -1,5 +1,5 @@
 import QtQuick
-import CustomMediaPlayer
+import Subixa
 
 // Every piece of text in the application goes through here.
 //

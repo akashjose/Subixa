@@ -83,10 +83,10 @@ public:
     {
         if (!m_software)
             return itemSize;
-        // CMP_NO_FBO_CAP=1 renders at full pane size on the software path, which
+        // SUBIXA_NO_FBO_CAP=1 renders at full pane size on the software path, which
         // is how to A/B the cap -- both the corruption it prevents and the CPU it
-        // saves. Same idea as CMP_NO_SYNC for the glFinish().
-        if (qEnvironmentVariableIsSet("CMP_NO_FBO_CAP"))
+        // saves. Same idea as SUBIXA_NO_SYNC for the glFinish().
+        if (qEnvironmentVariableIsSet("SUBIXA_NO_FBO_CAP"))
             return itemSize;
         return FboCap::cappedSize(itemSize, m_videoSize);
     }
@@ -216,7 +216,7 @@ public:
         // improves the frame without fixing it. Restricted to software
         // rasterizers so a real GPU is not stalled every frame for a bug it
         // does not have.
-        if (m_software && !qEnvironmentVariableIsSet("CMP_NO_SYNC")) {
+        if (m_software && !qEnvironmentVariableIsSet("SUBIXA_NO_SYNC")) {
             if (QOpenGLContext *c = QOpenGLContext::currentContext())
                 c->functions()->glFinish();
         }

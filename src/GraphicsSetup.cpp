@@ -106,8 +106,8 @@ Choice configure(int argc, char *argv[])
 {
     Q_UNUSED(argc);
 
-    if (qEnvironmentVariableIsSet("CMP_NO_GPU"))
-        return {QString(), QStringLiteral("CMP_NO_GPU set, leaving the driver alone")};
+    if (qEnvironmentVariableIsSet("SUBIXA_NO_GPU"))
+        return {QString(), QStringLiteral("SUBIXA_NO_GPU set, leaving the driver alone")};
 
     if (qEnvironmentVariableIsSet("GALLIUM_DRIVER")) {
         return {QString::fromLocal8Bit(qgetenv("GALLIUM_DRIVER")),

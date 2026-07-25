@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Templates as T
-import CustomMediaPlayer
+import Subixa
 
 // The scrollbar, which on a 93 000-row subtitle track is not decoration but the
 // primary navigation instrument. It fades out when idle so it is not a

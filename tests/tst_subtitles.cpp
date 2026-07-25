@@ -38,7 +38,7 @@ namespace {
 
 QString fixture(const QString &name)
 {
-    return QStringLiteral(CMP_TESTDATA_DIR "/") + name;
+    return QStringLiteral(SUBIXA_TESTDATA_DIR "/") + name;
 }
 
 // Runs the extractor synchronously. It is a plain QObject; the worker thread it

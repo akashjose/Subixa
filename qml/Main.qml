@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
-import CustomMediaPlayer
+import Subixa
 
 ApplicationWindow {
     id: root
@@ -22,8 +22,8 @@ ApplicationWindow {
     // a title bar that never changes is the player being coy about what it is
     // playing.
     title: root.currentFile === ""
-           ? "custom media player"
-           : root.fileLabel(root.currentFile) + " — custom media player"
+           ? "Subixa"
+           : root.fileLabel(root.currentFile) + " — Subixa"
     color: Theme.color.bgBase
 
     // Playback lives in C++ and is created in main() before the QML engine, so
@@ -1072,7 +1072,7 @@ ApplicationWindow {
         height: prefs.detachedHeight
         minimumWidth: 280
         minimumHeight: 320
-        title: "Subtitles — custom media player"
+        title: "Subtitles — Subixa"
         color: Theme.color.bgSurface
         visible: root.panelDetached && root.visible
         // Closing the window is the same statement as pressing Dock.

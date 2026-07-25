@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Templates as T
-import CustomMediaPlayer
+import Subixa
 
 // The workhorse control. Built on QtQuick.Templates rather than
 // QtQuick.Controls: the template carries the behaviour (hover, press, checked,

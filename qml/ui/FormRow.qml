@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import CustomMediaPlayer
+import Subixa
 
 // label | control | value readout, plus an optional help line under the control.
 //

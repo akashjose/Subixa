@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Shapes
-import CustomMediaPlayer
+import Subixa
 
 // One icon, tinted, at one of three sizes.
 //

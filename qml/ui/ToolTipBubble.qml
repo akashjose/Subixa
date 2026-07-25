@@ -3,7 +3,7 @@ import QtQuick
 // file in the app names it, and a bare QtQuick.Controls import here would be
 // the one place a platform style could get in.
 import QtQuick.Controls.Basic as C
-import CustomMediaPlayer
+import Subixa
 
 // A tooltip that follows the theme.
 //

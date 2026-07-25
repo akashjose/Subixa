@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Templates as T
-import CustomMediaPlayer
+import Subixa
 
 // An on/off switch with a state you can actually see. Basic's checked Button --
 // which the Follow toggle used to be -- is a marginally darker grey, which on a

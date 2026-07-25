@@ -1,5 +1,5 @@
 import QtQuick
-import CustomMediaPlayer
+import Subixa
 
 // A small pill carrying a count, a state or a key cap. Used for the queue
 // position, cue counts beside a track name, the "cached" badge, and the A-B

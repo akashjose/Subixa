@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Window
-import CustomMediaPlayer
+import Subixa
 
 // Preferences.
 //
@@ -32,7 +32,7 @@ Window {
     height: 640
     minimumWidth: 720
     minimumHeight: 520
-    title: "Settings — custom media player"
+    title: "Settings — Subixa"
     color: Theme.color.bgSurface
     visible: true
 
@@ -816,7 +816,7 @@ Window {
                         spacing: Theme.space.sm
 
                         AppText {
-                            text: "custom media player " + Qt.application.version
+                            text: "Subixa " + Qt.application.version
                             textFormat: Text.PlainText
                             color: Theme.color.textPrimary
                             font.family: Theme.type.sans

@@ -25,7 +25,7 @@ struct Choice
 };
 
 // Runs before QGuiApplication. May set GALLIUM_DRIVER in this process's
-// environment. Honours an existing GALLIUM_DRIVER and CMP_NO_GPU=1.
+// environment. Honours an existing GALLIUM_DRIVER and SUBIXA_NO_GPU=1.
 Choice configure(int argc, char *argv[]);
 
 // True when argv asks for probe mode -- the child process spawned by configure()

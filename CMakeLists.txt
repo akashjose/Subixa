@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
-project(custom_media_player VERSION 0.5.0 LANGUAGES CXX)
+project(subixa VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(CMP_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
+option(SUBIXA_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
 
 # 6.5 rather than 6.9. Nothing here needs 6.9, and requiring a 2025 release put
 # the project out of reach of every current LTS distribution -- which is the
@@ -15,11 +15,11 @@ option(CMP_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
 # config), and a dynamically linked build resolves the QML plugin through the
 # import path at runtime with no link-time dependency at all. A future *static*
 # build will need Qt6QuickShapesPrivate here and qt_import_qml_plugins.
-set(CMP_QT_COMPONENTS Core Gui Quick Qml QuickControls2 OpenGL)
-if(CMP_BUILD_TESTS)
-    list(APPEND CMP_QT_COMPONENTS Test)
+set(SUBIXA_QT_COMPONENTS Core Gui Quick Qml QuickControls2 OpenGL)
+if(SUBIXA_BUILD_TESTS)
+    list(APPEND SUBIXA_QT_COMPONENTS Test)
 endif()
-find_package(Qt6 6.5 REQUIRED COMPONENTS ${CMP_QT_COMPONENTS})
+find_package(Qt6 6.5 REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
 
 # libmpv comes from apt (0.37 on 24.04). pkg-config keeps us off a hardcoded path.
 find_package(PkgConfig REQUIRED)
@@ -38,7 +38,7 @@ qt_standard_project_setup(REQUIRES 6.5)
 # Everything but main.cpp, shared verbatim between the app and the QML harness.
 # Listed once because a source that reaches only one of the two produces a link
 # error in the other, at a place that says nothing about the omission.
-set(CMP_APP_SOURCES
+set(SUBIXA_APP_SOURCES
     src/MpvEngine.cpp
     src/MpvEngine.h
     src/MpvVideoItem.cpp
@@ -76,7 +76,7 @@ set(CMP_APP_SOURCES
 # under the same URI, and a file added to only one list fails at *runtime* with
 # a type-resolution error rather than at build time -- which is a long way from
 # the missing line.
-set(CMP_QML_FILES
+set(SUBIXA_QML_FILES
     qml/Main.qml
     qml/TransportBar.qml
     qml/SubtitlePanel.qml
@@ -109,13 +109,13 @@ set(CMP_QML_FILES
     qml/ui/ColorSwatch.qml
 )
 
-qt_add_executable(custom_media_player
+qt_add_executable(subixa
     src/main.cpp
-    ${CMP_APP_SOURCES}
+    ${SUBIXA_APP_SOURCES}
 )
 
-target_compile_definitions(custom_media_player PRIVATE
-    CMP_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(subixa PRIVATE
+    SUBIXA_VERSION="${PROJECT_VERSION}")
 
 # Must precede qt_add_qml_module: the property is read as the module is defined,
 # and a Theme.qml registered without it is an ordinary type that every user would
@@ -123,19 +123,19 @@ target_compile_definitions(custom_media_player PRIVATE
 set_source_files_properties(qml/Theme.qml qml/ui/Icons.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
-qt_add_qml_module(custom_media_player
-    URI CustomMediaPlayer
+qt_add_qml_module(subixa
+    URI Subixa
     VERSION 1.0
-    QML_FILES ${CMP_QML_FILES}
+    QML_FILES ${SUBIXA_QML_FILES}
 )
 
 # qmltyperegistrar emits `#if __has_include(<MpvEngine.h>)`. Without src/ on the
 # include path that guard is silently false, the include is skipped, and the
 # generated file fails with "QQuickItem was not declared" rather than anything
 # pointing at the real cause.
-target_include_directories(custom_media_player PRIVATE src)
+target_include_directories(subixa PRIVATE src)
 
-target_link_libraries(custom_media_player PRIVATE
+target_link_libraries(subixa PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Quick
@@ -148,7 +148,7 @@ target_link_libraries(custom_media_player PRIVATE
 
 # Warnings on. The tree is clean at this level and staying that way is cheaper
 # than getting back to it.
-target_compile_options(custom_media_player PRIVATE -Wall -Wextra)
+target_compile_options(subixa PRIVATE -Wall -Wextra)
 
 # ---- install ------------------------------------------------------------
 # Enough to package. The desktop entry and its MIME list are what make the
@@ -156,10 +156,10 @@ target_compile_options(custom_media_player PRIVATE -Wall -Wextra)
 # reach it.
 include(GNUInstallDirs)
 
-install(TARGETS custom_media_player
+install(TARGETS subixa
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-install(FILES custom-media-player.desktop
+install(FILES subixa.desktop
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
 )
 install(FILES LICENSE
@@ -176,10 +176,10 @@ install(FILES LICENSE
 # qt_add_qml_module against the sources listed in qt_add_executable, and moving
 # them out breaks that registration for the app. Recompiling four files is the
 # cheaper trade.
-if(CMP_BUILD_TESTS)
+if(SUBIXA_BUILD_TESTS)
 enable_testing()
 
-set(CMP_MODEL_SOURCES
+set(SUBIXA_MODEL_SOURCES
     src/SubtitleExtractor.cpp
     src/SubtitleCache.cpp
     src/SubtitleManager.cpp
@@ -207,10 +207,10 @@ qt_add_executable(tst_shortcuts tests/tst_shortcuts.cpp src/ShortcutRegistry.cpp
 target_include_directories(tst_shortcuts PRIVATE src)
 target_link_libraries(tst_shortcuts PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test)
 
-qt_add_executable(tst_subtitles tests/tst_subtitles.cpp ${CMP_MODEL_SOURCES})
+qt_add_executable(tst_subtitles tests/tst_subtitles.cpp ${SUBIXA_MODEL_SOURCES})
 target_include_directories(tst_subtitles PRIVATE src)
 target_compile_definitions(tst_subtitles PRIVATE
-    CMP_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+    SUBIXA_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
 target_link_libraries(tst_subtitles PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -224,7 +224,7 @@ target_link_libraries(tst_subtitles PRIVATE
 qt_add_executable(tst_mpvtracks tests/tst_mpvtracks.cpp)
 target_include_directories(tst_mpvtracks PRIVATE src)
 target_compile_definitions(tst_mpvtracks PRIVATE
-    CMP_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+    SUBIXA_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
 target_link_libraries(tst_mpvtracks PRIVATE
     Qt6::Core
     Qt6::Test
@@ -241,18 +241,18 @@ target_link_libraries(tst_mpvtracks PRIVATE
 # binaries, so sharing the URI at runtime costs nothing.
 qt_add_executable(tst_qmlpanel
     tests/tst_qmlpanel.cpp
-    ${CMP_APP_SOURCES}
+    ${SUBIXA_APP_SOURCES}
 )
-target_compile_definitions(tst_qmlpanel PRIVATE CMP_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(tst_qmlpanel PRIVATE SUBIXA_VERSION="${PROJECT_VERSION}")
 qt_add_qml_module(tst_qmlpanel
-    URI CustomMediaPlayer
+    URI Subixa
     VERSION 1.0
-    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qmltest/CustomMediaPlayer
-    QML_FILES ${CMP_QML_FILES}
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qmltest/Subixa
+    QML_FILES ${SUBIXA_QML_FILES}
 )
 target_include_directories(tst_qmlpanel PRIVATE src)
 target_compile_definitions(tst_qmlpanel PRIVATE
-    CMP_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+    SUBIXA_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
 target_link_libraries(tst_qmlpanel PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -286,4 +286,4 @@ set_tests_properties(qmlpanel PROPERTIES
     TIMEOUT 180
 )
 
-endif()  # CMP_BUILD_TESTS
+endif()  # SUBIXA_BUILD_TESTS

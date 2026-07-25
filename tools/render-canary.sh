@@ -37,7 +37,7 @@ set -uo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 clip="${1:-$repo/testclip.mp4}"
 reference="${2:-$clip}"
-binary="$repo/build/custom_media_player"
+binary="$repo/build/subixa"
 
 # The window the canary wants, whatever the developer's own settings say. Also
 # keeps the canary from writing into them: it gets its own config and cache.
@@ -76,8 +76,8 @@ trap cleanup EXIT
 # states both rather than inheriting whatever the last session left. With the
 # panel hidden the video pane is the whole client width, which is what lets the
 # crop below be a fixed fraction of the capture.
-mkdir -p "$work/config/custom_media_player"
-cat > "$work/config/custom_media_player/custom_media_player.conf" <<EOF
+mkdir -p "$work/config/subixa"
+cat > "$work/config/subixa/subixa.conf" <<EOF
 [ui]
 panelVisible=false
 panelDetached=false

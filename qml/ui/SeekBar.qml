@@ -1,5 +1,5 @@
 import QtQuick
-import CustomMediaPlayer
+import Subixa
 
 // The seek bar, full-bleed across the top of the transport.
 //

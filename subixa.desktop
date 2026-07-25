@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=Custom Media Player
+Name=Subixa Player
 GenericName=Media Player
 Comment=Watch films with a docked, searchable subtitle browser
-Exec=custom_media_player %F
-Icon=custom-media-player
+Exec=subixa %F
+Icon=subixa
 Terminal=false
 Categories=AudioVideo;Video;Player;
 MimeType=video/mp4;video/x-matroska;video/webm;video/x-msvideo;video/quicktime;video/mpeg;video/x-flv;video/3gpp;video/ogg;application/x-matroska;

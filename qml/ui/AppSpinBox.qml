@@ -1,5 +1,5 @@
 import QtQuick
-import CustomMediaPlayer
+import Subixa
 
 // A numeric nudge: minus, value, plus. Not QtQuick.Controls' SpinBox, whose
 // editable text field brings validation and focus questions this app has no use

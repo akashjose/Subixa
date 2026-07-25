@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import CustomMediaPlayer
+import Subixa
 
 // Icon, headline, explanation, and something to do about it.
 //

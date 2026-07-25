@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic as C
 import QtQuick.Templates as T
-import CustomMediaPlayer
+import Subixa
 
 // A themed menu that stays on screen.
 //

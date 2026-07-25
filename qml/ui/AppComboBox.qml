@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Templates as T
-import CustomMediaPlayer
+import Subixa
 
 // A dropdown. Used where the option set is long enough that a Segmented row
 // would not fit -- font families, hardware-decoding modes.

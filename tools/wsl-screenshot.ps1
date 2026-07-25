@@ -22,7 +22,7 @@
 # $Path stays positional so existing callers that pass only an output file keep
 # working -- declaring any param() at all is what stops it landing in $args.
 param([Parameter(Mandatory=$true, Position=0)][string]$Path,
-      [string]$Title = "custom media player")
+      [string]$Title = "Subixa")
 
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -62,8 +62,8 @@ $cb = [Win32+EnumProc]{
         $t = $sb.ToString()
         if ($t -like "*$Title*" -and $t -match '\(.+\)$') {
             # Prefer a window whose title *starts* with the requested text. With
-            # the browser detached there are two matches -- "custom media player"
-            # and "Subtitles - custom media player" -- and only this tells them
+            # the browser detached there are two matches -- "Subixa"
+            # and "Subtitles - Subixa" -- and only this tells them
             # apart.
             if ($t.StartsWith($Title)) {
                 $script:found = $h

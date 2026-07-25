@@ -1,5 +1,5 @@
 import QtQuick
-import CustomMediaPlayer
+import Subixa
 
 // A hairline. Its own component so the one colour decision is made once, and so
 // a vertical rule does not have to be written as a Rectangle with a magic width.

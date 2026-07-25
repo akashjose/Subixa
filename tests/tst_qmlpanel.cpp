@@ -33,7 +33,7 @@ namespace {
 
 QString fixture(const QString &name)
 {
-    return QStringLiteral(CMP_TESTDATA_DIR "/") + name;
+    return QStringLiteral(SUBIXA_TESTDATA_DIR "/") + name;
 }
 
 QObject *named(QObject *root, const char *objectName)
@@ -92,8 +92,8 @@ void TstQmlPanel::initTestCase()
     qputenv("XDG_CONFIG_HOME", m_home.filePath(QStringLiteral("config")).toUtf8());
     qputenv("XDG_CACHE_HOME", m_home.filePath(QStringLiteral("cache")).toUtf8());
 
-    QCoreApplication::setApplicationName(QStringLiteral("custom_media_player"));
-    QCoreApplication::setOrganizationName(QStringLiteral("custom_media_player"));
+    QCoreApplication::setApplicationName(QStringLiteral("subixa"));
+    QCoreApplication::setOrganizationName(QStringLiteral("subixa"));
 }
 
 void TstQmlPanel::init()
@@ -128,7 +128,7 @@ bool TstQmlPanel::startApp()
     // main.cpp passes the positional arguments this way; empty is "no file yet".
     m_engine->rootContext()->setContextProperty(QStringLiteral("initialFiles"),
                                                 QStringList());
-    m_engine->loadFromModule("CustomMediaPlayer", "Main");
+    m_engine->loadFromModule("Subixa", "Main");
 
     if (m_engine->rootObjects().isEmpty()) {
         qWarning("Main.qml did not load");
@@ -409,7 +409,7 @@ void TstQmlPanel::themeReachesBothWindows()
     QVERIFY(darkPanel.lightness() < 128);
 
     QObject *theme = m_engine->singletonInstance<QObject *>(
-        QStringLiteral("CustomMediaPlayer"), QStringLiteral("Theme"));
+        QStringLiteral("Subixa"), QStringLiteral("Theme"));
     QVERIFY(theme);
     theme->setProperty("dark", false);
 

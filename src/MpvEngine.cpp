@@ -104,10 +104,10 @@ MpvEngine::MpvEngine(QObject *parent) : QObject(parent)
     // it the other way round means probing hardware decoders on a software
     // rasterizer, which wastes time at startup and fails in confusing ways.
     //
-    // CMP_HWDEC pins the setting to any value mpv accepts -- no, auto, auto-safe,
+    // SUBIXA_HWDEC pins the setting to any value mpv accepts -- no, auto, auto-safe,
     // vaapi -- and switches the automatic choice off, which is how to test a
     // decoder this machine would not have picked.
-    const QByteArray forcedHwdec = qgetenv("CMP_HWDEC");
+    const QByteArray forcedHwdec = qgetenv("SUBIXA_HWDEC");
     m_hwdecForced = !forcedHwdec.isEmpty();
     mpv_set_option_string(m_mpv, "hwdec",
                           m_hwdecForced ? forcedHwdec.constData() : "no");

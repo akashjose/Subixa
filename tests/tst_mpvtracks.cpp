@@ -26,7 +26,7 @@ namespace {
 
 QString fixture(const QString &name)
 {
-    return QStringLiteral(CMP_TESTDATA_DIR "/") + name;
+    return QStringLiteral(SUBIXA_TESTDATA_DIR "/") + name;
 }
 
 }  // namespace
@@ -419,7 +419,7 @@ void TstMpvTracks::mapsSidecarPathToSid()
 
     // The same file named a different way still has to match: mpv reports an
     // absolute path while the extractor may hold whatever argv[1] contained.
-    const QString messy = QStringLiteral(CMP_TESTDATA_DIR "/../testdata/sidecar.srt");
+    const QString messy = QStringLiteral(SUBIXA_TESTDATA_DIR "/../testdata/sidecar.srt");
     QCOMPARE(MpvTrackList::subtitleIdForFile(tracks, messy), 2);
 
     QCOMPARE(MpvTrackList::subtitleIdForFile(tracks, fixture(QStringLiteral("en.srt"))), -1);

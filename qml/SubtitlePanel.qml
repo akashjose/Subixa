@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import CustomMediaPlayer
+import Subixa
 
 // The subtitle browser: one track at a time, incremental search, click-to-seek,
 // auto-follow, and the timing controls a reader or a QC pass needs.

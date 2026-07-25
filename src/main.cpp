@@ -38,9 +38,9 @@ int main(int argc, char *argv[])
 
     // Names first: the graphics probe caches its answer in QSettings, which needs
     // them, and it has to run before any GL context exists.
-    QCoreApplication::setApplicationName(QStringLiteral("custom_media_player"));
-    QCoreApplication::setOrganizationName(QStringLiteral("custom_media_player"));
-    QCoreApplication::setApplicationVersion(QStringLiteral(CMP_VERSION));
+    QCoreApplication::setApplicationName(QStringLiteral("subixa"));
+    QCoreApplication::setOrganizationName(QStringLiteral("subixa"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(SUBIXA_VERSION));
 
     // Probe mode is this same binary re-run by the selector below: it creates a
     // context, prints GL_RENDERER and exits without ever loading the UI.
@@ -119,7 +119,7 @@ int main(int argc, char *argv[])
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
         []() { QCoreApplication::exit(1); }, Qt::QueuedConnection);
 
-    engine.loadFromModule("CustomMediaPlayer", "Main");
+    engine.loadFromModule("Subixa", "Main");
 
     return app.exec();
 }

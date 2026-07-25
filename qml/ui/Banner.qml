@@ -1,5 +1,5 @@
 import QtQuick
-import CustomMediaPlayer
+import Subixa
 
 // The notice that appears over the picture. Over the video rather than in the
 // transport bar, because a file that will not play is the one thing that must

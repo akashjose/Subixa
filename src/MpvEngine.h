@@ -304,7 +304,7 @@ private:
     bool m_renderReady = false;
     QAtomicInt m_liveRenderContexts;
     QString m_pendingFile;
-    // CMP_HWDEC was set, so the automatic choice must keep its hands off.
+    // SUBIXA_HWDEC was set, so the automatic choice must keep its hands off.
     bool m_hwdecForced = false;
     bool m_endOfFile = false;
     bool m_softwareRendering = false;
