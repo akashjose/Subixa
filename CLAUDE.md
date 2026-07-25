@@ -83,13 +83,23 @@ read straight off a capture.
 
 Two things to know before believing a black window:
 
-- **The picture is intermittently missing.** Runs that log `VO: [libmpv] 1280x720 yuv420p`
-  and advance the clock normally sometimes still paint black. It is not file-specific
-  (`huge.mp4` is a byte-identical copy of `testclip.mp4`, and both have done it), the logs
-  are identical either way, and a re-run usually comes back fine. Software GL under WSLg
-  is the suspect, not the render path. Re-run before investigating.
+- **The picture is intermittently missing on 8-bit files.** Runs that log
+  `VO: [libmpv] 1280x720 yuv420p` and advance the clock normally sometimes still paint
+  black. Not file-specific (`huge.mp4` is a byte-identical copy of `testclip.mp4`, and both
+  have done it), logs identical either way, and a re-run comes back fine. Still
+  unexplained; distinct from the 10-bit bug in trap 11, which is deterministic and fixed.
+  Re-run before investigating.
+- **Dark content is not a bug.** Feature films open on studio cards and near-black
+  footage — seek a third of the way in before concluding anything about the render path.
+- **Audio init sometimes times out** (`Init failed: Timeout`, then mpv walks pulse → alsa
+  → jack → sdl). It follows a hard-killed previous instance, and playback will not start
+  until it resolves. Kill instances with `SIGTERM`, not `-9`, and let one exit before
+  starting the next.
 - The app must be launched detached from the tool call that starts it, or it dies with
   the shell and the screenshot catches nothing.
+- **`pkill -f custom_media_player` kills the shell running it** — the pattern matches that
+  shell's own command line, so the call dies with exit 144 before doing anything useful.
+  Match on the argument instead (`pkill -f '[c]ustom_media_player /mnt'`).
 
 ## Architecture
 
@@ -176,6 +186,25 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
    (ffmpeg cannot transcode text to bitmap, so there is no way to *generate* a PGS/VOBSUB
    fixture locally — that path is verified against the codec table, not a file.)
 
+### Rendering
+
+11. **Mesa's software rasterizers render 10-bit video wrong, and say nothing about it.**
+    A `yuv420p10` file comes out either fully black (synthetic 10-bit H.264) or heavily
+    vertically striped (a real AV1 film), while a byte-for-byte 8-bit twin of the same clip
+    renders perfectly in the same session. mpv logs no error at `-v`: it reports
+    `Texture for plane 0/1/2` and `Using FBO format rgba16f` identically for both depths,
+    so the log will not tell you. `MpvRenderer::usingSoftwareRasterizer()` checks
+    `GL_RENDERER` for llvmpipe/softpipe/swrast and, when it matches, applies
+    `vf=format=yuv420p` — a no-op for 8-bit content, a CPU conversion for 10-bit. It is
+    deliberately conditional so a real GPU keeps the native path.
+
+    The workaround must be applied **before** the queued file starts playing, which is why
+    it is queued ahead of `onRenderContextReady()` — see trap 2.
+
+    Do not misread this as slow decode. AV1 1920x800 decodes at **25× realtime** here
+    (20 cores, measured with `ffmpeg -f null -`); software *decode* is not the bottleneck,
+    software *rendering* is.
+
 ### Browser UI
 
 9. **A delegate cannot take `required property string text`.** `ItemDelegate` already has a
@@ -219,6 +248,12 @@ So the porting debt is deliberately kept small rather than paid early:
 
 Revisit when Windows becomes a release target, or when hwdec, 4K/HEVC or HDR playback
 needs judging — naturally after milestone 3.
+
+**Native Linux** needs no porting: the 10-bit workaround in trap 11 disables itself on a
+real GPU (`GL_RENDERER` stops matching), and the screenshot tooling is simply replaced by
+`grim`/`import`. The one thing left hardcoded for WSL's sake is `hwdec=no` — on a machine
+with a GPU that leaves vaapi/nvdec unused and burns CPU for nothing. Making it conditional
+on the same software-rasterizer check is the obvious follow-up.
 
 ## Next up
 

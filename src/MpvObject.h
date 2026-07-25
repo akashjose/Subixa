@@ -47,6 +47,9 @@ private slots:
     void doUpdate();
     void onMpvEvents();
     void onRenderContextReady();
+    // Invoked from the render thread when GL_RENDERER turns out to be a software
+    // rasterizer, which cannot render 10-bit planes correctly.
+    void forceEightBitVideo();
 
 private:
     static void onMpvRedraw(void *ctx);

@@ -6,6 +6,7 @@
 #include <QtCore/QMetaObject>
 #include <QtCore/QVarLengthArray>
 #include <QtGui/QOpenGLContext>
+#include <QtGui/QOpenGLFunctions>
 // Qt 6 moved QOpenGLFramebufferObject out of QtGui into the QtOpenGL module.
 #include <QtOpenGL/QOpenGLFramebufferObject>
 #include <QtQuick/QQuickWindow>
@@ -53,6 +54,13 @@ public:
             } else {
                 mpv_render_context_set_update_callback(m_mpvGL, &MpvObject::onMpvRedraw,
                                                        m_obj);
+                // Queued before onRenderContextReady on purpose: the workaround has
+                // to be in place before the pending file starts playing, or the
+                // filter chain gets rebuilt mid-playback.
+                if (usingSoftwareRasterizer()) {
+                    QMetaObject::invokeMethod(m_obj, "forceEightBitVideo",
+                                              Qt::QueuedConnection);
+                }
                 // Tell the item it can now safely start playback.
                 QMetaObject::invokeMethod(m_obj, "onRenderContextReady",
                                           Qt::QueuedConnection);
@@ -95,6 +103,30 @@ public:
     }
 
 private:
+    // Mesa's software rasterizers render 10-bit planes wrong: a yuv420p10 file
+    // comes out either black or heavily striped, while its 8-bit twin is fine.
+    // Detected from GL_RENDERER rather than assumed, so a real GPU keeps the
+    // native 10-bit path.
+    static bool usingSoftwareRasterizer()
+    {
+        QOpenGLContext *glctx = QOpenGLContext::currentContext();
+        if (!glctx)
+            return false;
+
+        const auto *name = reinterpret_cast<const char *>(
+            glctx->functions()->glGetString(GL_RENDERER));
+        if (!name)
+            return false;
+
+        // Covers llvmpipe, softpipe, swrast, and Mesa's classic "Software
+        // Rasterizer" string, which contains none of the driver names. zink
+        // reports the Vulkan device it sits on, so "zink Vulkan 1.3(llvmpipe ...)"
+        // matches while "zink Vulkan 1.3(AMD Radeon ...)" correctly does not.
+        const QByteArray renderer = QByteArray(name).toLower();
+        return renderer.contains("llvmpipe") || renderer.contains("softpipe")
+               || renderer.contains("swrast") || renderer.contains("software");
+    }
+
     MpvObject *m_obj = nullptr;
     mpv_render_context *m_mpvGL = nullptr;
 };
@@ -242,6 +274,19 @@ void MpvObject::onRenderContextReady()
         m_pendingFile.clear();
         command({QStringLiteral("loadfile"), file});
     }
+}
+
+void MpvObject::forceEightBitVideo()
+{
+    if (!m_mpv)
+        return;
+
+    // Costs nothing for 8-bit content -- the filter is a no-op when the input is
+    // already yuv420p. For 10-bit it converts on the CPU, which is the price of
+    // getting a correct picture out of a software rasterizer at all.
+    mpv_set_property_string(m_mpv, "vf", "format=yuv420p");
+    emit logMessage(QStringLiteral(
+        "software rasterizer detected: converting video to 8-bit before upload"));
 }
 
 void MpvObject::setOption(const QString &name, const QString &value)
