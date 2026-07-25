@@ -6,6 +6,13 @@
 #
 # Coordinates are measured from the window frame, which is exactly the origin of
 # the image wsl-screenshot.ps1 produces -- read them straight off a screenshot.
+#
+# This moves the real cursor and clicks wherever it lands, so the player must
+# genuinely be the foreground window first. Windows refuses focus changes asked
+# for by a background process, and the earlier version ignored that: when
+# SetForegroundWindow lost, the click went into whatever app was on top instead.
+# Foreground is now forced, verified, and the script aborts rather than clicking
+# into someone else's window.
 
 param([int]$X, [int]$Y, [string]$Text = "")
 
@@ -15,8 +22,13 @@ using System;
 using System.Runtime.InteropServices;
 public class Inp {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, uint d, IntPtr e);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out RECT rect, int size);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
@@ -24,11 +36,37 @@ public class Inp {
 
 $p = Get-Process | Where-Object { $_.MainWindowTitle -like "*custom media player*" } | Select-Object -First 1
 if (-not $p) { Write-Output "NOWINDOW"; exit 1 }
-[Inp]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
-Start-Sleep -Milliseconds 500
+$h = $p.MainWindowHandle
+
+# SW_RESTORE only when actually minimised: on a *maximised* window it un-maximises,
+# which silently destroys the one state a fullscreen/wide-window test is checking --
+# and then these window-relative coordinates point outside the shrunken window.
+if ([Inp]::IsIconic($h)) { [Inp]::ShowWindow($h, 9) | Out-Null }       # SW_RESTORE
+for ($try = 0; $try -lt 3 -and [Inp]::GetForegroundWindow() -ne $h; $try++) {
+    # The synthetic ALT press lifts the foreground lock; without it
+    # SetForegroundWindow silently does nothing for a background caller.
+    # Only when the window is not already ours -- see the keyup note below.
+    [Inp]::keybd_event(0x12, 0, 0, [IntPtr]::Zero)
+    [Inp]::keybd_event(0x12, 0, 2, [IntPtr]::Zero)                     # KEYEVENTF_KEYUP
+    [Inp]::BringWindowToTop($h) | Out-Null
+    [Inp]::SetForegroundWindow($h) | Out-Null
+    Start-Sleep -Milliseconds 600
+}
+if ([Inp]::GetForegroundWindow() -ne $h) {
+    Write-Output "NOTFOREGROUND (refusing to click, another window is on top)"
+    exit 1
+}
+
+# The ALT keyup above lands in the *old* foreground window, so the app can be
+# left believing ALT is still held -- and then every -Text character arrives as
+# an ALT accelerator (Alt+A, Alt+L, ...) which a QML text field simply ignores.
+# Symptom is a click that clearly worked next to typing that vanished. Release
+# it again now that the player has focus.
+[Inp]::keybd_event(0x12, 0, 2, [IntPtr]::Zero)                         # KEYEVENTF_KEYUP
+Start-Sleep -Milliseconds 120
 
 $r = New-Object Inp+RECT
-[Inp]::DwmGetWindowAttribute($p.MainWindowHandle, 9, [ref]$r, 16) | Out-Null
+[Inp]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) | Out-Null
 
 [Inp]::SetCursorPos($r.Left + $X, $r.Top + $Y) | Out-Null
 Start-Sleep -Milliseconds 200

@@ -79,14 +79,50 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 `tools/wsl-input.ps1` clicks and types into the same window, so search, tabs and
 click-to-seek can be exercised end to end without a human at the keyboard. Its
 coordinates are window-relative and share an origin with the screenshot, so they can be
-read straight off a capture.
+read straight off a capture. Note the panel layout shifts with content: with subtitle
+tabs present the search box sits at y≈111, without them at y≈90.
+
+**Both scripts must hold the foreground, and both used to assume they did.** Windows
+refuses a focus change requested by a background process, so `SetForegroundWindow` from a
+WSL-launched PowerShell often just loses — silently. The old screenshot script then
+`CopyFromScreen`'d the window's *screen rectangle* and saved whichever window was on top,
+which reads as a render bug in this app; the old input script clicked those coordinates,
+sending clicks into an unrelated application. Now: the capture uses
+`PrintWindow(PW_RENDERFULLCONTENT)`, which is z-order independent and steals no focus, and
+falls back to a screen grab only after verifying foreground, printing `NOTFOREGROUND`
+rather than saving the wrong pixels. `wsl-input.ps1` forces foreground, verifies it, and
+aborts instead of clicking blind.
+
+**`SW_RESTORE` un-maximises a maximised window.** Both scripts used to call
+`ShowWindow(h, SW_RESTORE)` unconditionally before doing anything, so any attempt to check
+a maximised or very wide window silently shrank it back to ~1186x733 first — destroying the
+one piece of state a trap 10 / fullscreen test exists to exercise, and leaving
+window-relative click coordinates pointing outside the window. Both now restore only when
+`IsIconic()` says the window is actually minimised. A capture that comes back at the normal
+window size after you maximised is this bug, not a failed maximise.
+
+The foreground unlock is a synthetic ALT press, and **it must be released again after the
+window is focused.** The keyup lands in the *old* foreground window, so the player can be
+left thinking ALT is held, and then every `-Text` character arrives as an accelerator
+(Alt+A, Alt+L, …) that a QML `TextField` ignores. The symptom is a click that demonstrably
+worked — a tab switches — beside typing that vanishes with no error.
 
 Two things to know before believing a black window:
 
 - **The whole WSLg session can degrade into painting black, and stays that way.** Runs
   that log `VO: [libmpv] ... yuv420p` and advance the clock normally paint black at *every*
   window size, including files and timestamps that rendered correctly minutes earlier in
-  the same session. It sets in after many launch/kill cycles. What it is **not**: not the
+  the same session. It sets in after many launch/kill cycles — roughly seven was enough
+  once, so budget the render-sensitive checks early rather than re-launching freely.
+
+  It does **not** always present as pure black. It has also appeared as a *frozen partial
+  frame*: `testclip.mp4` painting one wedge of a colour-bar frame, the rest black, byte
+  identical at 0:01 and again at 0:14 while the transport clock advanced normally. Same
+  class of failure, same fix. The tell is the freeze — a real decode/render bug would still
+  change with the picture. Confirm against the source before believing any dark or partial
+  frame: `ffmpeg -ss <t> -i <file> -frames:v 1 out.png`, plus
+  `-vf signalstats,metadata=print:key=lavfi.signalstats.YAVG` for average luma (on 10-bit
+  the scale is 0..1023, so ~307 is a normally lit shot, not a black one). What it is **not**: not the
   sync bug in trap 10 (it reproduces with `CMP_NO_SYNC=1` and without, identically), not
   instance count (one process alone still fails), not memory (10 GB free), and weston.log
   shows nothing. Still unexplained.
