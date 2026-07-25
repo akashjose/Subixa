@@ -187,13 +187,20 @@ ApplicationWindow {
     // Auto-follow. Cheap enough to run on every position tick: rowAt() is a
     // binary search plus a proxy row mapping, and the view is only touched when
     // the row actually changes.
+    //
+    // Positioning is the ListView's job rather than ours: setting currentIndex
+    // and letting highlightRangeMode keep it inside a band means the line being
+    // spoken sits in the upper middle of the panel with the next few visible
+    // below it. The old positionViewAtIndex(Contain) scrolled the *minimum*
+    // distance instead, which pinned each new line to the bottom edge and showed
+    // no lookahead at all.
     function syncFollow() {
         var row = lines.rowAt(Math.round(mpv.position * 1000))
         if (row === root.currentRow)
             return
         root.currentRow = row
-        if (followToggle.checked && row >= 0)
-            lineList.positionViewAtIndex(row, ListView.Contain)
+        if (followToggle.checked)
+            lineList.currentIndex = row
     }
 
     Connections {
@@ -703,7 +710,7 @@ ApplicationWindow {
                         // than wait for the next cue boundary.
                         onCheckedChanged: {
                             if (checked && root.currentRow >= 0)
-                                lineList.positionViewAtIndex(root.currentRow, ListView.Contain)
+                                lineList.currentIndex = root.currentRow
                         }
                     }
                 }
@@ -718,6 +725,23 @@ ApplicationWindow {
                     model: lines
 
                     ScrollBar.vertical: ScrollBar {}
+
+                    // Keep the playing line in a band in the upper middle rather
+                    // than at a fixed point. A band gives hysteresis: the view
+                    // only scrolls once the line would leave it, so a run of
+                    // short cues does not jog the list on every single one, and
+                    // there are always a few upcoming lines visible below.
+                    //
+                    // Only while following -- with the range applied when follow
+                    // is off, scrolling by hand would be dragged back.
+                    highlightRangeMode: followToggle.checked ? ListView.ApplyRange
+                                                             : ListView.NoHighlightRange
+                    preferredHighlightBegin: height * 0.3
+                    preferredHighlightEnd: height * 0.55
+                    // Animated, because an instant jump between distant cues (a
+                    // seek, or a gap in dialogue) loses the reader's place.
+                    highlightMoveDuration: 220
+                    highlightMoveVelocity: -1
 
                     // Dragging the list is a statement of intent: stop yanking
                     // the viewport back to the playing line.
