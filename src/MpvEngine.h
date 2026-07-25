@@ -78,6 +78,15 @@ class MpvEngine : public QObject
     // glFinish workarounds already use, applied one layer up.
     Q_PROPERTY(bool softwareRendering READ softwareRendering
                    NOTIFY softwareRenderingChanged)
+    // What GL_RENDERER actually said, and a verdict drawn from it.
+    //
+    // The verdict exists because Mesa's D3D12 driver renders Qt Quick's text
+    // materials in the wrong colour while every other primitive is exact -- see
+    // PaintedText. It is reported rather than acted on here: the UI decides what
+    // to do, and the user can override it.
+    Q_PROPERTY(QString rendererName READ rendererName NOTIFY rendererNameChanged)
+    Q_PROPERTY(bool glyphRenderingSuspect READ glyphRenderingSuspect
+                   NOTIFY rendererNameChanged)
 
 public:
     explicit MpvEngine(QObject *parent = nullptr);
@@ -109,6 +118,9 @@ public:
     double cacheEnd() const { return m_cacheEnd; }
     QVariantList chapters() const { return m_chapters; }
     bool softwareRendering() const { return m_softwareRendering; }
+    QString rendererName() const { return m_rendererName; }
+    bool glyphRenderingSuspect() const;
+    void setRendererName(const QString &name);
 
     // Decoded video size, empty until mpv reports it. Read by the video item to
     // decide how large a framebuffer is worth creating.
@@ -227,6 +239,7 @@ signals:
     void cacheEndChanged();
     void chaptersChanged();
     void softwareRenderingChanged();
+    void rendererNameChanged();
     void videoSizeChanged();
     void fileLoaded();
     // Playback reached the end of the file. Emitted on the edge only, and the
@@ -295,5 +308,6 @@ private:
     bool m_hwdecForced = false;
     bool m_endOfFile = false;
     bool m_softwareRendering = false;
+    QString m_rendererName;
     bool m_rendererKnown = false;
 };

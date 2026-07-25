@@ -66,6 +66,8 @@ set(CMP_APP_SOURCES
     src/Playlist.h
     src/ShortcutRegistry.cpp
     src/ShortcutRegistry.h
+    src/PaintedText.cpp
+    src/PaintedText.h
     src/GraphicsSetup.cpp
     src/GraphicsSetup.h
 )
@@ -83,6 +85,7 @@ set(CMP_QML_FILES
     qml/Theme.qml
     qml/ui/Icons.qml
     qml/ui/Icon.qml
+    qml/ui/AppText.qml
     qml/ui/IconButton.qml
     qml/ui/TextButton.qml
     qml/ui/ToolTipBubble.qml

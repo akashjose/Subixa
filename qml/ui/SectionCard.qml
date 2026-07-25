@@ -31,7 +31,7 @@ Rectangle {
             anchors.margins: Theme.space.xl
             spacing: Theme.space.lg
 
-            Text {
+            AppText {
                 Layout.fillWidth: true
                 visible: card.title !== ""
                 text: card.title.toUpperCase()

@@ -87,7 +87,7 @@ T.Button {
                 color: control._tint
             }
 
-            Text {
+            AppText {
                 anchors.verticalCenter: parent.verticalCenter
                 text: control.text
                 // See ToolTipBubble: PlainText everywhere. A button can carry a

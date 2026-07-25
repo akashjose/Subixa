@@ -64,7 +64,7 @@ T.MenuItem {
                 }
             }
 
-            Text {
+            AppText {
                 anchors.verticalCenter: parent.verticalCenter
                 text: item.text
                 textFormat: Text.PlainText
@@ -74,7 +74,7 @@ T.MenuItem {
             }
         }
 
-        Text {
+        AppText {
             id: shortcutLabel
             anchors.right: parent.right
             anchors.rightMargin: Theme.space.lg

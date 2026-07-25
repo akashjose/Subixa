@@ -52,7 +52,7 @@ C.ToolTip {
         topPadding: Theme.space.sm
         bottomPadding: Theme.space.sm
 
-        Text {
+        AppText {
             anchors.verticalCenter: parent.verticalCenter
             width: Math.min(implicitWidth, 260)
             text: tip.text
@@ -77,7 +77,7 @@ C.ToolTip {
             radius: Theme.radius.sm
             color: Theme.color.bgSunken
 
-            Text {
+            AppText {
                 id: shortcutLabel
                 anchors.centerIn: parent
                 text: tip.shortcut

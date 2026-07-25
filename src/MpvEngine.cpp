@@ -196,6 +196,30 @@ MpvEngine::~MpvEngine()
     m_mpv = nullptr;
 }
 
+void MpvEngine::setRendererName(const QString &name)
+{
+    if (m_rendererName == name)
+        return;
+    m_rendererName = name;
+    emit rendererNameChanged();
+}
+
+bool MpvEngine::glyphRenderingSuspect() const
+{
+    // Mesa's D3D12 Gallium driver, which exists only for WSL. Qt Quick's text
+    // materials come out in the wrong colour there -- #aab2c2 as pure green,
+    // #e8eaf0 as yellow, an 11px #7e93b5 timestamp as black and invisible --
+    // while rectangles, images and Shapes geometry in the same frame are exact
+    // to the byte. Reproduced in Qt's own qml binary with no application code,
+    // on Mesa 25.2.8 and 26.1.5 alike, and reported upstream.
+    //
+    // Matched by name rather than probed. A readback probe would be the better
+    // instrument in principle, but trap 10 already records this environment
+    // returning a *perfect* frame from toImage() while the screen was wrong, so
+    // a readback cannot be trusted to tell the truth about what is displayed.
+    return m_rendererName.contains(QLatin1String("D3D12"), Qt::CaseInsensitive);
+}
+
 void MpvEngine::log(const QString &text)
 {
     emit logMessage(text);

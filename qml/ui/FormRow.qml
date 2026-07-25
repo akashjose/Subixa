@@ -24,7 +24,7 @@ RowLayout {
             Layout.alignment: Qt.AlignTop
             spacing: Theme.space.xxs
 
-            Text {
+            AppText {
                 Layout.fillWidth: true
                 text: formRow.label
                 textFormat: Text.PlainText
@@ -34,7 +34,7 @@ RowLayout {
                 wrapMode: Text.WordWrap
             }
 
-            Text {
+            AppText {
                 Layout.fillWidth: true
                 visible: formRow.help !== ""
                 text: formRow.help
@@ -54,7 +54,7 @@ RowLayout {
             spacing: Theme.space.md
         },
 
-        Text {
+        AppText {
             Layout.preferredWidth: 64
             Layout.alignment: Qt.AlignTop
             horizontalAlignment: Text.AlignRight

@@ -212,7 +212,7 @@ Item {
                 width: parent.width - 2 * Theme.space.lg
                 spacing: Theme.space.xs
 
-                Text {
+                AppText {
                     id: previewTime
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: bar._fmt(bar.hoverSeconds)
@@ -222,7 +222,7 @@ Item {
                     font.pixelSize: Theme.type.monoSize
                 }
 
-                Text {
+                AppText {
                     id: previewCue
                     width: parent.width
                     visible: preview.cueText !== ""

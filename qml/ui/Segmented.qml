@@ -48,7 +48,7 @@ Rectangle {
                     }
                 }
 
-                Text {
+                AppText {
                     id: label
                     anchors.centerIn: parent
                     text: seg._label(parent.modelData)

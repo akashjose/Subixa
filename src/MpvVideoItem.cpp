@@ -305,8 +305,10 @@ void MpvVideoItem::onRenderContextCreated(bool software)
 
 void MpvVideoItem::reportRenderer(const QString &renderer, const QString &version)
 {
-    if (m_engine)
-        m_engine->log(QStringLiteral("GL_RENDERER: %1 | %2").arg(renderer, version));
+    if (!m_engine)
+        return;
+    m_engine->setRendererName(renderer);
+    m_engine->log(QStringLiteral("GL_RENDERER: %1 | %2").arg(renderer, version));
 }
 
 void MpvVideoItem::reportFboCap(const QSize &pane, const QSize &fbo)

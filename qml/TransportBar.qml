@@ -130,14 +130,14 @@ Rectangle {
             RowLayout {
                 spacing: 0
 
-                Text {
+                AppText {
                     text: bar.fmtTime(bar.mpv.position)
                     textFormat: Text.PlainText
                     color: bar.overVideo ? Theme.color.onVideo : Theme.color.textPrimary
                     font.family: Theme.type.mono
                     font.pixelSize: Theme.type.monoSize
                 }
-                Text {
+                AppText {
                     visible: bar.showDuration
                     text: " / "
                     textFormat: Text.PlainText
@@ -145,7 +145,7 @@ Rectangle {
                     font.family: Theme.type.mono
                     font.pixelSize: Theme.type.monoSize
                 }
-                Text {
+                AppText {
                     visible: bar.showDuration
                     text: bar.fmtTime(bar.mpv.duration)
                     textFormat: Text.PlainText

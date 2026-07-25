@@ -26,6 +26,7 @@ Window {
     required property var shortcuts
 
     signal subtitleStyleChanged()
+    signal textRenderingChanged()
 
     width: 880
     height: 640
@@ -68,7 +69,7 @@ Window {
                 anchors.margins: Theme.space.md
                 spacing: Theme.space.xxs
 
-                Text {
+                AppText {
                     Layout.fillWidth: true
                     Layout.margins: Theme.space.md
                     text: "Settings"
@@ -124,7 +125,7 @@ Window {
                                                               : Theme.color.textSecondary
                             }
 
-                            Text {
+                            AppText {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.label
                                 textFormat: Text.PlainText
@@ -572,14 +573,14 @@ Window {
                                     ColumnLayout {
                                         spacing: 0
 
-                                        Text {
+                                        AppText {
                                             text: modelData.label
                                             textFormat: Text.PlainText
                                             color: Theme.color.textPrimary
                                             font.family: Theme.type.sans
                                             font.pixelSize: Theme.type.bodySize
                                         }
-                                        Text {
+                                        AppText {
                                             text: modelData.category
                                             textFormat: Text.PlainText
                                             color: Theme.color.textTertiary
@@ -599,7 +600,7 @@ Window {
 
                                     // Conflict warning, shown against the row
                                     // being edited rather than as a dialog.
-                                    Text {
+                                    AppText {
                                         visible: capture.conflict !== ""
                                         text: "Used by " + capture.conflict
                                         textFormat: Text.PlainText
@@ -774,6 +775,25 @@ Window {
                     }
 
                     FormRow {
+                        label: "Text rendering"
+                        help: win.mpv.glyphRenderingSuspect
+                              ? "Auto has selected compatibility: this graphics "
+                                + "driver (" + win.mpv.rendererName
+                                + ") does not colour text correctly."
+                              : "Auto uses the GPU, which is faster and sharper."
+                        Segmented {
+                            options: [{ label: "Auto", value: "auto" },
+                                      { label: "GPU", value: "gpu" },
+                                      { label: "Compatibility", value: "painted" }]
+                            value: win.prefs.textRendering
+                            onActivated: (v) => {
+                                win.prefs.textRendering = v
+                                win.textRenderingChanged()
+                            }
+                        }
+                    }
+
+                    FormRow {
                         label: "Visual effects"
                         help: win.mpv.softwareRendering
                               ? "Off automatically: this machine is rendering in "
@@ -795,7 +815,7 @@ Window {
                         Layout.fillWidth: true
                         spacing: Theme.space.sm
 
-                        Text {
+                        AppText {
                             text: "custom media player " + Qt.application.version
                             textFormat: Text.PlainText
                             color: Theme.color.textPrimary
@@ -803,7 +823,7 @@ Window {
                             font.pixelSize: Theme.type.bodySize
                             font.weight: Theme.type.weightStrong
                         }
-                        Text {
+                        AppText {
                             Layout.fillWidth: true
                             text: "Built on Qt " + Qt.application.version
                                   + " and libmpv. Graphics: "

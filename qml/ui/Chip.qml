@@ -39,7 +39,7 @@ Rectangle {
             color: chip.textColor
         }
 
-        Text {
+        AppText {
             anchors.verticalCenter: parent.verticalCenter
             text: chip.text
             textFormat: Text.PlainText

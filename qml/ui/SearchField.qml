@@ -54,7 +54,7 @@ T.TextField {
         color: field.activeFocus ? Theme.color.textSecondary : Theme.color.textTertiary
     }
 
-    Text {
+    AppText {
         anchors.fill: parent
         anchors.leftMargin: field.leftPadding
         anchors.rightMargin: field.rightPadding

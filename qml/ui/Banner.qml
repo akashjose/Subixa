@@ -50,7 +50,7 @@ Rectangle {
             color: banner._edge
         }
 
-        Text {
+        AppText {
             anchors.verticalCenter: parent.verticalCenter
             width: Math.min(implicitWidth, 420)
             text: banner.message

@@ -28,7 +28,7 @@ ColumnLayout {
         animateColor: false
     }
 
-    Text {
+    AppText {
         Layout.alignment: Qt.AlignHCenter
         Layout.maximumWidth: 380
         visible: empty.title !== ""
@@ -42,7 +42,7 @@ ColumnLayout {
         wrapMode: Text.WordWrap
     }
 
-    Text {
+    AppText {
         Layout.alignment: Qt.AlignHCenter
         Layout.maximumWidth: 380
         visible: empty.body !== ""
@@ -52,7 +52,6 @@ ColumnLayout {
         font.family: Theme.type.sans
         font.pixelSize: Theme.type.bodySize
         lineHeight: Theme.type.bodyLine
-        lineHeightMode: Text.ProportionalHeight
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
     }

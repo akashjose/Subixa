@@ -117,7 +117,7 @@ T.ItemDelegate {
                     anchors.top: parent.top
                     spacing: 1
 
-                    Text {
+                    AppText {
                         id: timeLabel
                         anchors.right: parent.right
                         text: row.model.start
@@ -140,7 +140,7 @@ T.ItemDelegate {
                     // Reading speed, for a QC pass. Over 21 characters a second
                     // is faster than most people read comfortably, which is the
                     // threshold every subtitling house checks against.
-                    Text {
+                    AppText {
                         anchors.right: parent.right
                         visible: row.showCueDuration
                         readonly property real seconds:
@@ -163,7 +163,7 @@ T.ItemDelegate {
                 opacity: 0.6
             }
 
-            Text {
+            AppText {
                 width: parent.width - x
                 leftPadding: Theme.space.lg
                 rightPadding: Theme.space.lg
@@ -171,7 +171,6 @@ T.ItemDelegate {
                 font.family: Theme.type.sans
                 font.pixelSize: Theme.rowFontSize
                 lineHeight: Theme.type.cueLine
-                lineHeightMode: Text.ProportionalHeight
                 wrapMode: Text.WordWrap
                 // StyledText renders the subtitler's own italics, bold and
                 // speaker colours; PlainText is the escape hatch for a track
@@ -197,7 +196,7 @@ T.ItemDelegate {
             spacing: 1
             visible: !row.wide
 
-            Text {
+            AppText {
                 text: row.model.start
                 textFormat: Text.PlainText
                 color: row.current ? Theme.color.timestampCurrent : Theme.color.timestamp
@@ -205,7 +204,7 @@ T.ItemDelegate {
                 font.pixelSize: Math.max(9, Theme.rowFontSize - 3)
             }
 
-            Text {
+            AppText {
                 width: parent.width
                 color: row.current ? Theme.color.textPrimary : Theme.color.textSecondary
                 font.family: Theme.type.sans

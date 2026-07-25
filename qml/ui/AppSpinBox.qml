@@ -33,7 +33,7 @@ Row {
         autoRepeat: true
     }
 
-    Text {
+    AppText {
         anchors.verticalCenter: parent.verticalCenter
         width: Math.max(52, implicitWidth)
         horizontalAlignment: Text.AlignHCenter

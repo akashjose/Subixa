@@ -40,6 +40,11 @@ QtObject {
     // distinct surface colour and border as well as a shadow -- the UI has to be
     // complete without a single one of them.
     property bool effectsEnabled: true
+    // Draw text with QPainter into a texture rather than with the scene graph's
+    // glyph materials. Set from the graphics driver at startup and overridable
+    // in Settings -> Interface; see PaintedText.h. Off is the fast, sharp,
+    // correct-everywhere default.
+    property bool paintedText: false
 
     readonly property int minimumRowFontSize: 9
     readonly property int maximumRowFontSize: 22

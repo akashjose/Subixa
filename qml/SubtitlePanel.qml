@@ -139,7 +139,7 @@ Rectangle {
                 // The track being read, not the word "Subtitles". Someone
                 // looking at the subtitle panel knows it is the subtitle panel;
                 // which of 65 tracks they are reading is the useful thing.
-                Text {
+                AppText {
                     Layout.fillWidth: true
                     text: {
                         var tracks = panel.manager.tracks
@@ -281,7 +281,7 @@ Rectangle {
                             anchors.centerIn: parent
                             spacing: Theme.space.sm
 
-                            Text {
+                            AppText {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: tabButton.modelData.label
                                 textFormat: Text.PlainText
@@ -298,7 +298,7 @@ Rectangle {
                             // The cue count as a de-emphasised badge rather than
                             // welded into the label, so the two stop competing
                             // at the same weight.
-                            Text {
+                            AppText {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: tabButton.modelData.lineCount
                                 textFormat: Text.PlainText
@@ -466,7 +466,7 @@ Rectangle {
                     color: Theme.color.accentText
                 }
 
-                Text {
+                AppText {
                     visible: panel.width >= 340
                     text: "Delay"
                     textFormat: Text.PlainText
@@ -486,7 +486,7 @@ Rectangle {
                     onClicked: panel.delayNudged(-0.05)
                 }
 
-                Text {
+                AppText {
                     text: (panel.subtitleDelay >= 0 ? "+" : "")
                           + panel.subtitleDelay.toFixed(3) + " s"
                     textFormat: Text.PlainText

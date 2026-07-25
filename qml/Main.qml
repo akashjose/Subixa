@@ -91,6 +91,8 @@ ApplicationWindow {
         property int rowFontSize: 13
         property bool showStyling: true
         property bool reducedMotion: false
+        // "auto" | "gpu" | "painted". Auto trusts the driver check.
+        property string textRendering: "auto"
 
         // Playback behaviour
         property bool playNextAutomatically: true
@@ -166,6 +168,7 @@ ApplicationWindow {
         Theme.rowFontSize = prefs.rowFontSize
         Theme.showStyling = prefs.showStyling
         Theme.reducedMotion = prefs.reducedMotion
+        root.applyTextRendering()
 
         root.width = prefs.windowWidth
         root.height = prefs.windowHeight
@@ -190,6 +193,22 @@ ApplicationWindow {
         target: mpv
         function onSoftwareRenderingChanged() {
             Theme.effectsEnabled = !mpv.softwareRendering
+        }
+        // The renderer is only known once the video item has made a context, so
+        // this arrives a moment after startup rather than in onCompleted.
+        function onRendererNameChanged() { root.applyTextRendering() }
+    }
+
+    // Which text path to draw with. Auto asks the engine, which reports what
+    // GL_RENDERER actually said rather than guessing from the platform.
+    function applyTextRendering() {
+        Theme.paintedText = prefs.textRendering === "painted"
+                          || (prefs.textRendering === "auto"
+                              && mpv.glyphRenderingSuspect)
+        if (Theme.paintedText) {
+            console.log("text: drawing with QPainter -- "
+                        + mpv.rendererName
+                        + " does not colour glyphs correctly")
         }
     }
 
@@ -997,6 +1016,7 @@ ApplicationWindow {
             shortcuts: root.shortcutStore
             onClosing: settingsLoader.active = false
             onSubtitleStyleChanged: root.applySubtitleStyle()
+            onTextRenderingChanged: root.applyTextRendering()
         }
     }
 
@@ -1261,7 +1281,7 @@ ApplicationWindow {
                     radius: Theme.radius.lg
                     color: Theme.color.scrimVideo
 
-                    Text {
+                    AppText {
                         id: osdLabel
                         anchors.centerIn: parent
                         text: root.osdText
