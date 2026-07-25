@@ -15,7 +15,7 @@ option(SUBIXA_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
 # config), and a dynamically linked build resolves the QML plugin through the
 # import path at runtime with no link-time dependency at all. A future *static*
 # build will need Qt6QuickShapesPrivate here and qt_import_qml_plugins.
-set(SUBIXA_QT_COMPONENTS Core Gui Quick Qml QuickControls2 OpenGL)
+set(SUBIXA_QT_COMPONENTS Core Gui Quick Qml QuickControls2 OpenGL Svg)
 if(SUBIXA_BUILD_TESTS)
     list(APPEND SUBIXA_QT_COMPONENTS Test)
 endif()
@@ -117,6 +117,14 @@ qt_add_executable(subixa
 target_compile_definitions(subixa PRIVATE
     SUBIXA_VERSION="${PROJECT_VERSION}")
 
+# The window icon, compiled in. The desktop entry points at the installed copy
+# below, but that only covers a launcher: a window needs the icon at runtime,
+# and a player run straight from a build tree has no installed files at all.
+qt_add_resources(subixa "subixa_icon"
+    PREFIX "/"
+    FILES icons/subixa.svg
+)
+
 # Must precede qt_add_qml_module: the property is read as the module is defined,
 # and a Theme.qml registered without it is an ordinary type that every user would
 # instantiate a private copy of.
@@ -142,6 +150,8 @@ target_link_libraries(subixa PRIVATE
     Qt6::Qml
     Qt6::QuickControls2
     Qt6::OpenGL
+    # For QIcon to rasterise the SVG application icon.
+    Qt6::Svg
     PkgConfig::MPV
     PkgConfig::FFMPEG
 )
@@ -161,6 +171,10 @@ install(TARGETS subixa
 )
 install(FILES subixa.desktop
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
+)
+# hicolor/scalable is what the desktop entry's `Icon=subixa` resolves against.
+install(FILES icons/subixa.svg
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
 )
 install(FILES LICENSE
     DESTINATION ${CMAKE_INSTALL_DOCDIR}

@@ -5,6 +5,7 @@
 #include <QtCore/QDebug>
 #include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QIcon>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickWindow>
@@ -61,6 +62,11 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QGuiApplication app(argc, argv);
+
+    // Compiled in rather than read from the install prefix, so a build tree run
+    // looks like an installed one. The desktop entry names the installed copy
+    // separately; this is what the window and the task switcher use.
+    app.setWindowIcon(QIcon(QStringLiteral(":/icons/subixa.svg")));
 
     // Grayscale glyphs, belt and braces with the render type above.
     //
