@@ -1,10 +1,11 @@
 #include "SubtitleManager.h"
 
 #include "SubtitleExtractor.h"
+#include "SubtitleLineModel.h"
 
 #include <QtCore/QFileInfo>
 #include <QtCore/QVariantMap>
-#include <algorithm>
+#include <QtQml/QQmlEngine>
 
 namespace {
 
@@ -72,6 +73,7 @@ void SubtitleManager::load(const QString &mediaPath)
 
     m_tracks.clear();
     m_tracksView.clear();
+    rebuildModels();
     emit tracksChanged();
 
     ++m_requestId;
@@ -90,6 +92,7 @@ void SubtitleManager::clear()
 
     m_tracks.clear();
     m_tracksView.clear();
+    rebuildModels();
     setBusy(false);
     setStatus(QString());
     emit tracksChanged();
@@ -102,6 +105,7 @@ void SubtitleManager::onExtractFinished(int requestId, const SubtitleTrackList &
 
     m_tracks = tracks;
     rebuildTracksView();
+    rebuildModels();
     setBusy(false);
 
     int textTracks = 0;
@@ -132,6 +136,7 @@ void SubtitleManager::onExtractFailed(int requestId, const QString &reason)
 
     m_tracks.clear();
     m_tracksView.clear();
+    rebuildModels();
     setBusy(false);
     setStatus(reason);
     emit tracksChanged();
@@ -161,54 +166,35 @@ void SubtitleManager::rebuildTracksView()
     }
 }
 
-QVariantList SubtitleManager::lines(int trackId) const
+void SubtitleManager::rebuildModels()
 {
-    QVariantList rows;
-    if (trackId < 0 || trackId >= m_tracks.size())
-        return rows;
+    while (m_models.size() < m_tracks.size())
+        m_models.append(new SubtitleLineModel(this));
 
-    const QVector<SubtitleLine> &lines = m_tracks.at(trackId).lines;
-    rows.reserve(lines.size());
-    for (const SubtitleLine &line : lines) {
-        QVariantMap row;
-        row[QStringLiteral("startMs")] = line.startMs;
-        row[QStringLiteral("endMs")] = line.endMs;
-        row[QStringLiteral("start")] = formatTimestamp(line.startMs);
-        row[QStringLiteral("text")] = line.text;
-        rows.append(row);
+    // Surplus models from a previous, larger file are emptied rather than
+    // deleted -- a QML binding may still hold one for an instant after the
+    // track list changes.
+    for (int i = 0; i < m_models.size(); ++i) {
+        m_models[i]->setLines(i < m_tracks.size() ? m_tracks.at(i).lines
+                                                  : QVector<SubtitleLine>());
     }
-    return rows;
 }
 
-int SubtitleManager::lineIndexAt(int trackId, qint64 positionMs) const
+SubtitleLineModel *SubtitleManager::model(int trackId) const
 {
-    if (trackId < 0 || trackId >= m_tracks.size())
-        return -1;
+    if (trackId < 0 || trackId >= m_models.size())
+        return nullptr;
 
-    const QVector<SubtitleLine> &lines = m_tracks.at(trackId).lines;
-    if (lines.isEmpty())
-        return -1;
-
-    // First cue starting after the position; the one before it is the answer.
-    const auto it = std::upper_bound(lines.cbegin(), lines.cend(), positionMs,
-                                     [](qint64 ms, const SubtitleLine &line) {
-                                         return ms < line.startMs;
-                                     });
-    if (it == lines.cbegin())
-        return -1;
-    return static_cast<int>(std::distance(lines.cbegin(), it) - 1);
+    SubtitleLineModel *model = m_models.at(trackId);
+    // Without this the engine takes JavaScript ownership of a model returned
+    // from an invokable and can collect it out from under us.
+    QQmlEngine::setObjectOwnership(model, QQmlEngine::CppOwnership);
+    return model;
 }
 
 QString SubtitleManager::formatTimestamp(qint64 ms)
 {
-    if (ms < 0)
-        ms = 0;
-    const qint64 totalSeconds = ms / 1000;
-    return QStringLiteral("%1:%2:%3.%4")
-        .arg(totalSeconds / 3600, 2, 10, QLatin1Char('0'))
-        .arg((totalSeconds / 60) % 60, 2, 10, QLatin1Char('0'))
-        .arg(totalSeconds % 60, 2, 10, QLatin1Char('0'))
-        .arg(ms % 1000, 3, 10, QLatin1Char('0'));
+    return formatSubtitleTimestamp(ms);
 }
 
 void SubtitleManager::setBusy(bool busy)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QtCore/QLatin1Char>
 #include <QtCore/QMetaType>
 #include <QtCore/QString>
 #include <QtCore/QVector>
@@ -38,3 +39,17 @@ struct SubtitleTrack
 using SubtitleTrackList = QVector<SubtitleTrack>;
 
 Q_DECLARE_METATYPE(SubtitleTrackList)
+
+// hh:mm:ss.mmm. Lives here rather than on SubtitleManager so the list model can
+// format a row without depending on the manager.
+inline QString formatSubtitleTimestamp(qint64 ms)
+{
+    if (ms < 0)
+        ms = 0;
+    const qint64 totalSeconds = ms / 1000;
+    return QStringLiteral("%1:%2:%3.%4")
+        .arg(totalSeconds / 3600, 2, 10, QLatin1Char('0'))
+        .arg((totalSeconds / 60) % 60, 2, 10, QLatin1Char('0'))
+        .arg(totalSeconds % 60, 2, 10, QLatin1Char('0'))
+        .arg(ms % 1000, 3, 10, QLatin1Char('0'));
+}

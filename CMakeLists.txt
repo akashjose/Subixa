@@ -30,6 +30,10 @@ qt_add_executable(custom_media_player
     src/SubtitleExtractor.h
     src/SubtitleManager.cpp
     src/SubtitleManager.h
+    src/SubtitleLineModel.cpp
+    src/SubtitleLineModel.h
+    src/SubtitleFilterModel.cpp
+    src/SubtitleFilterModel.h
 )
 
 qt_add_qml_module(custom_media_player

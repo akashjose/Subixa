@@ -21,6 +21,7 @@ ApplicationWindow {
             for (var i = 0; i < subs.tracks.length; ++i) {
                 if (subs.tracks[i].browsable) {
                     root.currentTrack = subs.tracks[i].id
+                    trackTabs.currentIndex = i
                     break
                 }
             }
@@ -28,10 +29,47 @@ ApplicationWindow {
     }
 
     property int currentTrack: -1
-    // Snapshot of the selected track's rows, taken on the GUI thread. Fine at
-    // feature-film scale (~110 ms for 40k cues) but it does stall: 200k cues cost
-    // ~600 ms. Milestone 2's QAbstractListModel removes the copy entirely.
-    property var currentLines: currentTrack >= 0 ? subs.lines(currentTrack) : []
+    // View row of the cue playing right now, or -1 when playback is before the
+    // first cue or that cue is filtered out.
+    property int currentRow: -1
+
+    // Rows of the selected track, filtered by the search box. Switching tracks
+    // just repoints the proxy at another model -- no rows are copied, which is
+    // the whole reason the QVariantList snapshot is gone.
+    SubtitleFilterModel {
+        id: lines
+        sourceModel: subs.tracks.length > 0 ? subs.model(root.currentTrack) : null
+    }
+
+    // Auto-follow. Cheap enough to run on every position tick: rowAt() is a
+    // binary search plus a proxy row mapping, and the view is only touched when
+    // the row actually changes.
+    function syncFollow() {
+        var row = lines.rowAt(Math.round(mpv.position * 1000))
+        if (row === root.currentRow)
+            return
+        root.currentRow = row
+        if (followToggle.checked && row >= 0)
+            lineList.positionViewAtIndex(row, ListView.Contain)
+    }
+
+    Connections {
+        target: mpv
+        function onPositionChanged() { root.syncFollow() }
+    }
+
+    Connections {
+        // Filtering or a track switch renumbers the rows, so the highlight has
+        // to be recomputed even though playback has not moved.
+        target: lines
+        function onCountChanged() {
+            root.currentRow = -1
+            // Deferred: countChanged arrives mid rows-inserted/removed, and
+            // scrolling the view from inside its own model update is asking for
+            // trouble.
+            Qt.callLater(root.syncFollow)
+        }
+    }
 
     function fmt(t) {
         if (!isFinite(t) || t < 0)
@@ -134,9 +172,8 @@ ApplicationWindow {
         }
 
         // ---- docked subtitle browser -----------------------------------
-        // Milestone 1 readout: real parsed tracks and rows, but still driven by
-        // plain QVariantList snapshots. Search, tabs and auto-follow arrive with
-        // the QAbstractListModel in milestone 2.
+        // One tab per track, incremental search, click-to-seek, and auto-follow
+        // with a toggle so scrolling by hand does not fight playback.
         Rectangle {
             Layout.preferredWidth: 340
             Layout.fillHeight: true
@@ -167,44 +204,83 @@ ApplicationWindow {
                         Label {
                             color: subs.busy ? "#c8a45c" : "#6a6a7a"
                             font.pixelSize: 11
-                            text: subs.status
+                            // While searching, say how much of the track is
+                            // showing; otherwise the parse result.
+                            text: lines.pattern !== ""
+                                  ? lines.count + " of " + lines.sourceCount + " lines"
+                                  : subs.status
                         }
                     }
                 }
 
-                // One button per track. Becomes a TabBar once tracks carry their
-                // own models.
-                Flow {
+                TabBar {
+                    id: trackTabs
                     Layout.fillWidth: true
-                    Layout.margins: 8
-                    spacing: 6
                     visible: subs.tracks.length > 0
 
                     Repeater {
                         model: subs.tracks
 
-                        Button {
+                        TabButton {
                             required property var modelData
                             text: modelData.label + " (" + modelData.lineCount + ")"
                             enabled: modelData.browsable
-                            checkable: true
-                            checked: root.currentTrack === modelData.id
+                            width: Math.max(implicitWidth, 72)
                             font.pixelSize: 11
-                            padding: 4
                             ToolTip.visible: hovered
                             ToolTip.text: modelData.codec + " · " + modelData.kind
                                           + (modelData.sidecar ? " · sidecar " + modelData.source : "")
                                           + (modelData.note !== "" ? "\n" + modelData.note : "")
-                            onClicked: root.currentTrack = modelData.id
                         }
+                    }
+
+                    onCurrentIndexChanged: {
+                        var track = subs.tracks[currentIndex]
+                        if (track !== undefined && track.browsable)
+                            root.currentTrack = track.id
                     }
                 }
 
-                TextField {
+                RowLayout {
                     Layout.fillWidth: true
                     Layout.margins: 8
-                    placeholderText: "search…"
-                    enabled: false
+                    spacing: 8
+
+                    TextField {
+                        id: searchField
+                        Layout.fillWidth: true
+                        placeholderText: "search…"
+                        enabled: lines.sourceCount > 0
+                        font.pixelSize: 12
+                        // Filtering walks every cue, so a 200k-line track would
+                        // do that work on each keystroke. Coalesce instead.
+                        onTextChanged: searchDebounce.restart()
+                        Keys.onEscapePressed: text = ""
+
+                        Timer {
+                            id: searchDebounce
+                            interval: 150
+                            onTriggered: lines.pattern = searchField.text
+                        }
+                    }
+
+                    Button {
+                        id: followToggle
+                        text: "Follow"
+                        checkable: true
+                        checked: true
+                        font.pixelSize: 11
+                        padding: 6
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Scroll the list to the line playing now.\n"
+                                      + "Turns itself off if you drag the list."
+                        // Coming back on should jump to the current line rather
+                        // than wait for the next cue boundary.
+                        onCheckedChanged: {
+                            if (checked && root.currentRow >= 0)
+                                lineList.positionViewAtIndex(root.currentRow, ListView.Contain)
+                        }
+                    }
                 }
 
                 ListView {
@@ -214,32 +290,47 @@ ApplicationWindow {
                     Layout.margins: 8
                     clip: true
                     spacing: 2
-                    model: root.currentLines
+                    model: lines
 
                     ScrollBar.vertical: ScrollBar {}
 
+                    // Dragging the list is a statement of intent: stop yanking
+                    // the viewport back to the playing line.
+                    onDragStarted: followToggle.checked = false
+
                     delegate: ItemDelegate {
-                        required property var modelData
+                        id: lineRow
+                        required property int index
+                        required property var model
+                        readonly property bool current: index === root.currentRow
+
                         width: lineList.width
                         // Clicking a row seeks there. testclip has a burned-in
                         // timecode, so the frame that lands is a direct check on
                         // the parsed timestamp.
-                        onClicked: mpv.seek(modelData.startMs / 1000)
+                        onClicked: mpv.seek(model.startMs / 1000)
+
+                        background: Rectangle {
+                            color: lineRow.current ? "#23324a"
+                                                   : (lineRow.hovered ? "#1b1b25" : "transparent")
+                            border.color: lineRow.current ? "#42618f" : "transparent"
+                            radius: 3
+                        }
 
                         contentItem: ColumnLayout {
                             spacing: 1
                             Label {
-                                color: "#6f6f85"
+                                color: lineRow.current ? "#9fb6dc" : "#6f6f85"
                                 font.pixelSize: 10
                                 font.family: "monospace"
-                                text: modelData.start
+                                text: lineRow.model.start
                             }
                             Label {
                                 Layout.fillWidth: true
-                                color: "#d0d0dc"
+                                color: lineRow.current ? "#ffffff" : "#d0d0dc"
                                 font.pixelSize: 12
                                 wrapMode: Text.WordWrap
-                                text: modelData.text
+                                text: lineRow.model.text
                             }
                         }
                     }
@@ -252,7 +343,9 @@ ApplicationWindow {
                         verticalAlignment: Text.AlignTop
                         text: subs.tracks.length === 0
                               ? "No subtitle tracks in this file."
-                              : "Select a track above."
+                              : lines.pattern !== ""
+                                ? "No lines match “" + lines.pattern + "”."
+                                : "Select a track above."
                     }
                 }
             }

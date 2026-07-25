@@ -48,9 +48,14 @@ demuxed and decoded separately with libavformat/libavcodec.
 Video renders inside the window via the render API, QML composites over it, transport
 controls track playback.
 
-Subtitle extraction works: embedded and sidecar tracks are demuxed, decoded to timestamped
-rows, and listed in the docked panel. Clicking a row seeks to it. Search, per-track tabs
-and auto-follow are still to come.
+The subtitle browser works end to end: embedded and sidecar tracks are demuxed and decoded
+to timestamped rows, then listed in the docked panel under one tab per track. Typing in the
+search box filters the track as you type, clicking a row seeks to it, and the line playing
+now is highlighted and scrolled into view — until you drag the list, which turns following
+off rather than fighting you for the viewport.
+
+Player controls are still minimal: playback comes from the file passed as `argv[1]`, and
+there is no open dialog, track switching, or volume yet.
 
 ## Roadmap
 
@@ -69,7 +74,7 @@ and auto-follow are still to come.
 Measured on the fixtures: 200 000 cues (27 MB ASS) parse in ~1.2 s on the worker thread,
 with playback ticking normally throughout.
 
-### Milestone 2 — Browser UI (next)
+### Milestone 2 — Browser UI ✅
 
 - `QAbstractListModel` of subtitle lines, one model per track, tabs across tracks
 - `QSortFilterProxyModel` for incremental search
@@ -77,7 +82,11 @@ with playback ticking normally throughout.
 - Auto-follow with binary search on the current timestamp, plus a toggle so manual
   scrolling does not fight playback
 
-### Milestone 3 — Player usability
+The model shares each track's line buffer instead of copying it, so switching tabs is a
+refcount bump — the 200k-cue fixture browses and follows without the ~600 ms GUI stall the
+milestone 1 snapshot cost.
+
+### Milestone 3 — Player usability (next)
 
 - File open dialog + drag-and-drop
 - Audio/subtitle track switching wired to mpv

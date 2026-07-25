@@ -60,10 +60,36 @@ Subtitle parsing *does* run, because it never touches the render context, so thi
 real check on the extractor.
 
 Anything about playback or rendering needs a real window. Check the log for
-`VO: [libmpv]`; anything else means the render path is broken (see trap 1). Note that
+`VO: [libmpv]`; anything else means the render path is broken (see trap 1).
+
+### Seeing the UI from WSL
+
 WSLg windows are Wayland surfaces and do **not** show up in an XWayland root grab
-(`ffmpeg -f x11grab -i :0.0` comes back black, with or without `QT_QPA_PLATFORM=xcb`) —
-screenshots have to be taken from the Windows side.
+(`ffmpeg -f x11grab -i :0.0` comes back black, with or without `QT_QPA_PLATFORM=xcb`).
+They *are* ordinary Win32 windows on the Windows side, hosted by `msrdc` and titled
+`custom media player (<distro>)`, so drive the capture from there:
+
+```bash
+T=$(powershell.exe -NoProfile -Command '$env:TEMP' | tr -d '\r')
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+    -File "$(wslpath -w tools/wsl-screenshot.ps1)" "$T\shot.png"
+# then read /mnt/c/Users/<you>/AppData/Local/Temp/shot.png
+```
+
+`tools/wsl-input.ps1` clicks and types into the same window, so search, tabs and
+click-to-seek can be exercised end to end without a human at the keyboard. Its
+coordinates are window-relative and share an origin with the screenshot, so they can be
+read straight off a capture.
+
+Two things to know before believing a black window:
+
+- **The picture is intermittently missing.** Runs that log `VO: [libmpv] 1280x720 yuv420p`
+  and advance the clock normally sometimes still paint black. It is not file-specific
+  (`huge.mp4` is a byte-identical copy of `testclip.mp4`, and both have done it), the logs
+  are identical either way, and a re-run usually comes back fine. Software GL under WSLg
+  is the suspect, not the render path. Re-run before investigating.
+- The app must be launched detached from the tool call that starts it, or it dies with
+  the shell and the screenshot catches nothing.
 
 ## Architecture
 
@@ -73,7 +99,10 @@ src/main.cpp                  forces OpenGL RHI, passes argv[1] to QML as `initi
 src/SubtitleTypes.h           SubtitleLine / SubtitleTrack plain structs
 src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker thread
 src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed tracks
+src/SubtitleLineModel.{h,cpp} QAbstractListModel over one track's cues
+src/SubtitleFilterModel.{h,cpp} search proxy + the row mapping auto-follow needs
 qml/Main.qml                  video + transport + docked subtitle panel
+tools/wsl-*.ps1               screenshot and input injection from the Windows side
 ```
 
 `MpvObject` owns an `mpv_handle`; the nested `MpvRenderer` (render thread) owns the
@@ -82,10 +111,25 @@ properties (`time-pos`, `duration`, `pause`) surfaced as Qt properties.
 
 `SubtitleManager` runs a `SubtitleExtractor` on its own `QThread` and republishes results
 as bindable properties. Requests carry a monotonic id; bumping it makes an in-flight parse
-abandon its demux loop, so opening a second file does not wait on the first. The two
-`QVariantList` accessors (`tracks`, `lines()`) are a stopgap — `lines()` copies the whole
-track on the GUI thread (~110 ms for 40k cues, ~600 ms for 200k) and milestone 2's
-`QAbstractListModel` replaces it.
+abandon its demux loop, so opening a second file does not wait on the first.
+
+Rows reach QML through one `SubtitleLineModel` per track. The model **shares** the track's
+line buffer rather than copying it — `QVector` is implicitly shared and nothing mutates it
+after `setLines()`, so handing 200k cues to a model is a refcount bump. That is what
+replaced milestone 1's `QVariantList` snapshot, which cost ~600 ms of GUI thread per track
+switch. `tracks` stays a `QVariantList`: it is per-track metadata only, rebuilt once a load.
+
+Models are owned by the manager, **reused across loads and never deleted** — a QML binding
+can still hold one for an instant after the track list changes, and an emptied model is
+harmless where a dangling pointer is not. `model()` also pins ownership with
+`QQmlEngine::setObjectOwnership(..., CppOwnership)`; without it the engine takes JavaScript
+ownership of anything returned from an invokable and can collect it out from under C++.
+
+`SubtitleFilterModel` is the search proxy. Filtering is a plain case-insensitive substring
+match on the text role — timestamps are deliberately not searched, since someone typing
+"12" means words. It also owns `rowAt(positionMs)`, which is what auto-follow calls: the
+source model's binary search, mapped through the filter, returning -1 when the current cue
+is filtered out (nothing to highlight, which is the wanted behaviour).
 
 **Why the render API and not `--wid`:** with `--wid`, mpv draws into a separate native
 surface *above* the scene graph, so QML cannot reliably paint over it. The whole feature
@@ -132,6 +176,15 @@ premise is QML chrome composited on the video, so `--wid` is not an option.
    (ffmpeg cannot transcode text to bitmap, so there is no way to *generate* a PGS/VOBSUB
    fixture locally — that path is verified against the codec table, not a file.)
 
+### Browser UI
+
+9. **A delegate cannot take `required property string text`.** `ItemDelegate` already has a
+   `text` property, and the role of the same name collides with it. Take
+   `required property var model` and read `model.text` instead.
+10. **Only the browser decodes entities, so mpv's own overlay disagrees with the panel.**
+    libass renders `&amp;` literally over the video while the same cue reads `&` in the
+    list. Both are behaving as designed (trap 7) — it is not a parsing regression.
+
 Known-harmless: CMake warns `QTP0004` about qmldir files for `qml/`. Cosmetic.
 mpv logs `Suspected software renderer`, EGL/DRM/Vulkan probe failures, and
 `Cannot load libcuda.so.1` — all expected under WSL with `hwdec=no`.
@@ -145,17 +198,47 @@ mpv logs `Suspected software renderer`, EGL/DRM/Vulkan probe failures, and
   into libmpv from QML.
 - Subtitle parsing must **not** block the GUI thread.
 
+## Platform: why development stays on WSL
+
+The build is Linux-only on purpose, and that is a decision rather than an accident.
+
+WSL genuinely cannot test hwdec (software rendering only), GPU decode performance, or the
+D3D11 RHI path. Those matter for shipping, but not for the subtitle browser, which is the
+reason the project exists. Against that, a Windows build costs a second toolchain:
+`CMakeLists.txt` discovers both libmpv and FFmpeg through `pkg_check_modules`, and that
+path does not exist under MSVC — it would mean vcpkg or hand-wired `libmpv-2.dll` plus an
+FFmpeg dev drop, a second Qt install, and a second build tree to keep green.
+
+So the porting debt is deliberately kept small rather than paid early:
+
+- All file handling goes through `QFileInfo`/`QDir`, with no POSIX-isms to unpick.
+- The one known question is `SubtitleExtractor.cpp`'s `QFile::encodeName(path)` handed to
+  `avformat_open_input`. ffmpeg wants UTF-8 on Windows and Qt's local 8-bit there is not
+  necessarily UTF-8 — **verify against a non-ASCII filename at port time.** Correct as-is
+  on Linux.
+
+Revisit when Windows becomes a release target, or when hwdec, 4K/HEVC or HDR playback
+needs judging — naturally after milestone 3.
+
 ## Next up
 
-See `README.md` → Roadmap. Milestone 1 (subtitle extraction) is done: embedded and sidecar
-tracks parse to timestamped rows off the GUI thread, and the docked panel lists them with
-click-to-seek.
+See `README.md` → Roadmap. Milestones 1 (extraction) and 2 (browser UI) are done: tracks
+parse off the GUI thread, and the docked panel has per-track tabs, a search box, click-to-
+seek, and auto-follow with a toggle, all fed by `SubtitleLineModel` through
+`SubtitleFilterModel`.
 
-Immediate task is **Milestone 2: browser UI** — a `QAbstractListModel` per track fed from
-`SubtitleManager::trackData()`, a `QSortFilterProxyModel` for incremental search, tabs
-across tracks, and auto-follow driven by `lineIndexAt()` (already a binary search) with a
-toggle so manual scrolling does not fight playback. Landing the model also removes the
-`QVariantList` copy that currently stalls the GUI on track switch.
+Immediate task is **Milestone 3: player usability** — file open dialog and drag-and-drop,
+audio/subtitle track switching wired to mpv, volume, playback speed, fullscreen, keyboard
+shortcuts, and resume position per file.
+
+Two things milestone 2 left on the floor, worth folding into whatever touches them next:
+
+- **Nothing exercises the models below the scene graph.** `offscreen` runs cannot see UI,
+  so tabs, filtering and follow are currently verified by screenshotting a real window
+  (`tools/wsl-*.ps1`). `SubtitleLineModel::indexAt()`, the filter, and `rowAt()` mapping
+  are all testable without a window and should get a harness before they grow.
+- **Search is a linear scan per keystroke**, coalesced by a 150 ms timer in QML. Fine at
+  the 200k-cue fixture; if it ever is not, the fix is an index, not a longer timer.
 
 ## Related context
 
