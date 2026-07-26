@@ -1,6 +1,6 @@
 # Where the project is, and what is next
 
-> State at the end of the last session, and the work that follows.
+> Where the project stands as of the most recent milestone, and the work that follows.
 > Split out of `CLAUDE.md`, which is the entry point and links here.
 
 ## State
@@ -27,7 +27,9 @@ What it changed, briefly:
   the picture, sync-to-this-line, per-cue seek, A-B loop, cue copy, screenshots,
   audio delay, picture adjustments, an OSD, a queue popover, remappable keys.
 - **Release plumbing.** GPL-3.0-or-later, install rules, a desktop entry, an
-  icon, and the rename to **Subixa**.
+  icon, and the rename from the MVP's *custom media player* to **Subixa** —
+  carried through the CMake project, the binary, the desktop entry, the
+  `SUBIXA_*` environment switches and, since, the repository directory itself.
 
 Verified against the real 3 GB / 65-track film, not just the fixtures: 93 350
 cues in 10.0 s cold and 33 ms cached, click-to-seek landing on the clicked line
@@ -119,5 +121,3 @@ Worth folding into whatever touches them next.
   outside it. Everything visual in milestone 5 was checked by screenshot instead,
   which is why the layout traps (17–21) were each found once by eye rather than
   caught by a test.
-- **The repository directory is still `custom_media_player`.** Nothing in the
-  build depends on it.

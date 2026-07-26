@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Akash Jose
+
 // What plays next.
 //
 // All of this is file-system reasoning, so none of it needs mpv or a window. The

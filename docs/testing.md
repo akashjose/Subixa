@@ -9,7 +9,7 @@
 cd build && ctest --output-on-failure     # or run ./build/tst_subtitles directly
 ```
 
-Five headless suites, none needing a compositor or a rendered frame —
+Six headless suites, none needing a compositor or a rendered frame —
 deliberately, because a screenshot is the least reliable evidence available here
 (see the degraded-state note below). Run these before reaching for the UI.
 
@@ -268,10 +268,10 @@ Two things to know before believing a black window:
   instance count (one process alone still fails), not memory (10 GB free), and weston.log
   shows nothing. Still unexplained.
 
-  The reset is `wsl --terminate Ubuntu-24.04` **from Windows** — targeted, and it leaves
-  the 22.04 distro's containers alone. Do **not** use `wsl --shutdown`, which stops every
-  distro including the one hosting live Immich/Jellyfin containers. Note that terminating
-  also kills any Claude Code session running inside that distro.
+  The reset is `wsl --terminate <your-distro>` **from Windows** — targeted, so it leaves
+  any other distro alone. Do **not** use `wsl --shutdown`, which stops every distro you
+  have running rather than just this one. Terminating also kills any shell or editor
+  session running inside that distro, so save first.
 
   Practical consequence: **verify render fixes early in a session.** Once it degrades,
   every visual check returns a false negative.

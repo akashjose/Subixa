@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Akash Jose
+
 # Screenshot the running player from the Windows side.
 #
 #   powershell.exe -NoProfile -ExecutionPolicy Bypass \

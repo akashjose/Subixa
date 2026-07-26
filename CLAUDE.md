@@ -17,14 +17,18 @@ timing offset. Everything else is table stakes to support that. The audience is
 people who *read* subtitles — language learners, subtitle editors, QC passes —
 which is the tie-breaker whenever a decision is close.
 
-The repository directory is still `custom_media_player`; nothing in the build
-depends on it.
+It began as an MVP called *custom media player*; the rename to **Subixa** landed
+in milestone 5 and now runs the whole way through — the repository directory, the
+CMake project, the binary, the desktop entry and the `SUBIXA_*` environment
+switches. Older notes and commit messages that say `custom_media_player` are
+talking about this repository before that pass.
 
 ## Environment
 
-Runs in **WSL2, Ubuntu 24.04** (vhdx at `F:\WSL\Ubuntu-24.04`). The repo lives on
-the native ext4 fs, deliberately **not** under `/mnt/*` — those are 9p mounts and
-several times slower for build workloads.
+Developed on **WSL2, Ubuntu 24.04**. Keep the repo on the native ext4 fs,
+deliberately **not** under `/mnt/*` — those are 9p mounts and several times
+slower for build workloads. Nothing below is WSL-specific except the graphics
+notes and the tooling in `tools/`; an ordinary Linux desktop needs none of it.
 
 | | |
 |---|---|
@@ -42,7 +46,7 @@ colour. See **`docs/graphics.md`**, and trap 22.
 ## Build and run
 
 ```bash
-cd ~/code/custom_media_player
+cd ~/code/subixa
 export CMAKE_PREFIX_PATH="$HOME/Qt/6.9.3/gcc_64"     # required, or CMake finds Qt 6.4
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
@@ -166,16 +170,9 @@ failure that looks like something else.
 
 | | |
 |---|---|
-| `docs/roadmap.md` | **state and what is next — start here in a new session** |
+| `docs/roadmap.md` | **where the project stands and what is next — start here** |
 | `docs/architecture.md` | modules, the design system, the subtitle row, caching |
-| `docs/traps.md` | all 22, with the evidence and what was ruled out |
+| `docs/traps.md` | all 23, with the evidence and what was ruled out |
 | `docs/testing.md` | the suites, the render canary, WSL screenshot and input |
 | `docs/graphics.md` | driver selection, and why development stays on WSL |
 | `docs/keyboard.md` | default bindings |
-
-## Related context
-
-This project came out of a WSL 22.04 → 24.04 migration. Its checklist lives at
-`/mnt/f/WSL-migration/CHECKLIST.md`. The old `Ubuntu` (22.04) distro still exists
-and still hosts live Immich/Jellyfin/filebrowser containers — **do not
-unregister it**.

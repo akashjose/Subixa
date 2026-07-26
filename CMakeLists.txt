@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Akash Jose
+
 cmake_minimum_required(VERSION 3.21)
 project(subixa VERSION 0.5.0 LANGUAGES CXX)
 

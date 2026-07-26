@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Akash Jose
+
 #pragma once
 
 #include <QtCore/QObject>
@@ -69,7 +72,7 @@ public:
 
 private:
     // Paths cannot be keys directly: QSettings reads '/' as a group separator, so
-    // "/home/akash/film.mkv" would silently become nested groups. The real path is
+    // "/home/user/film.mkv" would silently become nested groups. The real path is
     // stored alongside the hash so the file stays readable by a human.
     static QString keyFor(const QString &path);
 

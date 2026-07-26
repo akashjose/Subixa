@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Akash Jose
+
 // The QML layer, headless.
 //
 // Everything below the scene graph already had a harness (tst_subtitles); the

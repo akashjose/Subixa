@@ -209,14 +209,9 @@ capped on the software rasterizer, which is what makes fullscreen usable there.
 Under WSL the answer to that last one is still software decode, and now for a stated
 reason: there is no `/dev/dri` render node, and mpv reports `hwdec-current = no` when asked.
 
-### Milestone 6 — Styling in the browser ✅
+### What plays next ✅
 
-- ✅ ASS override tags become markup: italics, bold, underline, speaker colours
-- ✅ Cue colours adjusted to stay legible against the panel, hue preserved, at WCAG's 4.5:1
-- ✅ Vector drawings dropped from the list — `{\p1}m 0 0 l 100 0` is a shape, not dialogue
-- ✅ Search unaffected: it matches the plain text, and styling can be turned off
-
-### Milestone 5 — What plays next ✅
+Feature work between milestones 4 and 5, rather than a milestone of its own.
 
 - ✅ The folder is the queue: opening a file queues its siblings in natural order, so `ep2`
   comes before `ep10`
@@ -224,6 +219,31 @@ reason: there is no `/dev/dri` render node, and mpv reports `hwdec-current = no`
 - ✅ Auto-advance at the end of a file, `<` and `>` to move by hand, and a `2/3` readout in
   the transport so an advance does not look like the player wandering off
 - ✅ The current file is in the window title
+
+### Styling in the browser ✅
+
+- ✅ ASS override tags become markup: italics, bold, underline, speaker colours
+- ✅ Cue colours adjusted to stay legible against the panel, hue preserved, at WCAG's 4.5:1
+- ✅ Vector drawings dropped from the list — `{\p1}m 0 0 l 100 0` is a shape, not dialogue
+- ✅ Search unaffected: it matches the plain text, and styling can be turned off
+
+### Milestone 5 — The pre-release pass ✅
+
+Driven by two reviews, one architectural and one of the interface. It touched most of the
+tree; `docs/roadmap.md` has the full account.
+
+- ✅ Playback split out of the scene-graph item into `MpvEngine`, so teardown runs in the
+  order libmpv requires — the previous order was a use-after-free no headless test could
+  reach
+- ✅ Exact, millisecond-formatted seeks: `QString::number(double)` gives six significant
+  digits, so clicking a cue three hours into a film landed 123 ms off
+- ✅ A design system with measured contrast, a control library replacing the Basic style,
+  vector icons, a two-row transport, a rebuilt subtitle row, and a settings window
+- ✅ Subtitle delay applied to the browser's timestamps as well as the picture, plus
+  sync-to-this-line, per-cue seek, A-B loop, cue copy, screenshots, audio delay, picture
+  adjustments, an OSD, a queue popover and remappable keys
+- ✅ Release plumbing: GPL-3.0-or-later, install rules, a desktop entry, an icon, and the
+  rename to Subixa
 
 ## Build
 
@@ -278,7 +298,7 @@ visual checks return false negatives until the distro is restarted.
 cd build && ctest --output-on-failure
 ```
 
-Five headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
+Six headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
 layer underneath the browser — the cue binary search, the search filter, and the row mapping
 auto-follow depends on — plus the cue cache (a hit has to reproduce a parse exactly, and a
 changed file or a new sidecar has to miss) and the `.srt` export, checked by parsing back
@@ -286,7 +306,10 @@ what it wrote. `tst_mpvtracks` links libmpv with `vo=null` and checks that selec
 a track changes what mpv would render, comparing its `sub-text` property rather than looking
 at pixels. `tst_playbackhistory` covers the per-file store and its policy, and `tst_playlist` what
 plays next — mostly the ordering and the boundaries, since a queue that wraps round to the
-first file is how you watch episode one twice. `tst_qmlpanel`
+first file is how you watch episode one twice. `tst_shortcuts` covers the keyboard table and
+its overrides, again mostly policy: rebinding to the default clears the override rather than
+storing a copy, two actions cannot silently claim one key, and no two actions ship with the
+same default — the check that stops the table rotting as it grows. `tst_qmlpanel`
 loads the real `Main.qml` offscreen and drives the QML layer itself: tab clicks swapping the
 model, search reaching the proxy, follow scrolling the view, a remembered track restored on
 reopen, and view state surviving a detach.
@@ -322,3 +345,21 @@ sources are in git; run the script to rebuild the rest.
 
 See `CLAUDE.md` for build gotchas that have already cost time — particularly `vo=libmpv`
 and render-context ordering.
+
+## License
+
+Copyright (C) 2026 Akash Jose &lt;akashjose@protonmail.com&gt;.
+
+Subixa is free software, licensed under the **GNU General Public License, version 3 or
+any later version**. See [`LICENSE`](LICENSE) for the full text. Every source file carries
+`SPDX-License-Identifier: GPL-3.0-or-later`.
+
+It comes with **no warranty** — not even the implied warranty of merchantability or
+fitness for a particular purpose.
+
+The GPL is the right licence here rather than a choice made lightly: Subixa links libmpv
+and FFmpeg, and the builds it links against on a typical Linux distribution are themselves
+GPL-licensed — Debian and Ubuntu's FFmpeg is built `--enable-gpl`, and libmpv's binaries
+are GPL-3+ because of what they link in turn. A distributed Subixa binary therefore has to
+be GPL-compatible whatever this file said. Anyone repackaging against an LGPL-only FFmpeg
+build should confirm their own position rather than assume this one carries over.

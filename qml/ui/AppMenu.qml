@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Akash Jose
+
 import QtQuick
 import QtQuick.Controls.Basic as C
 import QtQuick.Templates as T

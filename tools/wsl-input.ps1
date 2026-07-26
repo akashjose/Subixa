@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Akash Jose
+
 # Click at window-relative (X,Y) in the running player and optionally type text,
 # so a UI path can be driven end to end from WSL:
 #

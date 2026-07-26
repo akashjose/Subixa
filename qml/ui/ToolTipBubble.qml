@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Akash Jose
+
 import QtQuick
 // .Basic explicitly, for the same reason main() pins the style: every other
 // file in the app names it, and a bare QtQuick.Controls import here would be

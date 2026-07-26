@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Akash Jose
+
 // What mpv itself does with track selection, verified with no window and no FBO.
 //
 // This is the half of the subtitle browser that a unit test over our own models

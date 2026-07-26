@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-#
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Akash Jose
+
 # Is the player actually painting the picture?
 #
 # Every other check in this repo is headless, deliberately: under WSLg a
@@ -20,7 +22,7 @@
 #            the clip's own centre-region colour measured with ffmpeg
 #
 # Run it before trusting anything visual. If it fails, restart the distro
-# (`wsl --terminate Ubuntu-24.04` from Windows) rather than debugging the app.
+# (`wsl --terminate <your-distro>` from Windows) rather than debugging the app.
 #
 # Usage: tools/render-canary.sh [clip] [reference]
 #

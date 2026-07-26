@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Akash Jose
+
 // The resume-position store, and mostly its policy.
 //
 // Storage is the easy half. The half worth testing is when a position is *not*

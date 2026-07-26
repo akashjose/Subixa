@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Akash Jose
+
   Subixa's application icon.
 
   A play triangle over two subtitle lines. Not a bare play button: every player

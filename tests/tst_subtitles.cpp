@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Akash Jose
+
 // Headless coverage for everything below the scene graph: the extractor, the row
 // model's binary search, and the search proxy's row mapping.
 //

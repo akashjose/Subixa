@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Akash Jose
+
 # Regenerates the subtitle test fixtures. Only the small .srt/.ass sources are
 # checked in; everything with video in it is built here, because testclip.mp4 is
 # 6 MB and the muxed variants are multiples of that.
