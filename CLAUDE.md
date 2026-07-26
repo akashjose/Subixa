@@ -174,5 +174,5 @@ failure that looks like something else.
 | `docs/architecture.md` | modules, the design system, the subtitle row, caching |
 | `docs/traps.md` | all 23, with the evidence and what was ruled out |
 | `docs/testing.md` | the suites, the render canary, WSL screenshot and input |
-| `docs/graphics.md` | driver selection, and why development stays on WSL |
+| `docs/graphics.md` | driver selection, why development stays on WSL, the Windows port |
 | `docs/keyboard.md` | default bindings |

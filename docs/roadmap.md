@@ -67,10 +67,24 @@ In rough order of value.
    first O(matches). `QSortFilterProxyModel` cannot express that, so it means a
    small custom proxy.
 
-5. **A Windows build**, when hwdec, 4K/HEVC or HDR need judging. Note the tell:
-   the product thesis is "PotPlayer's subtitle list, done properly", and
-   PotPlayer's users are on Windows. It would also sidestep trap 22 entirely,
-   since Mesa's D3D12 driver exists only for WSL.
+5. **Finish the Windows build.** It exists — MSYS2 UCRT64, gcc rather than MSVC,
+   all six suites passing, and a deployable payload; `README.md` has the steps
+   and `docs/graphics.md` what the port turned up. The thesis argued for it: the
+   product is "PotPlayer's subtitle list, done properly", and PotPlayer's users
+   are on Windows. What remains before it is a target rather than a build:
+
+   - **A non-ASCII path broke subtitle extraction** — `QFile::encodeName` is the
+     local codepage there, and `avformat_open_input` refuses what it produces.
+     Found by measurement rather than suspected, and fixed: the call site now
+     passes `toUtf8()`, with a regression test that was checked against a
+     reverted build. See `docs/graphics.md`.
+   - **Nothing is packaged.** Deployment is a documented sequence of commands,
+     not a script; there is no installer and nothing is signed. Folds into
+     item 1.
+   - **The reason for building it is still unmeasured**: hwdec, 4K/HEVC and HDR
+     were what WSL could not judge, and none of them have been judged yet.
+   - It does sidestep trap 22, as predicted — Mesa's D3D12 driver exists only
+     for WSL — though `AppText` still chooses at runtime, so no QML changes.
 
 6. **Per-style defaults and native `.ass` parsing.** The styling rendered comes
    from the *override tags* in each cue; an ASS file's `[V4+ Styles]` table never

@@ -72,27 +72,68 @@ nothing, and on a native Linux desktop with a render node it will pick up vaapi/
 without further work. `SUBIXA_HWDEC=<value>` pins it to anything mpv accepts (`no`, `auto`,
 `vaapi`) and switches the automatic choice off.
 
-## Platform: why development stays on WSL
+## Platform: the development host, and the Windows build
 
-The build is Linux-only on purpose, and that is a decision rather than an accident.
+Development stays on WSL, and that is a decision rather than an accident. WSL genuinely
+cannot test hwdec (software rendering only), GPU decode performance, or the D3D11 RHI
+path. Those matter for shipping, but not for the subtitle browser, which is the reason the
+project exists — so the browser is developed where it is cheapest to develop, and the
+things WSL cannot judge are judged elsewhere.
 
-WSL genuinely cannot test hwdec (software rendering only), GPU decode performance, or the
-D3D11 RHI path. Those matter for shipping, but not for the subtitle browser, which is the
-reason the project exists. Against that, a Windows build costs a second toolchain:
-`CMakeLists.txt` discovers both libmpv and FFmpeg through `pkg_check_modules`, and that
-path does not exist under MSVC — it would mean vcpkg or hand-wired `libmpv-2.dll` plus an
-FFmpeg dev drop, a second Qt install, and a second build tree to keep green.
+**A Windows build now exists**, and it cost less than this section used to estimate. The
+estimate assumed MSVC, where the objection was real: `CMakeLists.txt` discovered libmpv and
+FFmpeg through `pkg_check_modules`, there is no MSVC libmpv to point that at, and the way
+out would have been vcpkg or a hand-generated import library. MSYS2 UCRT64 sidesteps all of
+it by packaging libmpv, FFmpeg and Qt 6 against one another for gcc. What the port actually
+took was a `WIN32` branch in the dependency lookup — `find_path`/`find_library` instead of
+pkg-config, because MSYS2's `.pc` files hardcode `prefix=/ucrt64` and hand a native CMake
+an MSYS path with no drive letter — and a handful of small fixes elsewhere. `README.md` has
+the toolchain, the versions and the deployment steps.
 
-So the porting debt is deliberately kept small rather than paid early:
+The porting debt was kept small rather than paid early, and mostly that held up:
 
-- All file handling goes through `QFileInfo`/`QDir`, with no POSIX-isms to unpick.
-- The one known question is `SubtitleExtractor.cpp`'s `QFile::encodeName(path)` handed to
-  `avformat_open_input`. ffmpeg wants UTF-8 on Windows and Qt's local 8-bit there is not
-  necessarily UTF-8 — **verify against a non-ASCII filename at port time.** Correct as-is
-  on Linux.
+- All file handling goes through `QFileInfo`/`QDir`, with no POSIX-isms to unpick. This was
+  correct — nothing here needed touching.
+- `glGetString` was being called bare in `MpvVideoItem.cpp`. On Linux that linked only
+  because libGL arrived transitively; on Windows the symbol lives in `opengl32.dll` and Qt
+  links no import library for it, since it resolves GL dynamically. It now goes through
+  Qt's resolved function table, which is portable and was the better call anyway.
+- `.srt` export opened its `QSaveFile` with `QIODevice::Text`, which is a no-op on Linux and
+  silently turns every `\n` into `\r\n` on Windows — the same track exported on two machines
+  would have come out byte-different. The flag is gone; every SubRip reader accepts LF.
+- The command line is safe. Windows hands `main()` an `argv` in the ANSI codepage, which
+  mangles a non-ASCII path before the program sees it, but Qt repopulates
+  `QCoreApplication::arguments()` from `GetCommandLineW` and `QCommandLineParser` reads
+  that. A path typed or dropped onto the binary arrives intact.
 
-Revisit when Windows becomes a release target, or when hwdec, 4K/HEVC or HDR playback
-needs judging — naturally after milestone 3.
+- **The one known question was the real one, the answer was that it was broken, and it
+  is now fixed.** `SubtitleExtractor.cpp` handed `QFile::encodeName(path)` to
+  `avformat_open_input`. Measured on this machine against a file named
+  `日本語 café Привет.mkv`:
+
+  | | |
+  |---|---|
+  | `QFile::encodeName` | ANSI codepage — `café` becomes `caf\xE9`, and the Japanese and Cyrillic become literal `?`. `avformat_open_input` fails with *Invalid argument*. |
+  | `QString::toUtf8` | proper UTF-8. `avformat_open_input` opens the file and reports its 5 streams. |
+
+  So on Windows, subtitle extraction failed outright for any file whose path was not
+  representable in the local codepage, and for most non-Latin scripts the encoded bytes are
+  `?` and the original is unrecoverable. `QFile::exists()` says yes throughout, because Qt
+  keeps the path as UTF-16 and never round-trips it through the codepage — which is why
+  this failed specifically at the ffmpeg boundary and nowhere else, and why it never looked
+  like a missing file.
+
+  The call site now uses `path.toUtf8()`: ffmpeg wants UTF-8 on Windows, and on Unix
+  `QFile::encodeName` already *is* `toUtf8`, so it is not a change there. Verified by
+  driving the real extractor against that filename — three tracks and their cues, where the
+  same binary built with `encodeName` reports *cannot open ... Invalid argument*.
+  `tst_subtitles`' `nonAsciiFilenamesReachTheDecoder` covers it, by copying a fixture to
+  that name under a `QTemporaryDir`. The test cannot fail on Linux — encodeName and toUtf8
+  agree there — so it is a guard for Windows specifically, and was confirmed to fail
+  against a deliberately reverted build before being kept.
+
+Still to judge on Windows, now that there is somewhere to judge them: hwdec, 4K/HEVC and
+HDR playback. Trap 22 does not arise there — Mesa's D3D12 driver exists only for WSL.
 
 **Native Linux** needs no porting: the 10-bit workaround in trap 9 disables itself on a
 real GPU (`GL_RENDERER` stops matching), and the screenshot tooling is simply replaced by

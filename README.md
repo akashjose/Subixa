@@ -57,7 +57,7 @@ playback, subtitle appearance and timing, the browser, hotkeys and the interface
 | `docs/architecture.md` | modules and the design system |
 | `docs/traps.md` | 23 things that have already cost time |
 | `docs/testing.md` | the suites, the render canary, WSL tooling |
-| `docs/graphics.md` | driver selection under WSL |
+| `docs/graphics.md` | driver selection under WSL, and what the Windows port turned up |
 | `docs/keyboard.md` | default bindings |
 
 ## Design decisions
@@ -247,8 +247,14 @@ tree; `docs/roadmap.md` has the full account.
 
 ## Build
 
-Requires Qt 6.9 (system Qt 6.4 on Ubuntu 24.04 is too old), libmpv, and FFmpeg dev
-libraries.
+Needs Qt 6.5 or newer, libmpv, and the FFmpeg development libraries. Linux is the
+development host and the platform every design decision was made against; Windows
+builds from the same tree with its own toolchain, covered below.
+
+### Linux
+
+Qt 6.9 here (system Qt 6.4 on Ubuntu 24.04 is too old for the version this was developed
+against, though CMake accepts 6.5).
 
 ```bash
 sudo apt install -y build-essential cmake ninja-build pkg-config \
@@ -270,6 +276,103 @@ aqt install-qt linux desktop 6.9.3 linux_gcc_64 \
 
 Note `qtdeclarative` is **not** a valid module for Qt 6 — QML and Quick ship in the base
 package, and passing a bad module name aborts the whole install.
+
+`make install` puts the binary, the desktop entry, the icon under
+`hicolor/scalable/apps` and the licence where a distribution package expects them. That
+is as far as packaging goes — there is no CPack configuration, no `.deb`, and no CI.
+
+### Windows
+
+Built under **MSYS2 UCRT64**, with gcc rather than MSVC. The reason is libmpv: there is
+no MSVC build of it to link against, so that toolchain means vcpkg or a hand-generated
+import library for a downloaded `libmpv-2.dll` (`docs/graphics.md` weighs this up). MSYS2
+packages libmpv, FFmpeg and Qt 6 against one another already, and everything it produces
+is an ordinary native Windows binary — the MSYS2 shell is the build environment, not a
+runtime dependency of the player.
+
+```bash
+pacman -S --needed \
+  mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja \
+  mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-qt6-declarative \
+  mingw-w64-ucrt-x86_64-qt6-svg mingw-w64-ucrt-x86_64-qt6-shadertools \
+  mingw-w64-ucrt-x86_64-mpv mingw-w64-ucrt-x86_64-ffmpeg
+```
+
+Then, from the **UCRT64** shell specifically — not MSYS, not MINGW64. The compiler, CMake
+and Qt all have to come out of the same prefix, and MSYS2's own `cmake` package is a
+native Windows CMake that already searches `/ucrt64`, so no `CMAKE_PREFIX_PATH` is needed.
+
+```bash
+cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-win
+./build-win/subixa.exe /path/to/video.mkv
+```
+
+The build directory is `build-win/` rather than `build/` so that one checkout can carry a
+Linux and a Windows tree at once without either overwriting the other's cache. Both are
+gitignored, as is `dist/`.
+
+`pkg-config` is deliberately unused on this path. Under MSYS2 the `.pc` files hardcode
+`prefix=/ucrt64`, so a native CMake is handed `-I/ucrt64/include` — an MSYS path with no
+drive letter — and the generate step fails on a non-existent include directory. libmpv and
+FFmpeg are located with `find_path`/`find_library` instead, which also means a Windows
+build works against a plain libmpv SDK that ships no `.pc` files at all. The full
+reasoning is in the comment above `subixa_import_library` in `CMakeLists.txt`.
+
+Last built and tested against:
+
+| | |
+|---|---|
+| Toolchain | MSYS2 UCRT64, gcc 16.1.0, CMake 4.4.0, Ninja 1.13.2 |
+| Qt | 6.11.1 (`mingw-w64-ucrt-x86_64-qt6-*`) |
+| libmpv | 0.41.0 — note this is far newer than the 0.37 on the Linux host |
+| FFmpeg | 8.1.2 (`libavformat` 62, `libavcodec` 62) |
+
+#### Deploying
+
+`windeployqt6` handles Qt and nothing else. libmpv's dependency tree is the larger half of
+the payload and has to be walked separately.
+
+```bash
+DEST=dist/subixa-win64
+mkdir -p "$DEST" && cp build-win/subixa.exe LICENSE "$DEST/"
+
+# Qt: libraries, the platform/imageformat/TLS plugins, the QML modules the app
+# imports, and a qt.conf pointing at them. --qmldir is what makes it read the
+# imports rather than guess.
+windeployqt6 --qmldir qml "$DEST/subixa.exe"
+
+# Everything else: libmpv, libass, libplacebo, the FFmpeg libraries, and the
+# ~140 codec and support libraries underneath them.
+ldd build-win/subixa.exe | grep -oiE '/ucrt64/bin/[^ ]+dll' | xargs -I{} cp -n {} "$DEST/"
+
+# vulkan-1.dll is a load-time dependency of libmpv-2.dll, so the player will not
+# start without it. `ldd` resolves it out of System32, which puts it outside the
+# filter above -- and a machine with no Vulkan-capable driver has no System32
+# copy to fall back on either.
+cp /ucrt64/bin/vulkan-1.dll "$DEST/"
+```
+
+`cp -n` matters in that third command: `ldd` also reports the Qt DLLs, and without it they
+would be copied back over whatever `windeployqt6` had just staged. The result is roughly
+170 DLLs and about 260 MB, intended to run on a machine with no MSYS2 installed — though
+it has not yet been tried on a clean one. There is no installer, and nothing is code-signed.
+
+#### Differences worth knowing
+
+- **The player is linked as a GUI binary**, so Windows gives it no console and Qt would
+  ordinarily send `qInfo()` to the debugger. It attaches to the parent console when it has
+  one, so launching from a terminal still prints the `GL_RENDERER` and hwdec lines — the
+  two most useful when an install misbehaves — while a double-click stays windowless.
+  `QT_FORCE_STDERR_LOGGING=1` is the fallback if they go missing.
+- **The test suites build and run unchanged**: `cd build-win && ctest --output-on-failure`.
+  All six passed here on 2026-07-26. They are left as console programs on purpose, since
+  ctest reads their stdout. Two needed portability fixes to get there — `tst_qmlpanel` was
+  reaching the developer's real registry and profile rather than a temporary one, and
+  `tst_mpvtracks` has to re-issue a seek that libmpv 0.41 does not always act on while
+  paused. Both are documented at the sites.
+- **Trap 22 is a Mesa bug and does not arise here.** `AppText` still picks between the two
+  text paths at runtime, so nothing in the QML changes either way.
 
 ## Development notes
 
@@ -301,8 +404,10 @@ cd build && ctest --output-on-failure
 Six headless suites. `tst_subtitles` covers the extractor against the fixtures and the model
 layer underneath the browser — the cue binary search, the search filter, and the row mapping
 auto-follow depends on — plus the cue cache (a hit has to reproduce a parse exactly, and a
-changed file or a new sidecar has to miss) and the `.srt` export, checked by parsing back
-what it wrote. `tst_mpvtracks` links libmpv with `vo=null` and checks that selecting
+changed file or a new sidecar has to miss), the `.srt` export, checked by parsing back
+what it wrote, and that a filename the local codepage cannot represent still reaches the
+decoder — a Windows-only failure that cannot reproduce on Linux, where the two path
+encodings coincide. `tst_mpvtracks` links libmpv with `vo=null` and checks that selecting
 a track changes what mpv would render, comparing its `sub-text` property rather than looking
 at pixels. `tst_playbackhistory` covers the per-file store and its policy, and `tst_playlist` what
 plays next — mostly the ordering and the boundaries, since a queue that wraps round to the
