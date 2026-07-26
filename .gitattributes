@@ -1,0 +1,40 @@
+# Line endings.
+#
+# The repo is built and run on Linux (WSL2), so the working tree is LF
+# everywhere, on every platform. This is deliberate rather than the usual
+# `text=auto`: a Windows clone with core.autocrlf=true would rewrite
+# tools/render-canary.sh and testdata/make-fixtures.sh with CRLF, and a
+# CRLF shebang line fails with a bare "bad interpreter" the moment that
+# checkout is opened from WSL. Nothing in the toolchain -- gcc, CMake,
+# Ninja, Qt's qmlcachegen, MSVC -- minds LF on Windows.
+*               text=auto eol=lf
+
+# PowerShell is the exception: these two run on the Windows side, and CRLF
+# is what that platform's tooling expects.
+*.ps1           text eol=crlf
+
+# Subtitle fixtures. LF is already implied above, but these are parsed
+# byte-for-byte by the extraction tests, so pin them where they are visible.
+*.srt           text eol=lf
+*.ass           text eol=lf
+
+# Media and other binaries: never diff, never touch the bytes. Most of these
+# are generated and gitignored, but the marker has to exist for the cases
+# where one is committed on purpose (icons, a captured frame in a bug report).
+*.mp4           binary
+*.mkv           binary
+*.mka           binary
+*.webm          binary
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.ico           binary
+*.gif           binary
+*.pdf           binary
+*.ttf           binary
+*.otf           binary
+*.woff          binary
+*.woff2         binary
+
+# SVG is text, and worth diffing -- trap 23 was a one-character XML error.
+*.svg           text eol=lf diff
