@@ -283,8 +283,13 @@ QString SubtitleManager::exportTrack(int trackId, const QUrl &target) const
 
     // QSaveFile: an export interrupted halfway would otherwise leave a
     // half-written .srt sitting next to the film, where it looks like a real one.
+    // Deliberately *not* QIODevice::Text. That flag translates every "\n" below
+    // into "\r\n" on Windows and leaves it alone everywhere else, so the same
+    // track exported on two machines would come out byte-different -- the same
+    // objection as the explicit encoding below. It was a no-op on Linux, which
+    // is why it survived this long. Every SubRip reader accepts LF.
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    if (!file.open(QIODevice::WriteOnly))
         return QStringLiteral("cannot write %1: %2")
             .arg(QFileInfo(path).fileName(), file.errorString());
 

@@ -24,17 +24,65 @@ if(SUBIXA_BUILD_TESTS)
 endif()
 find_package(Qt6 6.5 REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
 
-# libmpv comes from apt (0.37 on 24.04). pkg-config keeps us off a hardcoded path.
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
-
+# ---- libmpv and FFmpeg --------------------------------------------------
 # Subtitle text is demuxed and decoded directly rather than read from mpv: mpv
 # only exposes the line currently on screen, which cannot build a browsable list.
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
-    libavformat
-    libavcodec
-    libavutil
-)
+# So both libraries are needed, and both are found the same way.
+#
+# Found two different ways, because pkg-config is only the right answer on Unix:
+#
+#   Unix     pkg-config is authoritative. It knows the multiarch library
+#            directories and the transitive private dependencies, and every
+#            distribution ships the .pc files. libmpv comes from apt (0.37 on
+#            24.04); this keeps us off a hardcoded path.
+#
+#   Windows  pkg-config is either absent or actively wrong. Under MSYS2 the .pc
+#            files hardcode `prefix=/ucrt64`, so a *native* CMake is handed
+#            `-I/ucrt64/include` -- an MSYS path with no drive letter -- and the
+#            generate step fails with "includes non-existent path". Neither
+#            PKG_CONFIG_SYSTEM_INCLUDE_PATH nor --define-prefix suppresses it
+#            (checked against pkgconf 3.0.4). Looking the libraries up directly
+#            sidesteps the path translation, and has the larger benefit that a
+#            Windows build works against a plain libmpv SDK, which ships headers
+#            and an import library but no .pc files at all.
+#
+# Both paths end at the same two targets, so nothing downstream has to care.
+function(subixa_import_library name header)
+    string(TOUPPER ${name} prefix)
+
+    find_path(${prefix}_INCLUDE_DIR NAMES ${header})
+    if(NOT ${prefix}_INCLUDE_DIR)
+        message(FATAL_ERROR
+            "Could not find ${header}. Point CMAKE_PREFIX_PATH at the ${name} SDK.")
+    endif()
+
+    add_library(Subixa::${name} INTERFACE IMPORTED)
+    target_include_directories(Subixa::${name} INTERFACE ${${prefix}_INCLUDE_DIR})
+
+    foreach(lib IN LISTS ARGN)
+        find_library(${prefix}_${lib}_LIBRARY NAMES ${lib})
+        if(NOT ${prefix}_${lib}_LIBRARY)
+            message(FATAL_ERROR
+                "Found ${header} but not the ${lib} library that goes with it.")
+        endif()
+        target_link_libraries(Subixa::${name} INTERFACE ${${prefix}_${lib}_LIBRARY})
+    endforeach()
+endfunction()
+
+if(WIN32)
+    subixa_import_library(mpv mpv/client.h mpv)
+    subixa_import_library(ffmpeg libavformat/avformat.h avformat avcodec avutil)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
+    pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
+        libavformat
+        libavcodec
+        libavutil
+    )
+    add_library(Subixa::mpv ALIAS PkgConfig::MPV)
+    add_library(Subixa::ffmpeg ALIAS PkgConfig::FFMPEG)
+endif()
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -120,6 +168,18 @@ qt_add_executable(subixa
 target_compile_definitions(subixa PRIVATE
     SUBIXA_VERSION="${PROJECT_VERSION}")
 
+# Link as a GUI binary on Windows. qt_add_executable does not set this, so the
+# default is the console subsystem and every launch -- including a double-click
+# from Explorer -- pops a black console window alongside the player. The property
+# is ignored on other platforms, so it needs no guard.
+#
+# The cost is that qInfo() output no longer has a console to land on: Qt's
+# default handler sends it to the debugger instead. `QT_FORCE_STDERR_LOGGING=1`
+# puts it back on stderr, which is how to read the GL_RENDERER and hwdec lines
+# when diagnosing a Windows install. The test targets are deliberately left as
+# console programs -- ctest reads their stdout.
+set_target_properties(subixa PROPERTIES WIN32_EXECUTABLE TRUE)
+
 # The window icon, compiled in. The desktop entry points at the installed copy
 # below, but that only covers a launcher: a window needs the icon at runtime,
 # and a player run straight from a build tree has no installed files at all.
@@ -155,8 +215,8 @@ target_link_libraries(subixa PRIVATE
     Qt6::OpenGL
     # For QIcon to rasterise the SVG application icon.
     Qt6::Svg
-    PkgConfig::MPV
-    PkgConfig::FFMPEG
+    Subixa::mpv
+    Subixa::ffmpeg
 )
 
 # Warnings on. The tree is clean at this level and staying that way is cheaper
@@ -233,7 +293,7 @@ target_link_libraries(tst_subtitles PRIVATE
     Qt6::Gui
     Qt6::Qml
     Qt6::Test
-    PkgConfig::FFMPEG
+    Subixa::ffmpeg
 )
 
 # Talks to libmpv directly with vo=null: verifies that selecting a track changes
@@ -245,7 +305,7 @@ target_compile_definitions(tst_mpvtracks PRIVATE
 target_link_libraries(tst_mpvtracks PRIVATE
     Qt6::Core
     Qt6::Test
-    PkgConfig::MPV
+    Subixa::mpv
 )
 
 # The QML layer, loaded for real and driven headlessly. It needs the whole app:
@@ -278,8 +338,8 @@ target_link_libraries(tst_qmlpanel PRIVATE
     Qt6::QuickControls2
     Qt6::OpenGL
     Qt6::Test
-    PkgConfig::MPV
-    PkgConfig::FFMPEG
+    Subixa::mpv
+    Subixa::ffmpeg
 )
 
 add_test(NAME subtitles COMMAND tst_subtitles)

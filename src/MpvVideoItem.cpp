@@ -124,10 +124,17 @@ public:
                 // message appeared" is a poor way to learn that hardware GL came
                 // up, especially when checking whether WSL picked up D3D12
                 // passthrough instead of llvmpipe.
+                // Through Qt's resolved function table rather than a bare
+                // glGetString: on Windows that symbol lives in opengl32.dll and
+                // is not linked in, because Qt resolves GL dynamically and so
+                // pulls in no import library for it. On Linux it happened to
+                // link only because libGL arrived transitively. Same call as
+                // rendererIsSoftware above, and portable for the same reason.
+                QOpenGLFunctions *gl = QOpenGLContext::currentContext()->functions();
                 const char *renderer =
-                    reinterpret_cast<const char *>(glGetString(GL_RENDERER));
+                    reinterpret_cast<const char *>(gl->glGetString(GL_RENDERER));
                 const char *version =
-                    reinterpret_cast<const char *>(glGetString(GL_VERSION));
+                    reinterpret_cast<const char *>(gl->glGetString(GL_VERSION));
                 QMetaObject::invokeMethod(
                     m_item, "reportRenderer", Qt::QueuedConnection,
                     Q_ARG(QString, QString::fromUtf8(renderer ? renderer : "?")),

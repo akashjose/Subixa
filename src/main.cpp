@@ -15,8 +15,74 @@
 #include <QtQuick/QSGRendererInterface>
 #include <QtQuickControls2/QQuickStyle>
 
+#ifdef Q_OS_WIN
+// After the Qt headers, and with both guards: windows.h defines min and max as
+// macros, which breaks anything including <algorithm> behind it.
+// Guarded: Qt's own Windows build already defines both, and redefining them is a
+// warning in a tree that is otherwise clean under -Wall -Wextra.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <cstdio>
+#endif
+
+namespace {
+
+#ifdef Q_OS_WIN
+// The player is linked as a GUI binary -- see WIN32_EXECUTABLE in CMakeLists.txt
+// -- so Windows gives it no console and Qt sends qInfo() to the debugger, where
+// nobody launching from a terminal will find it. That is the right default for a
+// double-click, but it also hides the two lines most worth reading when a
+// Windows install misbehaves: the GL_RENDERER the driver reported and which
+// hardware decoder mpv settled on.
+//
+// So borrow the console of whatever started us, if there is one. Launched from
+// Explorer there is no parent console, AttachConsole fails, and nothing changes
+// -- which is the point. No black window on a double-click.
+void attachParentConsole()
+{
+    if (!AttachConsole(ATTACH_PARENT_PROCESS))
+        return;
+
+    // Only the streams that are not already pointed somewhere. `subixa.exe >
+    // log.txt` leaves a perfectly good file handle here, and reopening that onto
+    // the console would quietly discard the redirection the user asked for.
+    const auto adopt = [](DWORD stdHandle, FILE *stream, const char *mode) {
+        const HANDLE existing = GetStdHandle(stdHandle);
+        if (existing && existing != INVALID_HANDLE_VALUE)
+            return;
+
+        // Qt chooses between stderr and the debugger by looking at the standard
+        // *handle*, while fprintf goes through the CRT's own stream, so both
+        // have to be repointed or the attach only half works.
+        const HANDLE console =
+            CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr,
+                        OPEN_EXISTING, 0, nullptr);
+        if (console == INVALID_HANDLE_VALUE)
+            return;
+        SetStdHandle(stdHandle, console);
+        std::freopen("CONOUT$", mode, stream);
+    };
+
+    adopt(STD_OUTPUT_HANDLE, stdout, "w");
+    adopt(STD_ERROR_HANDLE, stderr, "w");
+}
+#endif  // Q_OS_WIN
+
+}  // namespace
+
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_WIN
+    // Before anything logs, which means before the graphics probe below.
+    attachParentConsole();
+#endif
+
     // The mpv render API here is the OpenGL one, so the scene graph must also be
     // OpenGL. Qt 6 can otherwise pick a different RHI backend and the FBO handle
     // we hand mpv would be meaningless. Must run before QGuiApplication.

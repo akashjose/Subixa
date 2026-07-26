@@ -16,13 +16,15 @@
 // but the object tree, the bindings and the signal wiring are all real. Nothing
 // here asserts a pixel.
 //
-// It writes into a temporary XDG_CONFIG_HOME and XDG_CACHE_HOME, because a test
-// that quietly remembered a subtitle track in the developer's own settings would
-// be a bug of exactly the kind these tests exist to catch.
+// It writes into a temporary settings and cache location, because a test that
+// quietly remembered a subtitle track in the developer's own settings would be a
+// bug of exactly the kind these tests exist to catch.
 
 #include <QtTest>
 
 #include <QtCore/QDir>
+#include <QtCore/QSettings>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QGuiApplication>
 #include "MpvEngine.h"
@@ -97,6 +99,32 @@ void TstQmlPanel::initTestCase()
 
     QCoreApplication::setApplicationName(QStringLiteral("subixa"));
     QCoreApplication::setOrganizationName(QStringLiteral("subixa"));
+
+    // The two lines above are Unix-only, and on their own they made this suite
+    // pass on Windows for the wrong reason. Qt there resolves the standard paths
+    // from %APPDATA%/%LOCALAPPDATA% and ignores XDG entirely, and a
+    // default-constructed QSettings -- which is what PlaybackHistory and
+    // ShortcutRegistry use -- is the *registry*, which no directory redirection
+    // can reach. So the suite read and wrote the developer's real profile,
+    // init()'s cleanup below removed an empty temporary directory, and the
+    // subtitle track remembered by the previous run reopened
+    // panelShowsTheParsedTrack on tab 1 instead of tab 0. It passed once, on a
+    // machine that had never run it before, and failed every time after.
+    //
+    // A file-backed QSettings under m_home says the same thing portably: the
+    // default constructor now lands in the directory init() clears.
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                       m_home.filePath(QStringLiteral("config")));
+
+    // And the cue cache, which reads QStandardPaths rather than QSettings. Test
+    // mode keeps it out of the real profile on every platform; clearing it once
+    // here -- not per test -- leaves the within-a-run cache hits the suite
+    // already relied on intact, while matching the fresh-per-run behaviour the
+    // XDG redirect gave on Linux.
+    QStandardPaths::setTestModeEnabled(true);
+    QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+        .removeRecursively();
 }
 
 void TstQmlPanel::init()

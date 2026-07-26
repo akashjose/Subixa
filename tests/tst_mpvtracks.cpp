@@ -177,10 +177,27 @@ QString TstMpvTracks::subTextAfterSeek(double seconds, int timeoutMs)
     // had left a different position and sid behind -- in isolation the state it
     // read stale happened to be empty. So the cue has to actually cover the
     // position that was asked for before it counts.
+    // Re-issue the seek if the first one produces nothing for a while. Switching
+    // sid while paused does not reliably make mpv decode a cue for the position
+    // it is already sitting on -- with vo=null there is no redraw to force it --
+    // so the poll below can otherwise read an empty sub-text until the timeout
+    // and report "no subtitle" for a track that has one. A second seek always
+    // shakes it loose. Seen on mpv 0.4x/libmpv 2.5 (Windows); the older 0.37 the
+    // suite was written against happened not to need it, and which of the two
+    // sid-switching tests loses the race moves between runs.
+    QElapsedTimer sinceSeek;
+    sinceSeek.start();
+
     QElapsedTimer timer;
     timer.start();
     QString text;
     while (timer.elapsed() < timeoutMs) {
+        if (sinceSeek.elapsed() > 2000) {
+            mpv_command(m_mpv, cmd);
+            waitFor(MPV_EVENT_PLAYBACK_RESTART, timeoutMs);
+            sinceSeek.restart();
+        }
+
         // And the seek has to have actually landed before the cue means
         // anything -- PLAYBACK_RESTART alone does not promise that.
         if (qAbs(doubleProp("time-pos") - seconds) > 1.0) {
