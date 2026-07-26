@@ -6,7 +6,6 @@
 #include "SubtitleText.h"
 
 #include <QtCore/QDir>
-#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
 #include <QtCore/QStringList>
@@ -298,10 +297,21 @@ bool SubtitleExtractor::readContainer(const QString &path, const QString &videoB
 {
     const bool sidecar = !videoBase.isEmpty();
     const QString shortName = QFileInfo(path).fileName();
-    const QByteArray encodedPath = QFile::encodeName(path);
+    // toUtf8(), deliberately not QFile::encodeName(). ffmpeg wants UTF-8 paths on
+    // every platform, and on Windows Qt's local 8-bit is the ANSI codepage: a name
+    // that codepage cannot represent -- Japanese or Cyrillic on a Latin-1 system --
+    // encodes to literal `?`, unrecoverably, and avformat_open_input then fails with
+    // "Invalid argument". Measured against `日本語 café Привет.mkv`: encodeName
+    // fails, toUtf8 opens it. The confusing part while diagnosing it is that
+    // QFile::exists() on the same QString says yes -- Qt holds the path as UTF-16
+    // and never round-trips it through the codepage -- so the only place this ever
+    // shows up is the ffmpeg boundary, one line below.
+    //
+    // On Unix QFile::encodeName *is* toUtf8, so this is not a change there.
+    const QByteArray utf8Path = path.toUtf8();
 
     FormatContextGuard fmt;
-    int rc = avformat_open_input(&fmt.ctx, encodedPath.constData(), nullptr, nullptr);
+    int rc = avformat_open_input(&fmt.ctx, utf8Path.constData(), nullptr, nullptr);
     if (rc < 0) {
         *error = QStringLiteral("cannot open %1: %2").arg(shortName, avError(rc));
         return false;

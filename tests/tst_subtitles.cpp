@@ -144,6 +144,7 @@ private slots:
     void wholesaleOffsetRebasesToZero();
     void subtitlesAlreadyAtZeroAreNotRebased();
     void sidecarsAreFoundNextToTheVideo();
+    void nonAsciiFilenamesReachTheDecoder();
 
     void cacheReproducesTheParseExactly();
     void cacheMissesWhenTheMediaChanges();
@@ -329,6 +330,43 @@ void TstSubtitles::sidecarsAreFoundNextToTheVideo()
     // The language suffix in sidecar.fr.srt is where a sidecar's tag comes from.
     QVERIFY(trackByLanguage(tracks, QStringLiteral("fr"))
             || trackByLanguage(tracks, QStringLiteral("fre")));
+}
+
+// The path handed to avformat_open_input has to be UTF-8 on every platform.
+// QFile::encodeName() is the local 8-bit codec, which is UTF-8 on Unix but the
+// ANSI codepage on Windows: this filename -- `日本語 café Привет.mkv` -- encodes
+// to literal `?` there, unrecoverably, and the open then fails with "Invalid
+// argument" for every file whose name the codepage cannot represent.
+//
+// The test exists because the bug is invisible on the development host. On Unix
+// encodeName *is* toUtf8, so a revert to it passes everything here and breaks
+// only Windows -- which is precisely the kind of change that gets made back.
+//
+// The filename below is UTF-8 in this source. Both supported compilers are gcc
+// and read it as such; a toolchain that does not would need /utf-8 or escapes.
+void TstSubtitles::nonAsciiFilenamesReachTheDecoder()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    // Japanese, an accented Latin letter, and Cyrillic: the first and last are
+    // unrepresentable in any single Windows codepage, the middle one encodes to
+    // a different byte under CP1252 than under UTF-8.
+    const QString name = QStringLiteral("日本語 café Привет.mkv");
+    const QString copy = QDir(dir.path()).filePath(name);
+    QVERIFY(QFile::copy(fixture(QStringLiteral("subs.mkv")), copy));
+
+    // Qt keeps the path as UTF-16 and never round-trips it through the codepage,
+    // so this passes even when the decoder cannot open the same file. That is
+    // what made the original bug confusing, and why the assertion is here.
+    QVERIFY(QFileInfo::exists(copy));
+
+    QString error;
+    const SubtitleTrackList tracks = parse(copy, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(tracks.size(), 3);
+    for (const SubtitleTrack &t : tracks)
+        QVERIFY(!t.lines.isEmpty());
 }
 
 void TstSubtitles::cacheReproducesTheParseExactly()
