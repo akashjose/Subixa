@@ -46,6 +46,10 @@ Settings → Hotkeys:
 | < / > | previous/next file in the queue |
 | Ctrl+= / Ctrl+- | subtitle row text size, remembered |
 
+Right-clicking the picture opens the same menu the transport bar's ⋮ button
+does, at the cursor. It is one menu reached two ways rather than two lists to
+keep in step.
+
 Minimising pauses a film and leaves music playing, which is what minimising an
 album is for. The distinction is mpv's own view of the file rather than its
 extension, and it discounts cover art so a tagged mp3 does not read as a film.

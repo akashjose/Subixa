@@ -1263,10 +1263,24 @@ ApplicationWindow {
                 // window has to be clicked to focus it under WSLg, and pausing
                 // on that is infuriating.
                 MouseArea {
+                    id: videoMouse
                     anchors.fill: parent
                     hoverEnabled: true
+                    // Right-click as well, for the context menu. Left is still
+                    // listed explicitly because naming acceptedButtons at all
+                    // replaces the default rather than adding to it, and
+                    // dropping LeftButton would take the double-click with it.
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onPositionChanged: chromeTimer.restart()
                     onDoubleClicked: root.toggleFullscreen()
+                    // The same list the transport's overflow button opens, at
+                    // the cursor. Every other player puts it here, and reaching
+                    // for a button at the bottom of the window to find it is the
+                    // step that was worth removing.
+                    onClicked: (mouse) => {
+                        if (mouse.button === Qt.RightButton)
+                            transportBar.popupOverflowAt(videoMouse, mouse.x, mouse.y)
+                    }
                     cursorShape: root.showChrome ? Qt.ArrowCursor : Qt.BlankCursor
 
                     // The wheel over the picture is volume, in the step the

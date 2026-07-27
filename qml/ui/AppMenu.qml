@@ -41,6 +41,35 @@ C.Menu {
     padding: Theme.space.xs
     overlap: 0
 
+    // Widens the menu to its widest row.
+    //
+    // A Menu does not do this for you. Its contentItem is a vertical ListView,
+    // and a vertical ListView's contentWidth is not the width of its delegates
+    // -- the same property that collapsed an earlier hand-built contentItem to
+    // nothing, noted above. So the menu's width comes from its background alone,
+    // which is a fixed 220, and any row needing more than that had its shortcut
+    // printed on top of its label. Only the longest ones did, which is what made
+    // it look like a text-rendering fault rather than a sizing one.
+    //
+    // Recomputed on every open rather than bound once: a row can gain a
+    // shortcut, change its label, or be hidden between one opening and the next,
+    // and a binding over itemAt() would not re-evaluate for any of that.
+    function fitToContents() {
+        let widest = 0
+        for (let i = 0; i < menu.count; ++i) {
+            const row = menu.itemAt(i)
+            if (row && row.visible)
+                widest = Math.max(widest, row.implicitWidth)
+        }
+        if (widest > 0)
+            menu.width = widest + menu.leftPadding + menu.rightPadding
+    }
+
+    // Covers a menu opened through plain popup(); the two helpers below call it
+    // themselves, because they need the final width to clamp against an edge and
+    // aboutToShow comes too late for that.
+    onAboutToShow: menu.fitToContents()
+
     // Opens the menu against `item`: above it when there is room, below it when
     // there is not, and never off the edge of the window.
     //
@@ -57,6 +86,8 @@ C.Menu {
             menu.popup(item)
             return
         }
+        // Before the clamp below, which measures against menu.width.
+        menu.fitToContents()
         const surface = win.contentItem
         const pos = item.mapToItem(surface, 0, 0)
         const wanted = Math.min(menu.implicitHeight, menu.maximumHeight)
@@ -71,6 +102,34 @@ C.Menu {
                  ? pos.y - wanted - Theme.space.sm
                  : Math.min(pos.y + item.height + Theme.space.sm,
                             surface.height - wanted - Theme.space.md)
+        menu.open()
+    }
+
+    // Opens the menu at a point given in `item`'s coordinates, for a context
+    // menu rather than a button. Same discipline as popupNear, and for the same
+    // reason: the point is mapped into the window's contentItem because that is
+    // also what the popup is parented to, and Popup.x/y are relative to the
+    // parent item rather than to the window.
+    //
+    // Clamped on both axes here, not just x. A button lives inside the layout so
+    // its edges are known; a cursor can be one pixel from the bottom of the
+    // picture, and a menu opened there would hang off it.
+    function popupAtPoint(item, x, y) {
+        const win = item.Window.window
+        if (!win) {
+            menu.popup(item, x, y)
+            return
+        }
+        menu.fitToContents()
+        const surface = win.contentItem
+        const pos = item.mapToItem(surface, x, y)
+        const wanted = Math.min(menu.implicitHeight, menu.maximumHeight)
+
+        menu.parent = surface
+        menu.x = Math.max(Theme.space.md,
+                          Math.min(pos.x, surface.width - menu.width - Theme.space.md))
+        menu.y = Math.max(Theme.space.md,
+                          Math.min(pos.y, surface.height - wanted - Theme.space.md))
         menu.open()
     }
 
