@@ -137,6 +137,10 @@ int main(int argc, char *argv[])
     // separately; this is what the window and the task switcher use.
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/subixa.svg")));
 
+    // Ties the window to subixa.desktop. The only mechanism under Wayland, which
+    // has no WM_CLASS for a shell to match on. Name goes without the suffix.
+    app.setDesktopFileName(QStringLiteral("subixa"));
+
     // Grayscale glyphs, belt and braces with the render type above.
     //
     // fontconfig here reports `rgba: 1`, so Qt's font engine produces per-channel

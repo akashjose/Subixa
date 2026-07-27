@@ -20,6 +20,15 @@
    the real cause.
 4. **`QOpenGLFramebufferObject` is in QtOpenGL, not QtGui** (Qt 6 moved it;
    `QOpenGLContext` stayed in QtGui).
+24. **`mpv_create` returns null under any `LC_NUMERIC` but `C`.** Development ran in a
+   `C.UTF-8` session, which satisfies that by accident, so it survived both platforms
+   until the player met an `en_IN` desktop and came up with no engine at all. mpv's
+   `Non-C locale detected` goes to a terminal a double-clicked player does not have, so
+   nothing in the log names the locale.
+
+   `setlocale` goes immediately before `mpv_create`, not in `main()`: the Qt application
+   object resets the locale from the environment as it is constructed. `tst_mpvtracks`
+   builds its own handle and needs its own call.
 
 ## Subtitle extraction
 
@@ -310,3 +319,18 @@ all; it is mpv ruling out a backend, not a failure.
     not fail loudly: ImageMagick rendered the entire tile black and reported
     nothing until asked directly, which sent the first diagnosis after a
     gradient that was working fine.
+25. **The `<svg` tag must appear in the first kilobyte of the file.** gdk-pixbuf sniffs
+    the head of a file for a signature rather than parsing XML for the root element.
+    `icons/subixa.svg` carried 1184 bytes of header, putting `<svg` at byte 1188, and the
+    loader answered `Couldn't recognize the image file format` — what it says for a
+    corrupt file. The icon was blank everywhere GNOME draws one.
+
+    Anything that goes by the *filename* was unaffected, which is what hid it: Qt drew
+    the window icon correctly, ImageMagick and a browser rendered it, and GTK's
+    `lookup_icon` returned the right path — a lookup resolves a name to a file and never
+    opens it. Only the draw goes through gdk-pixbuf. Loading every other SVG on the
+    system, and finding only this one failed, is what located it.
+
+    The comments live inside the `svg` element now. **A header added back above the tag
+    reintroduces it, silently.** One line checks it:
+    `python3 -c "from gi.repository import GdkPixbuf; GdkPixbuf.Pixbuf.new_from_file_at_size('icons/subixa.svg',48,48)"`.

@@ -14,6 +14,7 @@
 #include <QtCore/QVarLengthArray>
 
 #include <algorithm>
+#include <clocale>
 
 namespace {
 
@@ -90,6 +91,11 @@ const QSet<QString> &allowedVideoAdjustments()
 
 MpvEngine::MpvEngine(QObject *parent) : QObject(parent)
 {
+    // mpv_create returns null under any LC_NUMERIC but "C". Not in main(): the
+    // Qt application object resets the locale from the environment as it is
+    // constructed. Trap 24.
+    std::setlocale(LC_NUMERIC, "C");
+
     m_mpv = mpv_create();
     if (!m_mpv) {
         m_initError = QStringLiteral("could not create an mpv context");
