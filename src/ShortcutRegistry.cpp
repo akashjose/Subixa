@@ -78,7 +78,7 @@ const QVector<ShortcutRegistry::Action> &ShortcutRegistry::actions()
         // Window
         {"fullscreen",      "Fullscreen",               "Window",   "F",            false},
         {"fullscreen-alt",  "Fullscreen (alternate)",   "Window",   "F11",          true},
-        {"leave-fullscreen","Leave fullscreen",         "Window",   "Esc",          false},
+        {"leave-fullscreen","Leave fullscreen, or minimise", "Window", "Esc",       false},
 
         // Application
         {"open-file",       "Open a file",              "Application", "Ctrl+O",    true},
