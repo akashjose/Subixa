@@ -99,6 +99,16 @@ ApplicationWindow {
 
         // Playback behaviour
         property bool playNextAutomatically: true
+        // Minimising a film should not go on playing into a window nobody can
+        // see. Music should: minimising is how an album gets out of the way.
+        // The rule is the same either way -- stop what cannot be watched -- and
+        // hasVideo is what tells the two apart.
+        property bool pauseOnMinimize: true
+        // Off, so coming back does not start playing on its own. Restoring a
+        // window is often how someone goes looking for something rather than a
+        // decision to watch, and a player that begins the moment it reappears is
+        // the more startling of the two defaults. Pressing play is one key.
+        property bool resumeOnRestore: false
         property int seekStep: 5
         property int seekStepLarge: 10
         property int volumeStep: 5
@@ -296,6 +306,33 @@ ApplicationWindow {
     property int currentRow: -1
 
     readonly property bool fullscreen: visibility === Window.FullScreen
+
+    // ---- minimising -------------------------------------------------------
+    // A film playing into a taskbar button is nobody watching it, so minimising
+    // stops it. Music is the opposite: minimising is *how* an album is put on in
+    // the background, and pausing it there would be the player second-guessing
+    // the obvious. mpv.hasVideo is what separates them, and it discounts cover
+    // art so a tagged mp3 does not read as a film.
+    readonly property bool minimized: visibility === Window.Minimized
+    // Whether the pause was ours to undo. Restoring must not start something
+    // that was already paused when it was minimised.
+    property bool pausedByMinimize: false
+    onMinimizedChanged: {
+        if (root.minimized) {
+            if (prefs.pauseOnMinimize && mpv.hasVideo && !mpv.paused) {
+                mpv.setPaused(true)
+                root.pausedByMinimize = true
+            }
+        } else if (root.pausedByMinimize) {
+            // Cleared either way: the pause stops being ours the moment the
+            // window is back, so a later manual pause is never undone by a
+            // minimise that happened before it.
+            root.pausedByMinimize = false
+            if (prefs.resumeOnRestore)
+                mpv.setPaused(false)
+        }
+    }
+
     property bool panelVisible: true
     // What the panel was doing before fullscreen hid it, so leaving fullscreen
     // restores that rather than unconditionally showing it.
@@ -789,8 +826,14 @@ ApplicationWindow {
 
         case "fullscreen": case "fullscreen-alt": root.toggleFullscreen(); break
         case "leave-fullscreen":
+            // Esc means "get this out of the way", and what is in the way
+            // depends on where it is: fullscreen comes down to a window, and a
+            // window goes to the taskbar. Minimised rather than closed, because
+            // one key must never be able to end a viewing.
             if (root.fullscreen)
                 root.visibility = Window.Windowed
+            else
+                root.showMinimized()
             break
 
         case "open-file": openDialog.open(); break
@@ -816,11 +859,12 @@ ApplicationWindow {
 
             Shortcut {
                 sequence: modelData.sequence
+                // Escape needs no gate of its own any more: it does something in
+                // either window state now, and the search box is already covered
+                // because leave-fullscreen does not work while typing, so the
+                // field keeps the key and clears its own text.
                 enabled: modelData.sequence !== ""
                          && (!root.typing || modelData.worksWhileTyping)
-                         // Escape only leaves fullscreen; in the search box it
-                         // clears the text, which the field handles itself.
-                         && (modelData.id !== "leave-fullscreen" || root.fullscreen)
                 onActivated: root.dispatch(modelData.id)
             }
         }
@@ -1118,7 +1162,19 @@ ApplicationWindow {
             var paths = []
             for (var i = 0; i < drop.urls.length; ++i)
                 paths.push(mpv.localFile(drop.urls[i]))
-            root.openFiles(paths)
+            // A dropped folder is the media inside it. Expanded here rather than
+            // inside openFiles, so a folder holding a single film still arrives
+            // as one file to open rather than a queue of one.
+            var expanded = playlist.expand(paths)
+            if (expanded.length === 0) {
+                // Saying so, because the alternative is a drop that looks like
+                // it missed the window. A folder of subtitles and nothing else
+                // is the case that gets here.
+                root.notify("Nothing playable in what was dropped", "error")
+                drop.acceptProposedAction()
+                return
+            }
+            root.openFiles(expanded)
             drop.acceptProposedAction()
         }
     }
@@ -1212,6 +1268,26 @@ ApplicationWindow {
                     onPositionChanged: chromeTimer.restart()
                     onDoubleClicked: root.toggleFullscreen()
                     cursorShape: root.showChrome ? Qt.ArrowCursor : Qt.BlankCursor
+
+                    // The wheel over the picture is volume, in the step the
+                    // arrow keys use and with the same readout, so the two are
+                    // one control reached two ways. Inside the MouseArea rather
+                    // than beside it, so there is no question of which of the
+                    // two sees the event first. The panel scrolls as it did:
+                    // this is bounded by the picture.
+                    WheelHandler {
+                        onWheel: (event) => {
+                            // A sideways scroll on a trackpad reports no
+                            // vertical movement; without this it would read as
+                            // a turn downwards and quietly lower the volume.
+                            if (event.angleDelta.y === 0)
+                                return
+                            mpv.setVolume(mpv.volume + (event.angleDelta.y > 0
+                                                        ? prefs.volumeStep
+                                                        : -prefs.volumeStep))
+                            root.osd(Math.round(mpv.volume) + "%")
+                        }
+                    }
                 }
 
                 // Nothing loaded. The first thing a new user sees, so it says
@@ -1222,8 +1298,8 @@ ApplicationWindow {
                     visible: root.currentFile === "" && root.noticeText === ""
                     iconName: "film"
                     title: "Nothing playing"
-                    body: "Open a file, or drop one anywhere in this window. "
-                          + "Drop several to build a queue."
+                    body: "Open a file, or drop files and folders anywhere in "
+                          + "this window. Drop several to build a queue."
                     actionText: "Open file…"
                     actionShortcut: keys.sequenceFor("open-file")
                     onActionTriggered: openDialog.open()
@@ -1243,7 +1319,8 @@ ApplicationWindow {
                         compact: true
                         iconName: "folder-open"
                         title: "Drop to play"
-                        body: "Several files become a queue, in the order dropped."
+                        body: "Files or folders. Several become a queue, in the "
+                              + "order dropped."
                     }
                 }
 

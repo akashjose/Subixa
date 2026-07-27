@@ -15,6 +15,12 @@
 #include <QtCore/QFile>
 #include <QtCore/QTemporaryDir>
 
+#include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
+#include <QtQml/QQmlEngine>
+
+#include <memory>
+
 #include "Playlist.h"
 
 namespace {
@@ -51,21 +57,37 @@ private slots:
     void theOpenedFileIsAlwaysQueuedEvenIfUnrecognised();
     void nextAndPreviousStopAtTheEnds();
     void aDropKeepsTheOrderItWasDroppedIn();
+    void aDroppedFolderBecomesItsContents();
+    void severalDroppedFoldersPlayInTheOrderDropped();
+    void aDroppedFolderIsWalkedToTheBottom();
+    void aFolderWithNothingPlayableExpandsToNothing();
+    void qmlCanCallExpand();
     void reopeningAQueuedFileKeepsTheQueue();
     void dialogFiltersAndScanAgree();
 
 private:
     QString path(const QString &name) const { return m_dir.filePath(name); }
+    // A file at `name`, creating whatever folders lead to it.
+    QString touchIn(const QString &name) const
+    {
+        const QString full = path(name);
+        QDir().mkpath(QFileInfo(full).absolutePath());
+        touch(full);
+        return full;
+    }
     QTemporaryDir m_dir;
 };
 
 void TstPlaylist::init()
 {
     QVERIFY(m_dir.isValid());
-    // Each test builds the folder it needs.
+    // Each test builds the folder it needs -- subdirectories included, now that
+    // a drop can be a folder and the tests make some.
     const QDir dir(m_dir.path());
     for (const QString &name : dir.entryList(QDir::Files))
         QFile::remove(dir.filePath(name));
+    for (const QString &name : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+        QDir(dir.filePath(name)).removeRecursively();
 }
 
 void TstPlaylist::recognisesMediaByExtension()
@@ -221,6 +243,111 @@ void TstPlaylist::aDropKeepsTheOrderItWasDroppedIn()
                           QStringLiteral("b.mkv")}));
     QCOMPARE(playlist.currentIndex(), 0);
     QCOMPARE(QFileInfo(playlist.currentPath()).fileName(), QStringLiteral("c.mkv"));
+}
+
+void TstPlaylist::aDroppedFolderBecomesItsContents()
+{
+    touchIn(QStringLiteral("Season 1/ep10.mkv"));
+    touchIn(QStringLiteral("Season 1/ep2.mkv"));
+    touchIn(QStringLiteral("Season 1/ep1.mkv"));
+    touchIn(QStringLiteral("Season 1/ep1.srt"));
+    touchIn(QStringLiteral("Season 1/readme.nfo"));
+
+    // Sorted, not left in whatever order the filesystem returns: nobody chose
+    // that order, whereas the numbering in the names is a choice. The sidecar
+    // and the notes are not things to play.
+    QCOMPARE(names(Playlist::expand({path(QStringLiteral("Season 1"))})),
+             (QStringList{QStringLiteral("ep1.mkv"), QStringLiteral("ep2.mkv"),
+                          QStringLiteral("ep10.mkv")}));
+}
+
+void TstPlaylist::severalDroppedFoldersPlayInTheOrderDropped()
+{
+    touchIn(QStringLiteral("Season 2/ep1.mkv"));
+    touchIn(QStringLiteral("Season 1/ep1.mkv"));
+    const QString loose = touchIn(QStringLiteral("extra.mkv"));
+
+    // Season two first, because that is the order they were dropped in -- the
+    // sorting is inside each folder, never across them. A file dropped
+    // alongside folders keeps its place in the sequence.
+    const QStringList expanded = Playlist::expand(
+        {path(QStringLiteral("Season 2")), loose, path(QStringLiteral("Season 1"))});
+    QCOMPARE(expanded.size(), 3);
+    QCOMPARE(QDir(m_dir.path()).relativeFilePath(expanded.at(0)),
+             QStringLiteral("Season 2/ep1.mkv"));
+    QCOMPARE(QFileInfo(expanded.at(1)).fileName(), QStringLiteral("extra.mkv"));
+    QCOMPARE(QDir(m_dir.path()).relativeFilePath(expanded.at(2)),
+             QStringLiteral("Season 1/ep1.mkv"));
+
+    // And the queue that comes out of it is exactly that, first file current.
+    Playlist playlist;
+    playlist.setFiles(expanded);
+    QCOMPARE(playlist.count(), 3);
+    QCOMPARE(playlist.currentIndex(), 0);
+}
+
+void TstPlaylist::aDroppedFolderIsWalkedToTheBottom()
+{
+    touchIn(QStringLiteral("Show/Season 1/ep1.mkv"));
+    touchIn(QStringLiteral("Show/Season 1/Extras/blooper.mkv"));
+    touchIn(QStringLiteral("Show/Season 2/ep1.mkv"));
+    touchIn(QStringLiteral("Show/trailer.mkv"));
+
+    // One level would miss every episode here, which is how these folders are
+    // actually laid out. Files before subfolders at each level, so the trailer
+    // sitting at the top comes before the seasons, and a season's own episodes
+    // come before its Extras.
+    QCOMPARE(names(Playlist::expand({path(QStringLiteral("Show"))})),
+             (QStringList{QStringLiteral("trailer.mkv"), QStringLiteral("ep1.mkv"),
+                          QStringLiteral("blooper.mkv"), QStringLiteral("ep1.mkv")}));
+}
+
+void TstPlaylist::aFolderWithNothingPlayableExpandsToNothing()
+{
+    touchIn(QStringLiteral("Subs/film.srt"));
+    QDir().mkpath(path(QStringLiteral("Empty")));
+
+    // Nothing, rather than the folder itself: handing a directory to mpv as if
+    // it were a film is the failure this replaced. The window turns an empty
+    // expansion into a notice, which is the only way a drop can say so.
+    QVERIFY(Playlist::expand({path(QStringLiteral("Subs")),
+                              path(QStringLiteral("Empty"))}).isEmpty());
+
+    // A plain file is not filtered here though -- it has to reach the caller so
+    // that dropping one thing mpv cannot open reports mpv's error rather than
+    // looking like a drop that missed the window.
+    const QString notes = touchIn(QStringLiteral("notes.txt"));
+    QCOMPARE(Playlist::expand({notes}), QStringList{notes});
+}
+
+void TstPlaylist::qmlCanCallExpand()
+{
+    touchIn(QStringLiteral("Season 1/ep2.mkv"));
+    touchIn(QStringLiteral("Season 1/ep1.mkv"));
+
+    // expand() is static, and the drop handler reaches it through the Playlist
+    // *instance* in Main.qml. A static Q_INVOKABLE not being callable that way
+    // would fail at runtime, inside a drop, with nothing said at build time --
+    // so the call path the window actually uses is the thing tested here, not
+    // just the C++ function behind it.
+    QQmlEngine engine;
+    Playlist playlist;
+    engine.rootContext()->setContextProperty(QStringLiteral("playlist"), &playlist);
+
+    QQmlComponent component(&engine);
+    component.setData("import QtQml\nQtObject { function go(p) { return playlist.expand(p) } }",
+                      QUrl());
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create());
+    QVERIFY(object != nullptr);
+
+    QVariant returned;
+    QVERIFY(QMetaObject::invokeMethod(
+        object.get(), "go", Q_RETURN_ARG(QVariant, returned),
+        Q_ARG(QVariant, QVariant(QStringList{path(QStringLiteral("Season 1"))}))));
+
+    QCOMPARE(names(returned.toStringList()),
+             (QStringList{QStringLiteral("ep1.mkv"), QStringLiteral("ep2.mkv")}));
 }
 
 void TstPlaylist::reopeningAQueuedFileKeepsTheQueue()

@@ -27,8 +27,9 @@ Settings → Hotkeys:
 | ← / → | seek, Shift for 1 s; step size is a setting |
 | J / L | large seek |
 | Ctrl+← / Ctrl+→ | previous / next subtitle line |
-| ↑ / ↓ | volume, M mutes |
-| F, F11 | fullscreen, Esc leaves it |
+| ↑ / ↓ | volume, M mutes; the wheel over the picture does the same |
+| F, F11 | fullscreen |
+| Esc | leaves fullscreen, or minimises the window if it is not fullscreen |
 | Tab | show/hide the subtitle panel |
 | Ctrl+D | detach the panel into its own window, or dock it again |
 | Ctrl+F | focus the search box |
@@ -44,6 +45,15 @@ Settings → Hotkeys:
 | Ctrl+, | settings |
 | < / > | previous/next file in the queue |
 | Ctrl+= / Ctrl+- | subtitle row text size, remembered |
+
+Minimising pauses a film and leaves music playing, which is what minimising an
+album is for. The distinction is mpv's own view of the file rather than its
+extension, and it discounts cover art so a tagged mp3 does not read as a film.
+Settings → Playback turns the pause off; nothing there makes music pause.
+
+Restoring the window leaves it paused. Settings → Playback can make it resume
+instead, and that only ever resumes a pause the minimise itself caused — a film
+paused by hand before minimising stays paused either way.
 
 Guarding is per action rather than blanket: a binding is disabled while the search box has
 focus unless its `worksWhileTyping` flag says the sequence carries a modifier a `TextField`

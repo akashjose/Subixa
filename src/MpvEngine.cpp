@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <clocale>
+#include <utility>
 
 namespace {
 
@@ -456,10 +457,28 @@ void MpvEngine::refreshTracks()
             in.value(QStringLiteral("external"), false).toBool();
         out[QStringLiteral("externalFilename")] =
             in.value(QStringLiteral("external-filename"));
+        // mpv's own flag for a still it decoded out of a tag rather than a
+        // stream to play. Carried through rather than inferred from the codec,
+        // which cannot tell a cover jpeg from a one-frame video.
+        out[QStringLiteral("albumart")] =
+            in.value(QStringLiteral("albumart"), false).toBool();
         m_tracks.append(out);
     }
 
+    const bool hadVideo = m_hasVideo;
+    m_hasVideo = false;
+    for (const QVariant &entry : std::as_const(m_tracks)) {
+        const QVariantMap track = entry.toMap();
+        if (track.value(QStringLiteral("type")).toString() == QLatin1String("video")
+            && !track.value(QStringLiteral("albumart")).toBool()) {
+            m_hasVideo = true;
+            break;
+        }
+    }
+
     emit tracksChanged();
+    if (hadVideo != m_hasVideo)
+        emit hasVideoChanged();
 }
 
 void MpvEngine::refreshChapters()

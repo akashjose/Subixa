@@ -50,6 +50,10 @@ class MpvEngine : public QObject
     // contains the other (mpv sees bitmap subtitle tracks the browser cannot
     // list; the browser sees sidecars mpv may not have loaded).
     Q_PROPERTY(QVariantList tracks READ tracks NOTIFY tracksChanged)
+    // Whether there is a moving picture, as opposed to a file that merely has a
+    // video *track*: cover art in a music file is one, and treating it as video
+    // would mean an album pauses itself the moment the window is minimised.
+    Q_PROPERTY(bool hasVideo READ hasVideo NOTIFY hasVideoChanged)
     // Selected sid/aid, or -1 for off. -1 rather than mpv's "no" so QML can
     // compare with an integer.
     Q_PROPERTY(int subtitleTrack READ subtitleTrack NOTIFY subtitleTrackChanged)
@@ -107,6 +111,7 @@ public:
     bool paused() const { return m_paused; }
     bool idle() const { return m_idle; }
     QVariantList tracks() const { return m_tracks; }
+    bool hasVideo() const { return m_hasVideo; }
     int subtitleTrack() const { return m_subtitleTrack; }
     int audioTrack() const { return m_audioTrack; }
     double volume() const { return m_volume; }
@@ -230,6 +235,7 @@ signals:
     void pausedChanged();
     void idleChanged();
     void tracksChanged();
+    void hasVideoChanged();
     void subtitleTrackChanged();
     void audioTrackChanged();
     void volumeChanged();
@@ -287,6 +293,7 @@ private:
     bool m_paused = true;
     bool m_idle = true;
     QVariantList m_tracks;
+    bool m_hasVideo = false;
     QVariantList m_chapters;
     int m_subtitleTrack = -1;
     int m_audioTrack = -1;

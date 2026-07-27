@@ -180,6 +180,29 @@ Window {
                     }
 
                     FormRow {
+                        label: "Pause when the window is minimised"
+                        help: "Only films. Music keeps playing, since minimising "
+                              + "is how an album is put on in the background."
+                        AppSwitch {
+                            checked: win.prefs.pauseOnMinimize
+                            onToggled: win.prefs.pauseOnMinimize = checked
+                        }
+                    }
+
+                    FormRow {
+                        label: "Resume when the window comes back"
+                        help: "Off by default: restoring a window is often how "
+                              + "someone goes looking for something, not a "
+                              + "decision to watch."
+                        // Nothing to resume when nothing was paused.
+                        enabled: win.prefs.pauseOnMinimize
+                        AppSwitch {
+                            checked: win.prefs.resumeOnRestore
+                            onToggled: win.prefs.resumeOnRestore = checked
+                        }
+                    }
+
+                    FormRow {
                         label: "Volume"
                         readout: Math.round(win.mpv.volume) + "%"
                         AppSlider {
