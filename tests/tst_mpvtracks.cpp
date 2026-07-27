@@ -25,6 +25,8 @@
 #include "FboCap.h"
 #include "MpvTrackList.h"
 
+#include <clocale>
+
 namespace {
 
 QString fixture(const QString &name)
@@ -81,6 +83,9 @@ void TstMpvTracks::initTestCase()
     const QString path = fixture(QStringLiteral("subs.mkv"));
     if (!QFileInfo::exists(path))
         QSKIP("fixtures missing -- run ./testdata/make-fixtures.sh");
+
+    // Its own handle, so it needs its own call. See MpvEngine's constructor.
+    std::setlocale(LC_NUMERIC, "C");
 
     m_mpv = mpv_create();
     QVERIFY(m_mpv);

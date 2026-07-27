@@ -108,7 +108,7 @@ row, is in **`docs/architecture.md`**.
 
 ## Traps
 
-**`docs/traps.md` has all 23 with the evidence.** They are numbered as identities,
+**`docs/traps.md` has all 25 with the evidence.** They are numbered as identities,
 not an order. The index:
 
 | # | | |
@@ -136,6 +136,8 @@ not an order. The index:
 | 21 | `ScrollBar` and `ScrollIndicator` are different types | |
 | 22 | **Mesa's D3D12 driver miscolours every glyph** | see below |
 | 23 | XML forbids `--` inside a comment | the SVG icon renders black, silently |
+| 24 | `mpv_create` fails outside a `C` locale | and says so only on a terminal |
+| 25 | `<svg` must be in the first 1 KB | or gdk-pixbuf cannot see the icon at all |
 
 Trap 22 is the one that will confuse you first. On this machine Qt Quick's text
 materials render in the wrong colour — `#aab2c2` as green, an 11px `#7e93b5`
@@ -172,7 +174,7 @@ failure that looks like something else.
 |---|---|
 | `docs/roadmap.md` | **where the project stands and what is next — start here** |
 | `docs/architecture.md` | modules, the design system, the subtitle row, caching |
-| `docs/traps.md` | all 23, with the evidence and what was ruled out |
+| `docs/traps.md` | all 25, with the evidence and what was ruled out |
 | `docs/testing.md` | the suites, the render canary, WSL screenshot and input |
 | `docs/graphics.md` | driver selection, why development stays on WSL, the Windows port |
 | `docs/keyboard.md` | default bindings |
