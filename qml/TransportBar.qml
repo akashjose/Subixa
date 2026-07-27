@@ -302,6 +302,17 @@ Rectangle {
         return (h > 0 ? two(h) + ":" + two(m) : m) + ":" + two(s)
     }
 
+    // The overflow menu, opened at a point in `item`'s coordinates instead of
+    // against the button that normally summons it.
+    //
+    // The window calls this for a right-click on the picture. Deliberately the
+    // same menu object rather than a second one built from the same actions: two
+    // lists would agree on the day they were written and drift apart on the
+    // first one that gains an entry.
+    function popupOverflowAt(item, x, y) {
+        overflowMenu.popupAtPoint(item, x, y)
+    }
+
     // ---- menus -----------------------------------------------------------
     AppMenu {
         id: speedMenu
