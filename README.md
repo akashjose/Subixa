@@ -337,9 +337,14 @@ the payload and has to be walked separately.
 DEST=dist/subixa-win64
 mkdir -p "$DEST" && cp build-win/subixa.exe LICENSE "$DEST/"
 
-# Qt: libraries, the platform/imageformat/TLS plugins, the QML modules the app
-# imports, and a qt.conf pointing at them. --qmldir is what makes it read the
-# imports rather than guess.
+# qmlimportscanner lives in share/qt6/bin, not bin, and windeployqt6 looks for it
+# beside itself. Without this the scan dies with "Process failed to start", and
+# windeployqt6 then exits 0 having staged *nothing* -- an empty directory and a
+# success code.
+export PATH="/ucrt64/share/qt6/bin:$PATH"
+
+# Qt: libraries, the platform/imageformat/TLS plugins, and the QML modules the
+# app imports. --qmldir is what makes it read the imports rather than guess.
 windeployqt6 --qmldir qml "$DEST/subixa.exe"
 
 # Everything else: libmpv, libass, libplacebo, the FFmpeg libraries, and the
@@ -351,12 +356,42 @@ ldd build-win/subixa.exe | grep -oiE '/ucrt64/bin/[^ ]+dll' | xargs -I{} cp -n {
 # filter above -- and a machine with no Vulkan-capable driver has no System32
 # copy to fall back on either.
 cp /ucrt64/bin/vulkan-1.dll "$DEST/"
+
+# windeployqt does not write a qt.conf, and does not need to on a stock Qt: it
+# patches Qt6Core so the prefix relocates to wherever the DLL now sits, and the
+# layout it stages into is the one a stock Qt would then compute. That patching
+# works fine here -- the deployed Qt6Core reports a prefix of $DEST exactly.
+#
+# What does not survive is the *rest* of the layout. MSYS2 configures Qt with its
+# qml and plugin trees under share/qt6 rather than directly under the prefix, and
+# relocation keeps that offset, so the bundle resolves imports to
+# $DEST/share/qt6/qml while windeployqt has staged them to $DEST/qml. Plugins
+# disagree the same way and get away with it, because Qt always searches the
+# application directory for those; QML has no such fallback, so QML is what
+# breaks. qt.conf is what reconciles the two layouts.
+cat > "$DEST/qt.conf" <<'EOF'
+[Paths]
+Prefix = .
+Plugins = .
+Imports = qml
+Qml2Imports = qml
+Translations = translations
+EOF
 ```
 
-`cp -n` matters in that third command: `ldd` also reports the Qt DLLs, and without it they
+`cp -n` matters in the `ldd` command: it also reports the Qt DLLs, and without it they
 would be copied back over whatever `windeployqt6` had just staged. The result is roughly
-170 DLLs and about 260 MB, intended to run on a machine with no MSYS2 installed — though
-it has not yet been tried on a clean one. There is no installer, and nothing is code-signed.
+170 DLLs and about 300 MB. There is no installer, and nothing is code-signed.
+
+The paths above are MSYS2 mount paths, so run this from the **UCRT64 shell**. From Git Bash
+`/ucrt64` does not resolve and every `cp` fails with "No such file or directory"; the
+equivalent there is `/c/msys64/ucrt64`.
+
+Verified on 2026-07-28 by running the staged bundle with `PATH` cut down to
+`C:\Windows\system32;C:\Windows`: it starts, finds the Intel UHD 770 through the real
+driver, and decodes with `d3d11va-copy` through `wasapi`. That is standalone on *this*
+machine with MSYS2 merely off the PATH, which is a weaker claim than a clean machine —
+still untried — but it is the check that turned up the missing `qt.conf`.
 
 #### Differences worth knowing
 
