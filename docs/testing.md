@@ -5,13 +5,22 @@
 
 ## Tests
 
+Most media fixtures are generated rather than committed, so a fresh clone has to
+build them first. Three suites **fail** rather than skip without them, which is
+deliberate: a `QSKIP` exits 0, and a checkout that had never run this script used
+to report every suite green having asserted almost nothing.
+
 ```bash
+./testdata/make-fixtures.sh          # embedded, sidecar and shifted-timeline cases
+./testdata/make-fixtures.sh --big    # plus huge.mp4 and a 200k-cue ASS sidecar
 cd build && ctest --output-on-failure     # or run ./build/tst_subtitles directly
 ```
 
-Six headless suites, none needing a compositor or a rendered frame —
+Seven headless suites, none needing a compositor or a rendered frame —
 deliberately, because a screenshot is the least reliable evidence available here
-(see the degraded-state note below). Run these before reaching for the UI.
+(see the degraded-state note below). An eighth ctest entry, `rendercanary`, is
+registered `DISABLED` under the `manual` label so it has a name without ever
+running in a headless batch. Run these before reaching for the UI.
 
 - **`tst_subtitles`** — the extractor against the fixtures (the 8-comma ASS field
   layout, entity decoding, both halves of the rebase rule) plus
@@ -31,6 +40,25 @@ deliberately, because a screenshot is the least reliable evidence available here
   strings. Note `vo=null` rather than `QT_QPA_PLATFORM=offscreen`: offscreen never
   creates a render context, so the queued `loadfile` never flushes and mpv loads
   nothing at all (trap 2).
+- **`tst_conformance`** — the only suite whose inputs are bytes in git rather
+  than media muxed at test time, which is the whole reason it exists separately.
+  `testdata/conformance/` is 35 KB of containers built from a 32x32 token video
+  stream, and `golden.tsv` records what the extractor made of every cue in them.
+  Every other fixture is muxed by whatever ffmpeg is installed, so a Linux run
+  and a Windows run each decode inputs they produced themselves and their
+  agreement proves nothing; this one decodes identical bytes everywhere. A
+  decoder change or an FFmpeg major bump then arrives as a named line rather than
+  as a pass. It asserts the *application's* view — startMs, endMs and the text
+  after tag stripping and entity decoding — rather than the raw `rect->ass`
+  string, because the raw contract belongs to the decoder and will not survive
+  the eventual AVSubtitle-to-AVFrame port.
+  The corpus is exempted from line-ending normalisation in `.gitattributes`: one
+  source file carries CRLF deliberately, and `*.srt text eol=lf` would have
+  converted it on commit, leaving a case that still passed while testing nothing.
+  Updating the golden requires `SUBIXA_REGOLD=1 ./tools/regold.sh --reason "..."`,
+  and the reason is recorded in the file. A golden that rewrites itself on failure
+  does not test anything: the first person to see a red re-runs with the flag, the
+  diff scrolls past, and the regression becomes the expected output.
 - **`tst_qmlpanel`** — the QML layer, which until now had no harness at all. It
   loads the real `Main.qml` (not a mock) under `QT_QPA_PLATFORM=offscreen` and
   drives it through the object tree: a tab click swaps the model, the search box

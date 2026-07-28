@@ -13,9 +13,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(SUBIXA_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
 
-# 6.5 rather than 6.9. Nothing here needs 6.9, and requiring a 2025 release put
-# the project out of reach of every current LTS distribution -- which is the
-# difference between "packageable" and "build Qt yourself first".
 # QtQuick.Shapes -- which draws every icon in the app -- deliberately absent.
 # Qt 6.9 ships it as a private module (only Qt6QuickShapesPrivate has a CMake
 # config), and a dynamically linked build resolves the QML plugin through the
@@ -344,6 +341,24 @@ target_link_libraries(tst_subtitles PRIVATE
     Subixa::ffmpeg
 )
 
+# The golden-file check over the committed corpus. Separate from tst_subtitles
+# because it is the only suite whose inputs are bytes in git rather than media
+# muxed at test time -- which is what lets a Linux result and a Windows result be
+# compared at all. Links mpv purely to print its client API version in the
+# banner, so a red after a dependency bump names which library moved.
+qt_add_executable(tst_conformance tests/tst_conformance.cpp ${SUBIXA_MODEL_SOURCES})
+target_include_directories(tst_conformance PRIVATE src)
+target_compile_definitions(tst_conformance PRIVATE
+    SUBIXA_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+target_link_libraries(tst_conformance PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Test
+    Subixa::ffmpeg
+    Subixa::mpv
+)
+
 # Talks to libmpv directly with vo=null: verifies that selecting a track changes
 # what mpv would render, read back as text from `sub-text` instead of pixels.
 qt_add_executable(tst_mpvtracks tests/tst_mpvtracks.cpp)
@@ -394,7 +409,7 @@ target_link_libraries(tst_qmlpanel PRIVATE
 # source list, so without this more than half of what compiles here was built
 # with warnings off while the tree was described as clean under -Wall -Wextra.
 foreach(t tst_playbackhistory tst_playlist tst_shortcuts tst_subtitles
-          tst_mpvtracks tst_qmlpanel)
+          tst_mpvtracks tst_qmlpanel tst_conformance)
     target_compile_options(${t} PRIVATE -Wall -Wextra)
 endforeach()
 
@@ -404,9 +419,10 @@ add_test(NAME playbackhistory COMMAND tst_playbackhistory)
 add_test(NAME playlist COMMAND tst_playlist)
 add_test(NAME shortcuts COMMAND tst_shortcuts)
 add_test(NAME qmlpanel COMMAND tst_qmlpanel)
+add_test(NAME conformance COMMAND tst_conformance)
 
 # None of these needs a display; make sure they never try to open one.
-set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts PROPERTIES
+set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts conformance PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=minimal"
     TIMEOUT 120
 )
@@ -440,6 +456,12 @@ set_tests_properties(mpvtracks PROPERTIES REQUIRED_FILES
 
 set_tests_properties(qmlpanel PROPERTIES REQUIRED_FILES
     "${SUBIXA_TESTDATA}/subs.mkv")
+
+# The conformance corpus is committed, so these are present in any complete
+# checkout. Listing them anyway turns "somebody deleted a fixture" into a named
+# missing file rather than a decode error thirty lines into a golden diff.
+set_tests_properties(conformance PROPERTIES REQUIRED_FILES
+    "${SUBIXA_TESTDATA}/conformance/basic.mkv;${SUBIXA_TESTDATA}/conformance/entities.mkv;${SUBIXA_TESTDATA}/conformance/drawing.mkv;${SUBIXA_TESTDATA}/conformance/shifted.mkv;${SUBIXA_TESTDATA}/conformance/noshift.mp4;${SUBIXA_TESTDATA}/conformance/manytracks.mkv;${SUBIXA_TESTDATA}/conformance/sidecar.mp4;${SUBIXA_TESTDATA}/conformance/golden.tsv")
 
 # There is deliberately no SKIP_REGULAR_EXPRESSION here, and it must not come
 # back. It reads like a safety net and is the opposite of one: the expression is

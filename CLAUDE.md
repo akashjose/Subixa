@@ -205,8 +205,13 @@ failure that looks like something else.
 | | |
 |---|---|
 | `docs/roadmap.md` | **where the project stands and what is next — start here** |
-| `docs/architecture.md` | modules, the design system, the subtitle row, caching |
+| `docs/architecture.md` | the three founding decisions, modules, the design system, caching |
 | `docs/traps.md` | all 25, with the evidence and what was ruled out |
-| `docs/testing.md` | the suites, the render canary, WSL screenshot and input |
-| `docs/graphics.md` | driver selection, why development stays on WSL, the Windows port |
+| `docs/testing.md` | the suites, the conformance corpus, the render canary |
+| `docs/building.md` | the full Linux build, including the from-source media stack |
+| `docs/windows.md` | the MSYS2 toolchain, the build and the deployment sequence |
+| `docs/graphics.md` | driver selection, and what the Windows port turned up |
 | `docs/keyboard.md` | default bindings |
+| `CHANGELOG.md` | what has been built, milestone by milestone |
+| `CONTRIBUTING.md` | conventions, and what is most useful to work on |
+| `README.md` | the public page: what this is, and how to build it |

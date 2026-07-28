@@ -13,6 +13,10 @@ CMakeLists.txt.user*
 # Where tools/render-canary.sh leaves the grabs and the log when it fails.
 canary-failure/
 
+# Agent scratch space. Worktrees created here are separate git checkouts, and
+# `git add -A` will otherwise stage them as embedded repositories.
+.claude/
+
 # Generated test media. testclip.mp4 is 15 s of testsrc2 with a burned-in
 # timecode, and testdata/make-fixtures.sh generates it along with everything
 # muxed from it.
@@ -24,6 +28,12 @@ testdata/*.mkv
 testdata/*.mp4
 testdata/sidecar.*
 testdata/huge.en.ass
+
+# The conformance corpus is the opposite: committed as bytes, so that every
+# platform decodes identical input rather than whatever its own ffmpeg muxed.
+# The patterns above do not reach it -- they match direct children of testdata/
+# only -- but that is an accident of glob depth, and this says so out loud.
+!testdata/conformance/**
 
 # Test artefacts copied next to testclip.mp4 while checking the browser.
 testclip.*.srt

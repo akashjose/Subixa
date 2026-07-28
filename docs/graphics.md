@@ -87,7 +87,7 @@ out would have been vcpkg or a hand-generated import library. MSYS2 UCRT64 sides
 it by packaging libmpv, FFmpeg and Qt 6 against one another for gcc. What the port actually
 took was a `WIN32` branch in the dependency lookup — `find_path`/`find_library` instead of
 pkg-config, because MSYS2's `.pc` files hardcode `prefix=/ucrt64` and hand a native CMake
-an MSYS path with no drive letter — and a handful of small fixes elsewhere. `README.md` has
+an MSYS path with no drive letter — and a handful of small fixes elsewhere. `windows.md` has
 the toolchain, the versions and the deployment steps.
 
 The porting debt was kept small rather than paid early, and mostly that held up:

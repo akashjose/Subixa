@@ -18,6 +18,15 @@
 *.srt           text eol=lf
 *.ass           text eol=lf
 
+# The conformance corpus is exempt from all of the above, and the exemption is
+# load-bearing rather than tidy-minded. Those files are committed as bytes so
+# that every platform decodes identical input, and several of them encode a
+# specific byte sequence on purpose -- src/basic.en.srt carries CRLF to pin how
+# the parser handles it. Under the `*.srt text eol=lf` rule one line above, git
+# would normalise that to LF on commit and the case would silently stop testing
+# anything, while still passing. `-text` disables normalisation entirely.
+testdata/conformance/**  -text
+
 # Media and other binaries: never diff, never touch the bytes. Most of these
 # are generated and gitignored, but the marker has to exist for the cases
 # where one is committed on purpose (icons, a captured frame in a bug report).

@@ -3,6 +3,33 @@
 > What the modules are, and the decisions behind the ones that are not obvious.
 > Split out of `CLAUDE.md`, which is the entry point and links here.
 
+## The three decisions everything else follows from
+
+**Built from scratch, not forked.** VLC, Haruna and SMPlayer all carry
+architecture shaped around their own UI goals, and the feature this project
+exists for — a docked, searchable subtitle list that the video composites
+underneath — is not something any of them is arranged to grow. libmpv is a
+dependency here, not a base.
+
+**The mpv render API, not `--wid`.** The video surface is a
+`QQuickFramebufferObject`: mpv renders into an FBO the application owns, so it is
+an ordinary scene-graph node and QML composites freely on top of it. With `--wid`
+mpv draws into a separate native surface *above* the scene graph, which makes
+overlays and docked panels unreliable. Since the entire premise is QML chrome
+over video, `--wid` is not an option. The consequences of that choice are what
+traps 1, 2 and 10 are about, and it is also why `src/main.cpp` pins the scene
+graph to OpenGL.
+
+**Subtitle text is parsed independently of mpv.** This is the least obvious of
+the three and the one most likely to be undone by someone tidying up, so: mpv
+exposes only the *currently displayed* subtitle line, through the `sub-text`
+property. There is no API for "give me every cue in this track", and there could
+not usefully be one, since mpv's model is a renderer's. A browsable list needs
+every cue up front, so subtitle streams are demuxed and decoded separately with
+libavformat and libavcodec, on a worker thread, and cached on disk. That is why
+the project links FFmpeg directly as well as libmpv, and why a change to either
+library can move what the browser shows.
+
 ## Modules
 
 ```
