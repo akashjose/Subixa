@@ -25,33 +25,45 @@ talking about this repository before that pass.
 
 ## Environment
 
-Developed on **WSL2, Ubuntu 24.04**. Keep the repo on the native ext4 fs,
-deliberately **not** under `/mnt/*` — those are 9p mounts and several times
-slower for build workloads. Nothing below is WSL-specific except the graphics
-notes and the tooling in `tools/`; an ordinary Linux desktop needs none of it.
+Subixa targets **three platforms**: native Linux, Windows (MSYS2 UCRT64, gcc
+rather than MSVC) and WSL. All three are first class, and CI is expected to
+produce output for each. **Check which one you are on before trusting anything
+below** — much of the history in `docs/` was written under WSL and does not say
+so, which is its own trap; see the note under Traps.
+
+The current development host is **native Ubuntu 24.04 on X11**, not WSL.
 
 | | |
 |---|---|
-| Qt | 6.9.3 at `~/Qt/6.9.3/gcc_64` (system Qt is 6.4.2 — too old, do not use) |
-| libmpv | 0.37, client API 2.2.0, from apt |
-| FFmpeg | 6.1.1 (`libavformat` 60.16.100, `libavcodec` 60.31.102) |
-| Mesa | 26.1.5 from the kisak-mesa PPA |
-| Compiler | gcc 13.3.0, C++17, CMake 3.28.3 + Ninja |
-| Display | WSLg. Hardware GL via D3D12 is available and selected automatically. |
+| Qt | 6.12.0 at `~/data/Qt/6.12.0/gcc_64` (the distribution's is far too old) |
+| libmpv | 0.41.0, client API 2.5.0, built from source |
+| FFmpeg | 8.1.2 (`libavcodec` 62.28.102, `libavformat` 62.12.102) |
+| libplacebo | 7.360.1, built from source |
+| Mesa | 25.2.8, from the distribution |
+| Compiler | gcc 14.2, **C++23**, CMake 3.28.3 + Ninja |
+| Display | X11, `DISPLAY=:1`, hardware GL on Intel. `hwdec` resolves to `vaapi-copy`. |
 
-**Graphics are the single most surprising thing about this environment** — the
-driver is chosen by a probe, and the one it picks renders text in the wrong
-colour. See **`docs/graphics.md`**, and trap 22.
+**No distribution supplies that media stack** — Ubuntu 24.04 is on FFmpeg 6.1.1
+with no upgrade path in apt — so `tools/build-deps.sh` builds libplacebo, FFmpeg
+and mpv from pinned versions into `~/data/subixa-stack`. The versions move as a
+deliberate step, because a player whose codec stack drifts is a player whose bug
+reports cannot be reproduced.
 
 ## Build and run
 
 ```bash
-cd ~/code/subixa
-export CMAKE_PREFIX_PATH="$HOME/Qt/6.9.3/gcc_64"     # required, or CMake finds Qt 6.4
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+export CMAKE_PREFIX_PATH="$HOME/data/Qt/6.12.0/gcc_64"
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+      -DSUBIXA_DEPS_PREFIX="$HOME/data/subixa-stack"
 cmake --build build
 ./build/subixa testclip.mp4
 ```
+
+`SUBIXA_DEPS_PREFIX` sets `PKG_CONFIG_PATH` and an rpath in one flag. The rpath
+is the part that matters: without it a suite links against the prefix and then
+loads the distribution's older libraries at run time, and `ctest` does not
+inherit an `LD_LIBRARY_PATH` from your shell. Leave it unset to build against
+system packages, which is what the Windows path does.
 
 `testclip.mp4` is a generated 15 s testsrc2 clip with burned-in timecode —
 useful because you can visually confirm the rendered frame matches the seek bar.
@@ -68,11 +80,17 @@ Environment switches, all off by default: `SUBIXA_NO_GPU`, `SUBIXA_NO_SYNC`,
 workaround so it can be A/B'd; `docs/graphics.md` and `docs/traps.md` say what
 each is for.
 
-**First thing in a new session:** run `./tools/render-canary.sh`. It says whether
-the picture is being painted, whether it is moving, and whether it is the right
-clip — the three things the WSLg degraded state breaks while everything in the
-log looks normal. Until it passes, every visual check will lie, and the fix is to
-restart the distro rather than to debug the app.
+**`./tools/render-canary.sh` only runs under WSLg.** It says whether the picture
+is being painted, whether it is moving, and whether it is the right clip — the
+three things the WSLg degraded state breaks while everything in the log looks
+normal. There, run it first in every session: until it passes, every visual check
+will lie, and the fix is to restart the distro rather than to debug the app.
+
+On the current host it exits immediately with *"cannot reach the Windows side"*,
+because it shells to `powershell.exe`, `wslpath` and `tools/wsl-screenshot.ps1`.
+Nothing has replaced it. On X11 the same three checks are a few lines — `import`
+captures a window and two captures a second apart tell a moving picture from a
+frozen one — and building that is open work, not something already available.
 
 See **`docs/testing.md`** for the six suites, the canary, and the Windows-side
 screenshot and input tooling — including why a screenshot here needs care.
@@ -139,20 +157,34 @@ not an order. The index:
 | 24 | `mpv_create` fails outside a `C` locale | and says so only on a terminal |
 | 25 | `<svg` must be in the first 1 KB | or gdk-pixbuf cannot see the icon at all |
 
-Trap 22 is the one that will confuse you first. On this machine Qt Quick's text
-materials render in the wrong colour — `#aab2c2` as green, an 11px `#7e93b5`
-timestamp as black and invisible — while rectangles, images and Shapes geometry
-in the same frame are exact. It is not ours: it reproduces in Qt's own `qml`
-binary, and on Mesa 26.1.5 as well as 25.2.8. `PaintedText` works around it and
-`AppText` selects between the two at runtime. **Every piece of text in the app
-must go through `AppText`**, never a bare `Text`.
+**None of these entries records which platform it applies to, and that has cost
+real time.** Development moved between Linux, Windows and WSL in stretches, so a
+trap was found on whichever machine was in use and written up without saying so.
+Several read as universal and are not: 1, 20 and 22 are WSLg-only; 9 and 10 are
+software-rasterizer-only; 24 and 25 were found on an ordinary Ubuntu desktop; the
+non-ASCII path bug came off Windows. `docs/traps.md` around line 143 has one that
+is openly unresolved — *"Is this llvmpipe generally, or WSLg?"*. Check which
+platform a trap belongs to before treating it as a constraint, and add the scope
+to any entry you touch.
+
+Trap 22 is the clearest case. **It is a Mesa D3D12 bug, and that driver exists
+only under WSLg** — on native Linux and on Windows it does not arise. There, Qt
+Quick's text materials render in the wrong colour: `#aab2c2` as green, an 11px
+`#7e93b5` timestamp as black and invisible, while rectangles, images and Shapes
+geometry in the same frame are exact. It is not ours — it reproduces in Qt's own
+`qml` binary. `PaintedText` works around it, and `AppText` chooses between the
+two at runtime from the real `GL_RENDERER` rather than from the platform, so on
+this host it resolves to the native path and costs nothing. **Every piece of text
+in the app must still go through `AppText`**, never a bare `Text`, because the
+WSL leg is a supported target.
 
 Trap 23 is its small cousin, and cost a cycle for the same reason: a silent
 failure that looks like something else.
 
 ## Conventions
 
-- C++17, 4-space indent, Qt naming (`m_` members, camelCase methods).
+- C++23 (no compiler extensions), 4-space indent, Qt naming (`m_` members,
+  camelCase methods).
 - Keep mpv-specific types out of `MpvEngine.h` — it forward-declares `mpv_handle`
   and takes `void*` in `handleMpvEvent` so mpv headers stay in the .cpp.
 - QML talks to mpv only through `Q_INVOKABLE`/properties on `MpvEngine`. Do not

@@ -77,6 +77,40 @@ function(subixa_import_library name header)
     endforeach()
 endfunction()
 
+# Where tools/build-deps.sh put the media stack, if it was used.
+#
+# The distribution's packages cannot reach the versions this targets -- Ubuntu
+# 24.04 is on FFmpeg 6.1.1 with no upgrade in apt, against a target of 8.1.x --
+# so on Linux the stack is normally built from source into a prefix of its own.
+# Pointing CMake at it here rather than exporting PKG_CONFIG_PATH by hand means
+# one flag configures a build, and means the six suites find those libraries
+# under ctest, which does not inherit an LD_LIBRARY_PATH from the shell.
+#
+# Left empty, everything below behaves exactly as it did: system pkg-config on
+# Unix, find_path/find_library on Windows, where MSYS2 packages the stack
+# against itself and no prefix is wanted.
+set(SUBIXA_DEPS_PREFIX "" CACHE PATH
+    "Prefix containing libmpv/FFmpeg built by tools/build-deps.sh (Linux only)")
+
+if(SUBIXA_DEPS_PREFIX AND NOT WIN32)
+    if(NOT IS_DIRECTORY "${SUBIXA_DEPS_PREFIX}")
+        message(FATAL_ERROR
+            "SUBIXA_DEPS_PREFIX=${SUBIXA_DEPS_PREFIX} is not a directory. "
+            "Run tools/build-deps.sh first, or leave it unset to use system packages.")
+    endif()
+    # Both spellings: meson installs to lib/<triplet> and autotools to lib/.
+    set(ENV{PKG_CONFIG_PATH}
+        "${SUBIXA_DEPS_PREFIX}/lib/pkgconfig:${SUBIXA_DEPS_PREFIX}/lib/${CMAKE_LIBRARY_ARCHITECTURE}/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+    # An rpath rather than an LD_LIBRARY_PATH, so the binary and every test
+    # target find the stack with no environment set. Without this a suite links
+    # against the prefix and then loads the distribution's older libraries at
+    # run time, which is worse than failing to link at all.
+    list(APPEND CMAKE_BUILD_RPATH
+        "${SUBIXA_DEPS_PREFIX}/lib"
+        "${SUBIXA_DEPS_PREFIX}/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+    message(STATUS "Using media stack from ${SUBIXA_DEPS_PREFIX}")
+endif()
+
 if(WIN32)
     subixa_import_library(mpv mpv/client.h mpv)
     subixa_import_library(ffmpeg libavformat/avformat.h avformat avcodec avutil)

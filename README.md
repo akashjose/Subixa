@@ -247,38 +247,66 @@ tree; `docs/roadmap.md` has the full account.
 
 ## Build
 
-Needs Qt 6.5 or newer, libmpv, and the FFmpeg development libraries. Linux is the
-development host and the platform every design decision was made against; Windows
-builds from the same tree with its own toolchain, covered below.
+| | |
+|---|---|
+| Qt | 6.12 or newer |
+| FFmpeg | 8.1.x |
+| mpv | 0.41 (client API 2.5) |
+| libplacebo | 7.360 |
+| Compiler | C++23 — gcc 14 or newer |
+
+Nothing has shipped yet, so these are floors rather than compromises: the tree tracks
+current releases and CMake refuses anything older. Linux is the development host and the
+platform every design decision was made against; Windows builds from the same tree with
+its own toolchain, covered below.
 
 ### Linux
 
-Qt 6.9 here (system Qt 6.4 on Ubuntu 24.04 is too old for the version this was developed
-against, though CMake accepts 6.5).
+**No distribution can supply this stack.** Ubuntu 24.04 ships FFmpeg 6.1.1 and apt offers
+no upgrade — the candidate is the installed version — against a target of 8.1.x. So the
+media libraries are built from source into a prefix of their own, which leaves the
+system's own `mpv` and `ffmpeg` untouched and is reversible with `rm -rf`.
 
 ```bash
-sudo apt install -y build-essential cmake ninja-build pkg-config \
-  libmpv-dev libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libswscale-dev
+sudo apt install -y build-essential cmake ninja-build pkg-config nasm g++-14 \
+  glslang-dev glslang-tools libshaderc-dev liblcms2-dev libunwind-dev \
+  libdav1d-dev libxml2-dev libzimg-dev libass-dev \
+  libpulse-dev libasound2-dev libpipewire-0.3-dev \
+  libxrandr-dev libxpresent-dev libxss-dev libxkbcommon-dev libxinerama-dev \
+  libegl1-mesa-dev libgl-dev libgbm-dev libvulkan-dev
+pip install --user meson aqtinstall      # the distribution's meson is too old
 
-export CMAKE_PREFIX_PATH="$HOME/Qt/6.9.3/gcc_64"
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+./tools/build-deps.sh                    # libplacebo, FFmpeg, mpv -> ~/data/subixa-stack
+```
+
+Qt comes from [aqtinstall](https://github.com/miurahr/aqtinstall) — the system package is
+far too old:
+
+```bash
+aqt install-qt linux desktop 6.12.0 linux_gcc_64 \
+  -m qtshadertools qtimageformats -O ~/data/Qt
+```
+
+`qtdeclarative` is **not** a valid module name for Qt 6 — QML, Quick and Svg ship in the
+base package, and passing a bad module name aborts the whole install.
+
+Then one flag points CMake at the stack. It sets `PKG_CONFIG_PATH` for the dependency
+lookup and an rpath for the binary and all six test targets, which matters because `ctest`
+does not inherit an `LD_LIBRARY_PATH` from your shell:
+
+```bash
+export CMAKE_PREFIX_PATH="$HOME/data/Qt/6.12.0/gcc_64"
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+      -DSUBIXA_DEPS_PREFIX="$HOME/data/subixa-stack"
 cmake --build build
 ./build/subixa /path/to/video.mkv
 ```
 
-Qt itself is installed via [aqtinstall](https://github.com/miurahr/aqtinstall):
+Leave `SUBIXA_DEPS_PREFIX` unset to build against system packages instead — which works
+wherever the distribution is current enough, and is what the Windows path does.
 
-```bash
-pipx install aqtinstall
-aqt install-qt linux desktop 6.9.3 linux_gcc_64 \
-  -m qtshadertools qtimageformats qtmultimedia qt5compat -O ~/Qt
-```
-
-Note `qtdeclarative` is **not** a valid module for Qt 6 — QML and Quick ship in the base
-package, and passing a bad module name aborts the whole install.
-
-`make install` puts the binary, the desktop entry, the icon under
-`hicolor/scalable/apps` and the licence where a distribution package expects them. That
+`make install` puts the binary, the desktop entry and icon under the application id
+(`com.akashjose.Subixa`), and the licence where a distribution package expects them. That
 is as far as packaging goes — there is no CPack configuration, no `.deb`, and no CI.
 
 ### Windows
@@ -290,13 +318,23 @@ packages libmpv, FFmpeg and Qt 6 against one another already, and everything it 
 is an ordinary native Windows binary — the MSYS2 shell is the build environment, not a
 runtime dependency of the player.
 
+MSYS2 rolls, so unlike Linux it reaches the required versions on its own — but it has to
+be brought up to date first. **Update before installing.** A prefix left at Qt 6.11 will
+fail `find_package` outright, which is the intended behaviour and not a build error to
+work around:
+
 ```bash
+pacman -Syu                              # then reopen the shell and run it again
 pacman -S --needed \
   mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja \
   mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-qt6-declarative \
   mingw-w64-ucrt-x86_64-qt6-svg mingw-w64-ucrt-x86_64-qt6-shadertools \
   mingw-w64-ucrt-x86_64-mpv mingw-w64-ucrt-x86_64-ffmpeg
 ```
+
+`tools/build-deps.sh` and `SUBIXA_DEPS_PREFIX` are Linux-only and are not wanted here:
+MSYS2 already packages libmpv, FFmpeg and Qt against one another, which is the problem
+that script exists to solve on a distribution that does not.
 
 Then, from the **UCRT64** shell specifically — not MSYS, not MINGW64. The compiler, CMake
 and Qt all have to come out of the same prefix, and MSYS2's own `cmake` package is a
