@@ -23,7 +23,7 @@ Milestones 1–5 are committed, and so is the work that followed on the
 Linux desktop turned up that WSL had hidden (traps 24 and 25), and the mouse work
 — folder drops, Esc to minimise, wheel volume, right-click menu.
 
-Since then, 13 commits changed the ground the rest of this document stands on.
+Since then, 19 commits changed the ground the rest of this document stands on.
 
 **The dependency stack moved to current releases and is now built from source.**
 Linux was on Qt 6.9.3, FFmpeg 6.1.1 and mpv 0.37 — a 2023 stack — while the
@@ -85,18 +85,39 @@ from the queue chip in the same pass, so a folder holding one film shows them
 disabled rather than losing them. Both carry regression tests that fail without
 the fix.
 
-`SubtitleFilterModel`'s seven untested invokables now have characterization
-tests, pinning what the class does today because item 5 below plans to replace
-it and those are the invariants a base-class swap breaks silently.
+**The browser reads the ASS styles table.** Styling came only from the override
+tags inside each cue, so a track styled entirely through named styles — how most
+professionally authored ASS is written — read plain in the panel while libass
+rendered it italic and coloured on the picture. `avctx->subtitle_header` was
+already in memory and nothing read it. The cache format went 2 → 3 with the
+record layout (trap 14), and the actor name is now retained, which is the column
+the browser has not yet grown.
 
-Seven suites pass, warning-free under `-Wall -Wextra` on every target:
-40 cases in `tst_subtitles`, 23 in `tst_playbackhistory`, 14 in `tst_qmlpanel`.
+That change also exposed a hole in the corpus and closed it. `golden.tsv`
+recorded only the tag-stripped plain text, in which a cue styled through its
+table is byte-identical to an unstyled one — so the fixture could have been
+added, the golden regenerated, and nothing would have moved. It now records the
+style name, the actor and the styled markup.
+
+**The search proxy was replaced, on a measurement rather than the argument this
+file used to make.** One filter change over 200k cues took 326 ms under
+`QSortFilterProxyModel`, of which the predicate was 12 ms; scanning the same
+track from scratch took 14 ms. Rebuilding is 23× faster than updating
+incrementally. The seven characterization invokables were the specification and
+were not touched.
+
+**The track reconciliation moved to C++**, `qml/Main.qml` 1515 → 1459. That is
+3.7% and worth stating as such: the value is that the most intricate logic in the
+product now has a compiler and 20 cases in `tst_mpvtracks`, not the line count.
+
+Nine suites pass, warning-free under `-Wall -Wextra` on every target.
 
 ## Next
 
-In rough order of value. The work recorded above sits mostly *underneath* these
-rather than through them — of the six the previous version of this file listed,
-one is partly done (the settings item, item 3) and the rest are untouched.
+In rough order of value. Three of the six this file listed on 2026-07-29 have
+landed — the ASS styles table, the search proxy and the `Main.qml` drain — and
+the settings item is half done. What is left is mostly what needs a machine, a
+Windows box, or a decision rather than an afternoon.
 
 1. **CI, and then packaging.** Still no CI anywhere — no `.github`, no
    `metainfo.xml`, no AppImage, Flatpak or `.deb`. This ranks above the
@@ -122,23 +143,7 @@ one is partly done (the settings item, item 3) and the rest are untouched.
    standalone program, not assumed. What remains is the consolidation: one
    service, a schema version key, and pruning.
 
-3. **Drain `Main.qml`.** 1,502 lines, not the 1,300 the previous version of this
-   file claimed — and it was already 1,502 in the commit that wrote that line.
-   The two-namespace track reconciliation is the most intricate logic in the
-   product and is untyped JavaScript. Note that half of it already exists in C++:
-   `subtitleIdForStream`, `subtitleIdForFile`, `sameFile` and `isSelected` are in
-   `src/MpvTrackList.h` with coverage in `tests/tst_mpvtracks.cpp`. What remains
-   is the browser-namespace half and the arbitration between them.
-
-4. **The search proxy.** Filtering is a linear scan over every cue, on the GUI
-   thread. Measure before building: the payoff the previous version claimed —
-   "every keystroke after the first is O(matches)" — targets a case that
-   `qml/SubtitlePanel.qml`'s 150 ms debounce already caps, so keystrokes never
-   reach the proxy. The expensive scan is the first one, which incremental
-   narrowing cannot help. The real cost may be that `invalidateRowsFilter`
-   re-tests every rejected row and emits `countChanged` once per contiguous run.
-
-5. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then: nothing
+3. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then: nothing
    is packaged, deployment is a documented command sequence rather than a script,
    and nothing is signed. Azure Trusted Signing at about $10/month is the only
    certificate option that works headless in CI — OV certificates have needed a
