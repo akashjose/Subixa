@@ -272,14 +272,10 @@ ApplicationWindow {
         // half of them would be invisible. The models adjust for this, and this
         // is how they learn what they are being drawn on.
         rowBackground: Theme.color.bgSurface
-        onLoaded: {
-            root.currentTrack = -1
-            var index = root.preferredTrackIndex()
-            if (index >= 0) {
-                root.currentTrack = subs.tracks[index].id
-                panelUi.tabIndex = index
-            }
-        }
+        // The tab is the whole selection -- currentTrack is derived from it --
+        // so there is nothing else to set here. -1 when the file has no
+        // browsable track, which reads back as "nothing to list".
+        onLoaded: panelUi.tabIndex = root.preferredTrackIndex()
     }
 
     PlaybackHistory {
@@ -300,7 +296,19 @@ ApplicationWindow {
         objectName: "shortcuts"
     }
 
-    property int currentTrack: -1
+    // The track being browsed, in the browser's own numbering -- an index into
+    // the manager's track list, which is not mpv's track ids and never was.
+    //
+    // Derived rather than assigned. Three paths choose a track (a tab, the
+    // transport's subtitle menu, and the one remembered for this file) and each
+    // used to write this *and* the tab; the menu path only ever wrote the tab,
+    // so picking a track there left the browser listing the previous track's
+    // cues and export writing them. One selection, panelUi.tabIndex, and this
+    // is how the rest of the window reads it.
+    readonly property int currentTrack: {
+        var track = subs.tracks[panelUi.tabIndex]
+        return track !== undefined && track.browsable ? track.id : -1
+    }
     // View row of the cue playing right now, or -1 when playback is before the
     // first cue or that cue is filtered out.
     property int currentRow: -1
@@ -543,7 +551,10 @@ ApplicationWindow {
         var track = tracks[index]
         if (track === undefined || !track.browsable)
             return
-        root.currentTrack = track.id
+        // The panel has already moved its own tab by the time it says this, but
+        // setting it here as well is what makes the tab the selection rather
+        // than a thing that happens to agree with one.
+        panelUi.tabIndex = index
         root.applySubtitleSelection()
         // A tab click is a statement about this film, so it is worth keeping.
         // Only explicit choices are remembered -- storing what the sync handlers
@@ -626,6 +637,8 @@ ApplicationWindow {
 
     // The other direction: picking a subtitle track from the transport menu moves
     // the panel to the matching tab, so the two agree no matter which was used.
+    // Moving the tab is the whole of it -- currentTrack derives from it, so the
+    // list and the export target follow without a second write to keep in step.
     // Path comparison happens in C++ -- one file can be named relatively in the
     // extractor and absolutely by mpv.
     function syncPanelToSubtitleTrack() {

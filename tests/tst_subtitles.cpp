@@ -128,6 +128,31 @@ const SubtitleTrack *trackByLanguage(const SubtitleTrackList &tracks, const QStr
     return nullptr;
 }
 
+// The track the proxy tests run against: two cues matching "alpha" with a
+// non-matching one between them. The gap is the point -- filtering has to
+// *renumber* rows, not just shorten the list, so a view row that happens to
+// equal its source row proves nothing.
+QVector<SubtitleLine> proxyLines()
+{
+    QVector<SubtitleLine> lines;
+    lines.append({1000, 2000, QStringLiteral("alpha"), {}});
+    lines.append({3000, 4000, QStringLiteral("beta"), {}});
+    lines.append({5000, 6000, QStringLiteral("alpha again"), {}});
+    return lines;
+}
+
+// SubtitleLineModel only ever emits dataChanged for the whole list at once, when
+// the theme changes the row background. The proxy's remapping is per row, so
+// checking it needs a model that can touch one.
+class TouchableLineModel : public SubtitleLineModel
+{
+public:
+    void touchRow(int row, const QList<int> &roles)
+    {
+        emit dataChanged(index(row, 0), index(row, 0), roles);
+    }
+};
+
 }  // namespace
 
 class TstSubtitles : public QObject
@@ -171,6 +196,16 @@ private slots:
     void searchFoldsHardSpaces();
     void rowAtMapsThroughTheFilter();
     void startMsAtRoundTripsThroughTheFilter();
+
+    void cueStartMsAtIgnoresTheDelay();
+    void endMsAtBracketsTheLine();
+    void textAtFollowsTheSpokenCue();
+    void rowAccessorsReadTheViewRow();
+    void rowAfterAndRowBeforeStepThroughTheView();
+    void delayMovesTimesWithoutMovingRows();
+    void roleNamesComeFromTheSourceModel();
+    void dataChangedRemapsThroughTheFilter();
+    void filterWithoutASourceModelIsInert();
 };
 
 void TstSubtitles::initTestCase()
@@ -1159,6 +1194,455 @@ void TstSubtitles::styledAndPlainTextAgreeOnContent()
              qPrintable(styled));   // renders as one ampersand
     QVERIFY2(!styled.contains(QStringLiteral("&amp;amp;")),
              qPrintable(styled));   // would render as "&amp;"
+}
+
+// The rest of SubtitleFilterModel's surface, pinned as it behaves today.
+//
+// These are characterization tests, not specifications. The class is a
+// QSortFilterProxyModel and is slated to become a purpose-built proxy instead;
+// the row mapping, the delay arithmetic and the signal forwarding would all keep
+// compiling through that swap and could each go quietly wrong, which is the one
+// failure mode a subtitle browser cannot survive -- a click seeking to the wrong
+// line looks like a timing bug in the file. So every invokable is exercised with
+// the filter both empty and active, since renumbering is where the mapping shows.
+//
+// Where the current behaviour looks questionable it is still recorded, with the
+// oddity named in the comment rather than asserted away.
+
+void TstSubtitles::cueStartMsAtIgnoresTheDelay()
+{
+    SubtitleLineModel model;
+    model.setLines(proxyLines());
+    SubtitleFilterModel filter;
+    filter.setSourceModel(&model);
+
+    QCOMPARE(filter.cueStartMsAt(0), 1000);
+    QCOMPARE(filter.cueStartMsAt(2), 5000);
+    QCOMPARE(filter.cueStartMsAt(-1), -1);
+    QCOMPARE(filter.cueStartMsAt(3), -1);
+
+    filter.setPattern(QStringLiteral("alpha"));
+    QCOMPARE(filter.count(), 2);
+    QCOMPARE(filter.cueStartMsAt(1), 5000);
+    // Row 2 existed a moment ago and does not now: the panel keeps view rows
+    // across a keystroke, so an accessor being asked for a row that has just
+    // been filtered away is ordinary, not a bug in the caller.
+    QCOMPARE(filter.cueStartMsAt(2), -1);
+
+    // The pair either side of the delay: cueStartMsAt is what the row *shows*,
+    // startMsAt is where a click on it *seeks*. Anything that collapses the two
+    // makes a resynced file display the wrong timestamps or seek to the wrong
+    // place, depending on which one wins.
+    filter.setDelayMs(2000);
+    QCOMPARE(filter.cueStartMsAt(1), 5000);
+    QCOMPARE(filter.startMsAt(1), 7000);
+    QCOMPARE(filter.cueStartMsAt(9), -1);
+}
+
+void TstSubtitles::endMsAtBracketsTheLine()
+{
+    SubtitleLineModel model;
+    model.setLines(proxyLines());
+    SubtitleFilterModel filter;
+    filter.setSourceModel(&model);
+
+    QCOMPARE(filter.endMsAt(0), 2000);
+    QCOMPARE(filter.endMsAt(2), 6000);
+    QCOMPARE(filter.endMsAt(-1), -1);
+    QCOMPARE(filter.endMsAt(3), -1);
+
+    filter.setPattern(QStringLiteral("alpha"));
+    // Loop-this-line reads both ends of one row, so they have to describe the
+    // same cue after renumbering -- 5000..6000, not 5000..2000.
+    QCOMPARE(filter.startMsAt(1), 5000);
+    QCOMPARE(filter.endMsAt(1), 6000);
+    QCOMPARE(filter.endMsAt(2), -1);
+
+    // The delay moves the end exactly as it moves the start, or a loop set on a
+    // resynced file would run short by the offset.
+    filter.setDelayMs(500);
+    QCOMPARE(filter.endMsAt(1), 6500);
+    filter.setDelayMs(-500);
+    QCOMPARE(filter.endMsAt(1), 5500);
+
+    // A stored end of 0 reads as "no end". The guard is on the value rather than
+    // on the row, so endMsAt cannot tell a zero-length cue at the head of the
+    // file from a cue whose end was never parsed -- both come back -1 and the
+    // loop button does nothing. Recorded as it stands: harmless in practice
+    // because nothing produces a cue that ends at 0, and the alternative is
+    // looping over a zero-length range.
+    QVector<SubtitleLine> degenerate;
+    degenerate.append({0, 0, QStringLiteral("no end"), {}});
+    SubtitleLineModel edge;
+    edge.setLines(degenerate);
+    SubtitleFilterModel edgeFilter;
+    edgeFilter.setSourceModel(&edge);
+    QCOMPARE(edgeFilter.count(), 1);
+    QCOMPARE(edgeFilter.cueStartMsAt(0), 0);
+    QCOMPARE(edgeFilter.endMsAt(0), -1);
+}
+
+void TstSubtitles::textAtFollowsTheSpokenCue()
+{
+    SubtitleLineModel model;
+    model.setLines(proxyLines());
+    SubtitleFilterModel filter;
+    filter.setSourceModel(&model);
+
+    QCOMPARE(filter.textAt(0), QString());
+    QCOMPARE(filter.textAt(999), QString());
+    QCOMPARE(filter.textAt(1000), QStringLiteral("alpha"));
+    QCOMPARE(filter.textAt(1500), QStringLiteral("alpha"));
+    QCOMPARE(filter.textAt(3500), QStringLiteral("beta"));
+
+    // In the gap after a cue ends, and past the last cue, the preview keeps
+    // showing the line that started most recently: textAt inherits indexAt's
+    // rule and never consults endMs. Hovering a silent stretch therefore shows
+    // the previous line rather than nothing. Pinned rather than corrected --
+    // "the last thing said" is defensible for a hover preview, and auto-follow
+    // depends on the same rule to keep a highlight during a pause.
+    QCOMPARE(filter.textAt(2500), QStringLiteral("alpha"));
+    QCOMPARE(filter.textAt(9'999'999), QStringLiteral("alpha again"));
+
+    filter.setPattern(QStringLiteral("alpha"));
+    QCOMPARE(filter.textAt(1500), QStringLiteral("alpha"));
+    QCOMPARE(filter.textAt(5500), QStringLiteral("alpha again"));
+    // The cue playing now is filtered out, so the preview goes blank rather than
+    // quoting a line the list is not showing.
+    QCOMPARE(filter.textAt(3500), QString());
+
+    filter.setPattern(QString());
+    filter.setDelayMs(500);
+    // With +500 the cue stored at 1000 is not spoken until 1500.
+    QCOMPARE(filter.textAt(1200), QString());
+    QCOMPARE(filter.textAt(1600), QStringLiteral("alpha"));
+}
+
+void TstSubtitles::rowAccessorsReadTheViewRow()
+{
+    SubtitleLineModel model;
+    model.setLines(proxyLines());
+    SubtitleFilterModel filter;
+    filter.setSourceModel(&model);
+
+    QCOMPARE(filter.textAtRow(0), QStringLiteral("alpha"));
+    QCOMPARE(filter.textAtRow(2), QStringLiteral("alpha again"));
+    QCOMPARE(filter.timestampAtRow(0), QStringLiteral("00:00:01.000"));
+    QCOMPARE(filter.timestampAtRow(2), QStringLiteral("00:00:05.000"));
+
+    // Out of range on either side is an empty string, not the nearest row: these
+    // feed a copy action and a status line, where a wrong answer is silent.
+    QCOMPARE(filter.textAtRow(-1), QString());
+    QCOMPARE(filter.textAtRow(3), QString());
+    QCOMPARE(filter.timestampAtRow(-1), QString());
+    QCOMPARE(filter.timestampAtRow(3), QString());
+
+    filter.setPattern(QStringLiteral("alpha"));
+    QCOMPARE(filter.textAtRow(1), QStringLiteral("alpha again"));
+    QCOMPARE(filter.timestampAtRow(1), QStringLiteral("00:00:05.000"));
+    QCOMPARE(filter.textAtRow(2), QString());
+    QCOMPARE(filter.timestampAtRow(2), QString());
+
+    // The timestamp is the stored one. It comes from the line model, which knows
+    // nothing about the delay, so a resynced row goes on displaying where the cue
+    // sits in the file while startMsAt seeks to where it is heard. The two
+    // disagreeing is deliberate; a row that renumbered its own timestamps would
+    // no longer match the subtitle file the reader is editing.
+    filter.setDelayMs(2000);
+    QCOMPARE(filter.timestampAtRow(1), QStringLiteral("00:00:05.000"));
+    QCOMPARE(filter.startMsAt(1), 7000);
+
+    // An empty track is a normal state: models are emptied rather than deleted
+    // between loads, and QML asks for row 0 as soon as it is rebound.
+    SubtitleLineModel empty;
+    SubtitleFilterModel emptyFilter;
+    emptyFilter.setSourceModel(&empty);
+    QCOMPARE(emptyFilter.count(), 0);
+    QCOMPARE(emptyFilter.textAtRow(0), QString());
+    QCOMPARE(emptyFilter.timestampAtRow(0), QString());
+}
+
+void TstSubtitles::rowAfterAndRowBeforeStepThroughTheView()
+{
+    SubtitleLineModel model;
+    model.setLines(proxyLines());
+    SubtitleFilterModel filter;
+    filter.setSourceModel(&model);
+
+    // Before the first cue, "next line" means the first one rather than nothing.
+    QCOMPARE(filter.rowAfter(0), 0);
+    QCOMPARE(filter.rowAfter(1500), 1);
+    QCOMPARE(filter.rowAfter(3500), 2);
+    // Past the last cue there is nowhere to go, and the caller must not seek.
+    QCOMPARE(filter.rowAfter(5500), -1);
+    QCOMPARE(filter.rowAfter(9'999'999), -1);
+
+    // rowBefore is a track-back button, not a plain decrement: a little way into
+    // a line it restarts that line, and only near the start does it step back.
+    QCOMPARE(filter.rowBefore(0), -1);       // nothing has been said yet
+    QCOMPARE(filter.rowBefore(1100), -1);    // just inside the first line
+    QCOMPARE(filter.rowBefore(2500), 0);     // further in: restart it
+    QCOMPARE(filter.rowBefore(3100), 0);     // just inside the second: step back
+    QCOMPARE(filter.rowBefore(5000), 1);     // exactly on the third's start
+    QCOMPARE(filter.rowBefore(6300), 2);     // well into it: restart
+
+    // The 1200 ms window itself, from both sides. Exactly on the boundary steps
+    // back, because the comparison is strict.
+    QCOMPARE(filter.rowBefore(2200), -1);
+    QCOMPARE(filter.rowBefore(2201), 0);
+
+    filter.setPattern(QStringLiteral("alpha"));
+    QCOMPARE(filter.count(), 2);
+    QCOMPARE(filter.rowAfter(0), 0);
+    QCOMPARE(filter.rowAfter(1500), 1);
+    QCOMPARE(filter.rowAfter(5500), -1);
+    QCOMPARE(filter.rowBefore(5100), 0);
+    QCOMPARE(filter.rowBefore(6500), 1);
+
+    // Playback sitting on a cue the filter hides. rowAt says -1 there, which
+    // rowAfter cannot tell apart from "before the first cue" -- so next-line
+    // jumps to the top of the list, which is *backwards* from where playback is,
+    // and previous-line does nothing at all. Both are pinned as they stand: the
+    // shape of the fix is a decision about the search UI, not about this class.
+    QCOMPARE(filter.rowAt(3500), -1);
+    QCOMPARE(filter.rowAfter(3500), 0);
+    QCOMPARE(filter.rowBefore(3500), -1);
+
+    // A search matching nothing leaves no row to step to in either direction.
+    filter.setPattern(QStringLiteral("nothing here"));
+    QCOMPARE(filter.count(), 0);
+    QCOMPARE(filter.rowAfter(0), -1);
+    QCOMPARE(filter.rowAfter(3500), -1);
+    QCOMPARE(filter.rowBefore(3500), -1);
+
+    // With a delay in force the window is still measured in playback time, so
+    // the answers match the undelayed ones taken at the same point in the line.
+    filter.setPattern(QString());
+    filter.setDelayMs(1000);
+    QCOMPARE(filter.rowBefore(2100), -1);    // 1100 into the file, as above
+    QCOMPARE(filter.rowBefore(3500), 0);     // 2500, as above
+    QCOMPARE(filter.rowAfter(2500), 1);
+
+    // And an empty track answers nothing rather than row 0.
+    SubtitleLineModel empty;
+    SubtitleFilterModel emptyFilter;
+    emptyFilter.setSourceModel(&empty);
+    QCOMPARE(emptyFilter.rowAfter(0), -1);
+    QCOMPARE(emptyFilter.rowBefore(0), -1);
+}
+
+void TstSubtitles::delayMovesTimesWithoutMovingRows()
+{
+    SubtitleLineModel model;
+    model.setLines(proxyLines());
+    SubtitleFilterModel filter;
+    filter.setSourceModel(&model);
+    filter.setPattern(QStringLiteral("alpha"));
+    QCOMPARE(filter.count(), 2);
+
+    QSignalSpy delayed(&filter, &SubtitleFilterModel::delayMsChanged);
+    QSignalSpy counted(&filter, &SubtitleFilterModel::countChanged);
+    QSignalSpy removed(&filter, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy inserted(&filter, &QAbstractItemModel::rowsInserted);
+    QSignalSpy reset(&filter, &QAbstractItemModel::modelReset);
+
+    // Resyncing must not disturb the list. It moves where cues *are in time*,
+    // not which of them match, and a reset here would throw away the scroll
+    // position and the selection every time the user nudged the offset.
+    filter.setDelayMs(2000);
+    QCOMPARE(delayed.size(), 1);
+    QCOMPARE(filter.count(), 2);
+    QCOMPARE(counted.size(), 0);
+    QCOMPARE(removed.size(), 0);
+    QCOMPARE(inserted.size(), 0);
+    QCOMPARE(reset.size(), 0);
+    QCOMPARE(filter.pattern(), QStringLiteral("alpha"));
+
+    // Setting the same value again is not a change.
+    filter.setDelayMs(2000);
+    QCOMPARE(delayed.size(), 1);
+
+    // Everything that speaks playback time shifts; everything that speaks stored
+    // time does not.
+    QCOMPARE(filter.rowAt(1500), -1);
+    QCOMPARE(filter.rowAt(3500), 0);
+    QCOMPARE(filter.rowAt(7500), 1);
+    QCOMPARE(filter.startMsAt(0), 3000);
+    QCOMPARE(filter.endMsAt(0), 4000);
+    QCOMPARE(filter.textAt(3500), QStringLiteral("alpha"));
+    QCOMPARE(filter.cueStartMsAt(0), 1000);
+    QCOMPARE(filter.timestampAtRow(0), QStringLiteral("00:00:01.000"));
+    QCOMPARE(filter.textAtRow(0), QStringLiteral("alpha"));
+
+    // A negative delay pulls cues earlier, and nothing clamps the result at
+    // zero: subtitles pushed far enough back report a playback position before
+    // the start of the file.
+    filter.setDelayMs(-500);
+    QCOMPARE(filter.startMsAt(0), 500);
+    QCOMPARE(filter.rowAt(600), 0);
+    filter.setDelayMs(-2000);
+    QCOMPARE(filter.startMsAt(0), -1000);
+
+    // Which collides with the sentinel: at exactly -1001 the first row's start
+    // *is* -1, the value the same call uses for "no such row". A caller testing
+    // `>= 0` before seeking silently declines to seek to that line. It takes an
+    // offset larger than the first cue's own timestamp to reach, so no real file
+    // has hit it -- recorded because the collision is invisible at the call site.
+    filter.setDelayMs(-1001);
+    QCOMPARE(filter.startMsAt(0), -1);
+    QCOMPARE(filter.startMsAt(99), -1);
+    QCOMPARE(filter.cueStartMsAt(0), 1000);
+    QCOMPARE(filter.count(), 2);
+}
+
+void TstSubtitles::roleNamesComeFromTheSourceModel()
+{
+    SubtitleLineModel model;
+    model.setLines(proxyLines());
+    SubtitleFilterModel filter;
+    filter.setSourceModel(&model);
+
+    // The delegate binds model.text, model.start, model.startMs, model.endMs and
+    // model.styled by name. QML resolves those against the *proxy's* roleNames,
+    // so a proxy that stopped forwarding the source's names would leave every row
+    // blank with no warning anywhere -- the delegate would simply be reading
+    // undefined properties.
+    QCOMPARE(filter.roleNames(), model.roleNames());
+    const QHash<int, QByteArray> names = filter.roleNames();
+    QCOMPARE(names.value(SubtitleLineModel::StartMsRole), QByteArrayLiteral("startMs"));
+    QCOMPARE(names.value(SubtitleLineModel::EndMsRole), QByteArrayLiteral("endMs"));
+    QCOMPARE(names.value(SubtitleLineModel::StartTextRole), QByteArrayLiteral("start"));
+    QCOMPARE(names.value(SubtitleLineModel::TextRole), QByteArrayLiteral("text"));
+    QCOMPARE(names.value(SubtitleLineModel::RawTextRole), QByteArrayLiteral("rawText"));
+    QCOMPARE(names.value(SubtitleLineModel::StyledTextRole), QByteArrayLiteral("styled"));
+
+    // A filter being active changes nothing about the names, and neither does
+    // switching tracks -- which is a source model swap, the whole cost of a tab
+    // click.
+    filter.setPattern(QStringLiteral("alpha"));
+    QCOMPARE(filter.roleNames(), model.roleNames());
+
+    SubtitleLineModel other;
+    other.setLines(proxyLines());
+    filter.setSourceModel(&other);
+    QCOMPARE(filter.roleNames(), other.roleNames());
+
+    // And the roles read back through the proxy, which is the other half of the
+    // same contract: the name has to reach the right column of data.
+    const QModelIndex row = filter.index(0, 0);
+    QCOMPARE(filter.data(row, SubtitleLineModel::TextRole).toString(),
+             QStringLiteral("alpha"));
+    QCOMPARE(filter.data(row, SubtitleLineModel::StartMsRole).toLongLong(), 1000);
+    QCOMPARE(filter.data(row, SubtitleLineModel::StartTextRole).toString(),
+             QStringLiteral("00:00:01.000"));
+}
+
+void TstSubtitles::dataChangedRemapsThroughTheFilter()
+{
+    TouchableLineModel model;
+    model.setLines(proxyLines());
+    SubtitleFilterModel filter;
+    filter.setSourceModel(&model);
+
+    QSignalSpy changed(&filter, &QAbstractItemModel::dataChanged);
+
+    // Unfiltered the row numbers pass straight through, roles and all.
+    model.touchRow(1, {SubtitleLineModel::StyledTextRole});
+    QCOMPARE(changed.size(), 1);
+    QCOMPARE(changed.at(0).at(0).value<QModelIndex>().row(), 1);
+    QCOMPARE(changed.at(0).at(1).value<QModelIndex>().row(), 1);
+    QCOMPARE(changed.at(0).at(2).value<QList<int>>(),
+             QList<int>{SubtitleLineModel::StyledTextRole});
+
+    filter.setPattern(QStringLiteral("alpha"));
+    changed.clear();
+
+    // Source row 2 is view row 1, and the view row is what the list is painting.
+    // A proxy that forwarded the source's number would repaint the wrong row --
+    // and with only the styled role changing, the wrong row would look right.
+    model.touchRow(2, {SubtitleLineModel::StyledTextRole});
+    QCOMPARE(changed.size(), 1);
+    QCOMPARE(changed.at(0).at(0).value<QModelIndex>().row(), 1);
+    QCOMPARE(changed.at(0).at(1).value<QModelIndex>().row(), 1);
+
+    // A hidden row produces nothing at all.
+    changed.clear();
+    model.touchRow(1, {SubtitleLineModel::StyledTextRole});
+    QCOMPARE(changed.size(), 0);
+
+    // The way the app actually emits it: a theme change restyles every row at
+    // once, and the two surviving rows are contiguous in the view even though
+    // they are not in the source.
+    changed.clear();
+    model.setBackground(QColor(QStringLiteral("#f6f7f9")));
+    QCOMPARE(changed.size(), 1);
+    QCOMPARE(changed.at(0).at(0).value<QModelIndex>().row(), 0);
+    QCOMPARE(changed.at(0).at(1).value<QModelIndex>().row(), 1);
+
+    // None of it disturbs the filter: the cue text did not change, so no row
+    // enters or leaves the view.
+    QCOMPARE(filter.count(), 2);
+    QCOMPARE(filter.textAtRow(1), QStringLiteral("alpha again"));
+}
+
+void TstSubtitles::filterWithoutASourceModelIsInert()
+{
+    // The state the panel is in before a file is opened, and again after one
+    // with no subtitle tracks. QML binds to the proxy either way and calls
+    // straight into it, so every accessor has to answer rather than crash.
+    SubtitleFilterModel filter;
+    QCOMPARE(filter.count(), 0);
+    QCOMPARE(filter.sourceCount(), 0);
+    QCOMPARE(filter.rowAt(0), -1);
+    QCOMPARE(filter.rowAt(5000), -1);
+    QCOMPARE(filter.rowAfter(0), -1);
+    QCOMPARE(filter.rowBefore(0), -1);
+    QCOMPARE(filter.startMsAt(0), -1);
+    QCOMPARE(filter.cueStartMsAt(0), -1);
+    QCOMPARE(filter.endMsAt(0), -1);
+    QCOMPARE(filter.textAt(0), QString());
+    QCOMPARE(filter.textAtRow(0), QString());
+    QCOMPARE(filter.timestampAtRow(0), QString());
+
+    // With nothing to forward, roleNames falls back to the base model's generic
+    // set -- "display", "decoration" and friends, none of which a subtitle row
+    // binds. A view attached this early sees undefined properties until a track
+    // arrives and the reset makes QML read the names again. Recorded because it
+    // is the one place the panel's role names are legitimately absent, and a
+    // replacement proxy that answered with the subtitle names here instead would
+    // be an improvement rather than a regression.
+    QVERIFY(!filter.roleNames().values().contains(QByteArrayLiteral("text")));
+    QCOMPARE(filter.roleNames().value(Qt::DisplayRole), QByteArrayLiteral("display"));
+
+    // Typing into the search box with nothing loaded is harmless, and the text
+    // is kept: it survives a source change by design.
+    filter.setPattern(QStringLiteral("alpha"));
+    QCOMPARE(filter.count(), 0);
+    QCOMPARE(filter.pattern(), QStringLiteral("alpha"));
+    filter.setDelayMs(2000);
+    QCOMPARE(filter.startMsAt(0), -1);
+
+    // A track arrives with both still in force.
+    SubtitleLineModel model;
+    model.setLines(proxyLines());
+    filter.setSourceModel(&model);
+    QCOMPARE(filter.count(), 2);
+    QCOMPARE(filter.sourceCount(), 3);
+    QCOMPARE(filter.startMsAt(0), 3000);
+    QCOMPARE(filter.textAtRow(1), QStringLiteral("alpha again"));
+
+    // And goes away again -- closing the file, or opening one with no subtitles.
+    // The proxy has to empty rather than keep answering from a model that may be
+    // about to be deleted.
+    filter.setSourceModel(nullptr);
+    QCOMPARE(filter.count(), 0);
+    QCOMPARE(filter.sourceCount(), 0);
+    QCOMPARE(filter.rowAt(3500), -1);
+    QCOMPARE(filter.rowAfter(0), -1);
+    QCOMPARE(filter.textAtRow(0), QString());
+    QCOMPARE(filter.timestampAtRow(0), QString());
+    QCOMPARE(filter.endMsAt(0), -1);
+    QVERIFY(!filter.roleNames().values().contains(QByteArrayLiteral("text")));
 }
 
 QTEST_MAIN(TstSubtitles)

@@ -59,6 +59,8 @@ private slots:
 
     void panelShowsTheParsedTrack();
     void tabSwitchSwapsTheModel();
+    void aMenuPickReachesTheBrowser();
+    void skipStaysForASingleFile();
     void searchReachesTheProxy();
     void followMovesTheView();
     void followOffLeavesTheViewAlone();
@@ -219,6 +221,85 @@ void TstQmlPanel::tabSwitchSwapsTheModel()
     tabs->setProperty("currentIndex", 1);
     QTRY_COMPARE(list->property("count").toInt(), 4);  // the Japanese ASS track
     QCOMPARE(m_root->property("currentTrack").toInt(), 1);
+}
+
+void TstQmlPanel::aMenuPickReachesTheBrowser()
+{
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+
+    QObject *ui = named(m_root, "panelUi");
+    QObject *tabs = named(m_root, "trackTabs");
+    QObject *list = named(m_root, "lineList");
+    QVERIFY(ui && tabs && list);
+    QCOMPARE(m_root->property("currentTrack").toInt(), 0);
+
+    // The other direction into the browser: a track picked from the transport's
+    // subtitle menu, which ends at syncPanelToSubtitleTrack() and whose only
+    // write is the tab. The mpv half of that round trip cannot run here --
+    // offscreen never creates a render context, so mpv loads no file and has no
+    // track list to match a selection against -- so this makes the same write.
+    //
+    // Deliberately not through the tab bar: a tab click carries the selection
+    // with it and that path always worked. This one did not, and the browser
+    // went on listing the previous track's cues.
+    ui->setProperty("tabIndex", 2);
+
+    QCOMPARE(m_root->property("currentTrack").toInt(), 2);
+    QTRY_COMPARE(list->property("count").toInt(), 3);       // the French track
+    QTRY_COMPARE(tabs->property("currentIndex").toInt(), 2);
+
+    ui->setProperty("tabIndex", 1);
+    QCOMPARE(m_root->property("currentTrack").toInt(), 1);
+    QTRY_COMPARE(list->property("count").toInt(), 4);       // the Japanese ASS track
+
+    // -1 says nothing is being read, and it is what a file whose tracks are all
+    // bitmap now opens on: no tab lit, rather than the previous film's tab still
+    // lit over another film's cues. Export reads the same -1 and does nothing.
+    ui->setProperty("tabIndex", -1);
+    QCOMPARE(m_root->property("currentTrack").toInt(), -1);
+    QTRY_COMPARE(list->property("count").toInt(), 0);
+}
+
+void TstQmlPanel::skipStaysForASingleFile()
+{
+    // A folder of exactly one playable file, so there is nowhere to skip to.
+    // Its own folder for the same reason the queue tests have theirs.
+    const QString dir = m_home.filePath(QStringLiteral("solo"));
+    QDir().mkpath(dir);
+    const QString only = dir + QStringLiteral("/only.mkv");
+    if (!QFileInfo::exists(only))
+        QFile::copy(fixture(QStringLiteral("subs.mkv")), only);
+
+    QSignalSpy parsed(named(m_root, "subtitleManager"), SIGNAL(loaded()));
+    QMetaObject::invokeMethod(m_root, "openFile", Q_ARG(QVariant, only));
+    QVERIFY(parsed.wait(20000));
+    QCOMPARE(named(m_root, "playlist")->property("count").toInt(), 1);
+
+    QObject *back = named(m_root, "skipBack");
+    QObject *forward = named(m_root, "skipForward");
+    QObject *chip = named(m_root, "queueChip");
+    QVERIFY(back && forward && chip);
+
+    // Skip is a playback control and stays where it is at any queue length:
+    // disabled says "nowhere to go", where absent says "this player is broken".
+    QVERIFY(back->property("visible").toBool());
+    QVERIFY(forward->property("visible").toBool());
+    QVERIFY(!back->property("enabled").toBool());
+    QVERIFY(!forward->property("enabled").toBool());
+    // The chip is the other half of what used to be one predicate, and it must
+    // not come back with it -- "1/1" is a permanent readout of nothing.
+    QVERIFY(!chip->property("visible").toBool());
+
+    // And with a queue both halves appear, which is what says the two are still
+    // wired to the playlist rather than pinned on.
+    const QString first = queueFolderFile(QStringLiteral("ep1.mkv"));
+    queueFolderFile(QStringLiteral("ep2.mkv"));  // before the open, or it is not in the queue
+    parsed.clear();
+    QMetaObject::invokeMethod(m_root, "openFile", Q_ARG(QVariant, first));
+    QVERIFY(parsed.wait(20000));
+    QTRY_VERIFY(chip->property("visible").toBool());
+    QTRY_VERIFY(forward->property("enabled").toBool());
+    QVERIFY(!back->property("enabled").toBool());
 }
 
 void TstQmlPanel::searchReachesTheProxy()
@@ -425,6 +506,10 @@ void TstQmlPanel::detachingKeepsTheViewState()
     QCOMPARE(rebuiltTabs->property("currentIndex").toInt(), 1);
     QCOMPARE(rebuiltField->property("text").toString(), QStringLiteral("albatross"));
     QTRY_COMPARE(named(m_root, "lineList")->property("count").toInt(), 1);
+    // The selected track rides on the tab now, so a bar that wrote one of its
+    // own resets back on the way through would move the track being read as well
+    // as the tab lit -- trap 13 with a larger blast radius than it had.
+    QCOMPARE(m_root->property("currentTrack").toInt(), 1);
 
     // And back again.
     m_root->setProperty("panelDetached", false);

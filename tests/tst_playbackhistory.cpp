@@ -6,9 +6,26 @@
 // Storage is the easy half. The half worth testing is when a position is *not*
 // worth keeping: resuming somebody thirty seconds into a film they finished, or
 // two seconds into one they just opened, is worse behaviour than not resuming.
+//
+// The other half worth testing is what reaches the *file*, and when. remember()
+// is called every few seconds for hours and QSettings has no partial write, so
+// the tests below watch the file itself rather than the store: Qt hands every
+// QSettings on a path the same in-memory copy, and reading through a second
+// PlaybackHistory would answer from that copy whether or not anything was ever
+// written.
+//
+// Two mechanisms, and they need different instruments. flush() writing the file
+// is visible with no event loop at all. The *debounce* is not: QSettings posts
+// itself an update after every setValue and syncs when the event loop next
+// turns, so in the running app a tick that reaches setValue reaches the disk
+// whether or not this class ever calls sync(). Holding the position in members
+// is what stops that, and only a test that turns the event loop can tell the
+// two apart -- hence the processEvents() below.
 
 #include <QtTest>
 
+#include <QtCore/QCoreApplication>
+#include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
 
 #include "PlaybackHistory.h"
@@ -36,8 +53,25 @@ private slots:
     void subtitleSelectionSurvivesFinishingTheFilm();
     void preferredLanguageFollowsTheLastChoice();
 
+    void aFlushPutsThePositionInTheFile();
+    void aTickThatHasNotMovedFarNeverReachesTheFile();
+    void anUnchangedPositionNeverWritesTheFile();
+    void aFileNotWorthRememberingNeverWritesTheFile();
+    void aFlushWritesTheOtherGroupsSharingTheFile();
+    void closingDownWritesThePositionBeingHeld();
+    void openingAnotherFileWritesTheOutgoingPosition();
+    void forgetDropsAPositionThatWasOnlyHeld();
+
 private:
     QString settingsFile() const { return m_dir.filePath(QStringLiteral("history.ini")); }
+    // The bytes on disk, or an empty string when there is no file at all.
+    QString fileText() const
+    {
+        QFile file(settingsFile());
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            return {};
+        return QString::fromUtf8(file.readAll());
+    }
     QTemporaryDir m_dir;
 };
 
@@ -238,6 +272,198 @@ void TstPlaybackHistory::preferredLanguageFollowsTheLastChoice()
     history.rememberSubtitle(QStringLiteral("/media/films/d.mkv"), 2, QString(),
                              QStringLiteral("und"));
     QCOMPARE(history.preferredLanguage(), QStringLiteral("spa"));
+}
+
+void TstPlaybackHistory::aFlushPutsThePositionInTheFile()
+{
+    PlaybackHistory history(settingsFile());
+    const QString film = QStringLiteral("/media/films/example.mkv");
+
+    // Nothing in remember() writes the file, so this is the first position and it
+    // is still not on disk.
+    history.remember(film, 1800.0, 8634.0);
+    QVERIFY2(!fileText().contains(QStringLiteral("position=1800")),
+             "remember() wrote the file on its own");
+
+    // flush() is what the timer, the destructor and closing down all call.
+    history.flush();
+    QVERIFY(fileText().contains(QStringLiteral("position=1800")));
+
+    // One tick later. Five seconds of progress is not worth storing, let alone
+    // serialising every entry in the file for -- so the file keeps the old value
+    // until something flushes...
+    history.remember(film, 1805.0, 8634.0);
+    QVERIFY(fileText().contains(QStringLiteral("position=1800")));
+    QVERIFY(!fileText().contains(QStringLiteral("position=1805")));
+    // ...while the store still answers with the newer one, because reopening the
+    // file that is playing must not resume at whatever the last write caught.
+    QCOMPARE(history.resumeFor(film), 1805.0);
+
+    history.flush();
+    QVERIFY(fileText().contains(QStringLiteral("position=1805")));
+    QVERIFY(!fileText().contains(QStringLiteral("position=1800")));
+
+    // And a fresh store reads it back, which is the point of writing at all.
+    PlaybackHistory reopened(settingsFile());
+    QCOMPARE(reopened.resumeFor(film), 1805.0);
+}
+
+void TstPlaybackHistory::aTickThatHasNotMovedFarNeverReachesTheFile()
+{
+    // The test above shows flush() writing the file, which it would do just as
+    // well if remember() still handed every tick to QSettings. This one is about
+    // the thing that actually cuts the rewrites in the running app: a tick that
+    // reaches setValue reaches the disk at the next turn of the event loop,
+    // because QSettings syncs itself, so the position has to be held short of
+    // QSettings entirely rather than merely short of sync().
+    PlaybackHistory history(settingsFile());
+    const QString film = QStringLiteral("/media/films/example.mkv");
+
+    // The first position for a file is always worth storing -- a short session
+    // has to leave something behind -- and here is Qt writing it unprompted.
+    history.remember(film, 1800.0, 8634.0);
+    QCoreApplication::processEvents();
+    QVERIFY(fileText().contains(QStringLiteral("position=1800")));
+
+    // Now the five-second tick, five times over, with the event loop turning
+    // between each the way it does under a running player. This is the ~1440
+    // full rewrites of a feature-length film, and none of them may happen.
+    for (double at = 1805.0; at <= 1825.0; at += 5.0) {
+        history.remember(film, at, 8634.0);
+        QCoreApplication::processEvents();
+        QVERIFY2(fileText().contains(QStringLiteral("position=1800")),
+                 "a five-second tick rewrote the whole settings file");
+    }
+
+    // A tick a whole PositionWriteStep on is worth an entry, and goes out.
+    history.remember(film, 1830.0, 8634.0);
+    QCoreApplication::processEvents();
+    QVERIFY(fileText().contains(QStringLiteral("position=1830")));
+}
+
+void TstPlaybackHistory::anUnchangedPositionNeverWritesTheFile()
+{
+    PlaybackHistory history(settingsFile());
+    const QString film = QStringLiteral("/media/films/example.mkv");
+
+    history.remember(film, 1800.0, 8634.0);
+    history.flush();
+    QVERIFY(QFile::exists(settingsFile()));
+
+    // Removing the file behind the store is what makes a rewrite visible: there
+    // is no partial write in QSettings, so anything at all reaching it brings the
+    // whole file back.
+    QVERIFY(QFile::remove(settingsFile()));
+
+    // A player sitting still, ticking. QSettings does not compare before it
+    // stores, so without a check of our own each of these would have serialised
+    // every entry in the file again.
+    for (int i = 0; i < 20; ++i) {
+        history.remember(film, 1800.0, 8634.0);
+        history.flush();
+    }
+    QVERIFY2(!QFile::exists(settingsFile()),
+             "an unchanged position rewrote the whole settings file");
+
+    // A position that really moved still writes, so the check above is not
+    // passing because writing stopped working.
+    history.remember(film, 1830.0, 8634.0);
+    history.flush();
+    QVERIFY(fileText().contains(QStringLiteral("position=1830")));
+}
+
+void TstPlaybackHistory::aFileNotWorthRememberingNeverWritesTheFile()
+{
+    PlaybackHistory history(settingsFile());
+    const QString clip = QStringLiteral("/media/clips/ninety-seconds.mkv");
+
+    // Nothing about a 90-second clip is ever worth an entry, and the ticks arrive
+    // all the same -- clearing an entry that was never there, over and over, for
+    // as long as the clip is open. None of that may reach the file.
+    for (int i = 0; i < 20; ++i) {
+        history.remember(clip, 60.0, 90.0);
+        history.flush();
+    }
+    QVERIFY2(!QFile::exists(settingsFile()),
+             "a file with nothing worth remembering still wrote the settings file");
+}
+
+void TstPlaybackHistory::aFlushWritesTheOtherGroupsSharingTheFile()
+{
+    PlaybackHistory history(settingsFile());
+
+    // Standing in for the QML `Settings` groups in Main.qml: separate QSettings
+    // on the same file, with no flush of their own that this code owns. Qt gives
+    // every QSettings on a path one shared representation, which is what makes
+    // flush() theirs as much as ours. They used to go out on whatever sync() the
+    // resume tick happened to do, so this is the test that stops the next change
+    // to remember() quietly taking their mid-session flush with it.
+    QSettings preferences(settingsFile(), QSettings::IniFormat);
+    preferences.setValue(QStringLiteral("ui/panelWidth"), 360);
+    QVERIFY(!fileText().contains(QStringLiteral("panelWidth")));
+
+    history.flush();
+    QVERIFY(fileText().contains(QStringLiteral("panelWidth=360")));
+}
+
+void TstPlaybackHistory::closingDownWritesThePositionBeingHeld()
+{
+    const QString film = QStringLiteral("/media/films/example.mkv");
+    {
+        PlaybackHistory history(settingsFile());
+        history.remember(film, 1800.0, 8634.0);
+        history.flush();
+
+        // Held rather than stored -- five seconds is not worth an entry. Which
+        // is fine right up until the session ends here.
+        history.remember(film, 1805.0, 8634.0);
+        QVERIFY(fileText().contains(QStringLiteral("position=1800")));
+    }
+
+    // Destruction is the application quitting. Without a flush there the
+    // debounce would quietly cost the viewer the last stretch of every session,
+    // and nothing else in the class would notice: ~QSettings syncs, but it can
+    // only write what was handed to it.
+    QVERIFY2(fileText().contains(QStringLiteral("position=1805")),
+             "the position being held at exit never reached the file");
+}
+
+void TstPlaybackHistory::openingAnotherFileWritesTheOutgoingPosition()
+{
+    PlaybackHistory history(settingsFile());
+    const QString first = QStringLiteral("/media/films/first.mkv");
+    const QString second = QStringLiteral("/media/films/second.mkv");
+
+    history.remember(first, 1800.0, 8634.0);
+    history.remember(first, 1805.0, 8634.0);  // held, not stored
+
+    // The next episode. There is one held position and it is about to describe a
+    // different file, so this is the last moment the outgoing one can be saved.
+    history.remember(second, 600.0, 3600.0);
+
+    QCOMPARE(history.resumeFor(first), 1805.0);
+    QVERIFY2(fileText().contains(QStringLiteral("position=1805")),
+             "switching files threw away where the outgoing one got to");
+}
+
+void TstPlaybackHistory::forgetDropsAPositionThatWasOnlyHeld()
+{
+    PlaybackHistory history(settingsFile());
+    const QString film = QStringLiteral("/media/films/example.mkv");
+
+    history.remember(film, 1800.0, 8634.0);
+    history.remember(film, 1805.0, 8634.0);  // held, not stored
+
+    // Forgetting a file that is still open is the case the hold makes awkward:
+    // the held position would otherwise be written back by the very next flush,
+    // undoing the forget a few seconds after it happened.
+    history.forget(film);
+    QCOMPARE(history.resumeFor(film), -1.0);
+
+    history.flush();
+    QCOMPARE(history.resumeFor(film), -1.0);
+    QVERIFY2(!fileText().contains(QStringLiteral("position=1805")),
+             "a held position came back after forget()");
 }
 
 QTEST_MAIN(TstPlaybackHistory)
