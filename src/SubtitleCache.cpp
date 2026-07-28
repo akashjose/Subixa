@@ -25,7 +25,13 @@ constexpr quint32 kMagic = 0x434D5053;
 // still readable, and would quietly serve the old text forever. Version 2 is
 // exactly that case: `{\p1}` vector drawings stopped being flattened into the
 // cue text, so every entry written before it holds path coordinates as dialogue.
-constexpr quint32 kFormatVersion = 2;
+//
+// Version 3 is both at once. The record grew a per-cue style and actor name and a
+// per-track [V4+ Styles] table, and the extractor now produces them -- so an
+// entry written before it has no styles at all, and a track styled entirely
+// through its table would go on reading plain out of the cache however often it
+// was reopened.
+constexpr quint32 kFormatVersion = 3;
 
 // Pinned so a Qt upgrade cannot silently change how the primitives below are
 // encoded and turn every existing entry into garbage.
@@ -41,15 +47,18 @@ constexpr auto kStreamVersion = QDataStream::Qt_6_0;
 // the file before it is believed. These are the smallest encodings a record can
 // have under kStreamVersion: a QString is a quint32 length and nothing else when
 // empty, a qint64 is 8 bytes, a qint32 is 4, a bool is 1.
-constexpr qint64 kMinLineBytes = 8 + 8 + 4 + 4;
-constexpr qint64 kMinTrackBytes = 4 + 4 + 4 + 4 + 4 + 4 + 1 + 4 + 4 + 4;
+constexpr qint64 kMinLineBytes = 8 + 8 + 4 + 4 + 4 + 4;
+constexpr qint64 kMinStyleBytes = 4 + 4 + 4 + 8 + 1 + 1 + 1 + 1;
+constexpr qint64 kMinTrackBytes = 4 + 4 + 4 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4;
 
 // Absolute ceilings on top of the size check, so a large *valid-length* file
 // cannot ask for an allocation that is merely proportionate rather than sane.
-// Both sit far above anything real: the 200k-cue fixture is the largest track
-// anyone has, and the 65-track film is the widest container.
+// All three sit far above anything real: the 200k-cue fixture is the largest
+// track anyone has, the 65-track film is the widest container, and a styles table
+// past a few hundred rows has stopped describing a subtitle.
 constexpr qint32 kMaxLinesPerTrack = 5'000'000;
 constexpr qint32 kMaxTracks = 4096;
+constexpr qint32 kMaxStylesPerTrack = 65'536;
 
 // What the stream has not consumed yet. QDataStream reads straight through to
 // the device rather than buffering ahead, so the device's own count is exact.
@@ -71,13 +80,40 @@ bool countFits(QDataStream &in, qint32 count, qint64 minBytes, qint32 ceiling)
 
 void writeLine(QDataStream &out, const SubtitleLine &line)
 {
-    out << line.startMs << line.endMs << line.text << line.rawText;
+    out << line.startMs << line.endMs << line.text << line.rawText << line.style
+        << line.actor;
 }
 
 bool readLine(QDataStream &in, SubtitleLine &line)
 {
-    in >> line.startMs >> line.endMs >> line.text >> line.rawText;
+    in >> line.startMs >> line.endMs >> line.text >> line.rawText >> line.style
+        >> line.actor;
     return in.status() == QDataStream::Ok;
+}
+
+// The colour goes out as a plain integer with -1 for "the row declared none",
+// rather than through QColor's own stream operators: those encode a spec tag and
+// four 16-bit channels whose meaning is Qt's to change, and the whole point of
+// pinning kStreamVersion is that nothing in an entry is Qt's to change.
+void writeStyle(QDataStream &out, const QString &name, const AssStyle &style)
+{
+    out << name << style.fontName << qint32(style.fontSize)
+        << (style.primaryColour.isValid() ? qint64(style.primaryColour.rgb())
+                                          : qint64(-1))
+        << style.bold << style.italic << style.underline << style.strikeOut;
+}
+
+bool readStyle(QDataStream &in, QString &name, AssStyle &style)
+{
+    qint32 fontSize = 0;
+    qint64 colour = -1;
+    in >> name >> style.fontName >> fontSize >> colour >> style.bold >> style.italic
+        >> style.underline >> style.strikeOut;
+    if (in.status() != QDataStream::Ok)
+        return false;
+    style.fontSize = fontSize;
+    style.primaryColour = colour < 0 ? QColor() : QColor(QRgb(colour));
+    return true;
 }
 
 void writeTrack(QDataStream &out, const SubtitleTrack &track)
@@ -85,6 +121,12 @@ void writeTrack(QDataStream &out, const SubtitleTrack &track)
     out << qint32(track.id) << qint32(track.streamIndex) << track.language
         << track.title << track.codecName << qint32(track.kind) << track.sidecar
         << track.sourcePath << track.note;
+    // Ahead of the cues rather than after them: it is track metadata, and a
+    // reader that wanted only the header would otherwise have to walk 200k cues
+    // to reach it. AssStyleTable is ordered, so this is byte-stable.
+    out << qint32(track.styles.size());
+    for (auto it = track.styles.cbegin(); it != track.styles.cend(); ++it)
+        writeStyle(out, it.key(), it.value());
     out << qint32(track.lines.size());
     for (const SubtitleLine &line : track.lines)
         writeLine(out, line);
@@ -95,10 +137,29 @@ bool readTrack(QDataStream &in, SubtitleTrack &track)
     qint32 id = 0;
     qint32 streamIndex = 0;
     qint32 kind = 0;
+    qint32 styleCount = 0;
     qint32 lineCount = 0;
 
     in >> id >> streamIndex >> track.language >> track.title >> track.codecName
         >> kind >> track.sidecar >> track.sourcePath >> track.note;
+
+    // The styles table, bounded exactly as the cue count is: it is another number
+    // out of the file that decides how much to read.
+    in >> styleCount;
+    if (in.status() != QDataStream::Ok)
+        return false;
+    if (!countFits(in, styleCount, kMinStyleBytes, kMaxStylesPerTrack))
+        return false;
+
+    track.styles.clear();
+    for (qint32 i = 0; i < styleCount; ++i) {
+        QString name;
+        AssStyle style;
+        if (!readStyle(in, name, style))
+            return false;
+        track.styles.insert(name, style);
+    }
+
     in >> lineCount;
 
     if (in.status() != QDataStream::Ok)

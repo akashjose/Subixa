@@ -247,8 +247,11 @@ void SubtitleManager::rebuildModels()
     // deleted -- a QML binding may still hold one for an instant after the
     // track list changes.
     for (int i = 0; i < m_models.size(); ++i) {
-        m_models[i]->setLines(i < m_tracks.size() ? m_tracks.at(i).lines
-                                                  : QVector<SubtitleLine>());
+        const bool live = i < m_tracks.size();
+        // Before the lines: setStyles() on a populated model emits dataChanged
+        // for every row, which the reset from setLines() would only repeat.
+        m_models[i]->setStyles(live ? m_tracks.at(i).styles : AssStyleTable());
+        m_models[i]->setLines(live ? m_tracks.at(i).lines : QVector<SubtitleLine>());
     }
 }
 

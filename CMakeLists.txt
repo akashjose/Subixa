@@ -341,6 +341,16 @@ target_link_libraries(tst_subtitles PRIVATE
     Subixa::ffmpeg
 )
 
+# The ASS [V4+ Styles] table: parsing it, and threading a base style through to
+# the markup the browser renders. Its own target because tst_subtitles is the
+# single-writer file this wave was arranged to keep out of.
+qt_add_executable(tst_assstyles tests/tst_assstyles.cpp ${SUBIXA_MODEL_SOURCES})
+target_include_directories(tst_assstyles PRIVATE src)
+target_compile_definitions(tst_assstyles PRIVATE
+    SUBIXA_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+target_link_libraries(tst_assstyles PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test Subixa::ffmpeg)
+
 # The search proxy on its own. Split out of tst_subtitles rather than appended to
 # it: that file is 1165 lines and is the single-writer bottleneck the audit
 # named, and the proxy is now a class in its own right rather than a
@@ -420,7 +430,7 @@ target_link_libraries(tst_qmlpanel PRIVATE
 # source list, so without this more than half of what compiles here was built
 # with warnings off while the tree was described as clean under -Wall -Wextra.
 foreach(t tst_playbackhistory tst_playlist tst_shortcuts tst_subtitles
-          tst_mpvtracks tst_qmlpanel tst_conformance tst_searchproxy)
+          tst_mpvtracks tst_qmlpanel tst_conformance tst_searchproxy tst_assstyles)
     target_compile_options(${t} PRIVATE -Wall -Wextra)
 endforeach()
 
@@ -432,9 +442,10 @@ add_test(NAME shortcuts COMMAND tst_shortcuts)
 add_test(NAME qmlpanel COMMAND tst_qmlpanel)
 add_test(NAME conformance COMMAND tst_conformance)
 add_test(NAME searchproxy COMMAND tst_searchproxy)
+add_test(NAME assstyles COMMAND tst_assstyles)
 
 # None of these needs a display; make sure they never try to open one.
-set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts conformance searchproxy PROPERTIES
+set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts conformance searchproxy assstyles PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=minimal"
     TIMEOUT 120
 )

@@ -104,14 +104,21 @@ bool sameCues(const SubtitleTrackList &a, const SubtitleTrackList &b)
             || a[t].language != b[t].language || a[t].title != b[t].title
             || a[t].codecName != b[t].codecName || a[t].kind != b[t].kind
             || a[t].sidecar != b[t].sidecar || a[t].sourcePath != b[t].sourcePath
-            || a[t].note != b[t].note || a[t].lines.size() != b[t].lines.size()) {
+            || a[t].note != b[t].note || a[t].styles != b[t].styles
+            || a[t].lines.size() != b[t].lines.size()) {
             return false;
         }
         for (int i = 0; i < a[t].lines.size(); ++i) {
             const SubtitleLine &x = a[t].lines[i];
             const SubtitleLine &y = b[t].lines[i];
+            // style and actor are compared for the same reason the rest of the
+            // record is: this predicate is the whole definition of "the cache is
+            // indistinguishable from a parse". A field added to SubtitleLine or
+            // SubtitleTrack and not added here is a field the cache may drop,
+            // corrupt or reorder with every suite still green.
             if (x.startMs != y.startMs || x.endMs != y.endMs || x.text != y.text
-                || x.rawText != y.rawText) {
+                || x.rawText != y.rawText || x.style != y.style
+                || x.actor != y.actor) {
                 return false;
             }
         }
@@ -1032,11 +1039,14 @@ void TstSubtitles::hostileCacheCountsAreRefused()
     }
     QVERIFY(original.size() > 64);
 
-    // Walk the header exactly as the loader does, to find where the two count
+    // Walk the header exactly as the loader does, to find where the three count
     // fields actually sit. Reproducing the layout here is deliberate: these are
     // the only fields that decide an allocation, and a format change that moved
     // them should fail loudly rather than leave the test poisoning padding.
+    // Version 3 adding the [V4+ Styles] table is exactly that -- it put a third
+    // count between the track header and the cues, and this walk went red.
     qint64 trackCountAt = -1;
+    qint64 styleCountAt = -1;
     qint64 lineCountAt = -1;
     {
         QBuffer buffer(&original);
@@ -1069,13 +1079,29 @@ void TstSubtitles::hostileCacheCountsAreRefused()
         in >> id >> streamIndex >> language >> title >> codecName >> kind
             >> sidecar >> sourcePath >> note;
         QCOMPARE(in.status(), QDataStream::Ok);
+
+        styleCountAt = buffer.pos();
+        qint32 styleCount = 0;
+        in >> styleCount;
+        QCOMPARE(styleCount, qint32(real.at(0).styles.size()));
+        for (qint32 i = 0; i < styleCount; ++i) {
+            QString name, fontName;
+            qint32 fontSize = 0;
+            qint64 colour = 0;
+            bool bold = false, italic = false, underline = false, strikeOut = false;
+            in >> name >> fontName >> fontSize >> colour >> bold >> italic
+                >> underline >> strikeOut;
+        }
+        QCOMPARE(in.status(), QDataStream::Ok);
+
         lineCountAt = buffer.pos();
         qint32 lineCount = 0;
         in >> lineCount;
         QCOMPARE(lineCount, qint32(real.at(0).lines.size()));
     }
     QVERIFY(trackCountAt > 0);
-    QVERIFY(lineCountAt > trackCountAt);
+    QVERIFY(styleCountAt > trackCountAt);
+    QVERIFY(lineCountAt > styleCountAt);
 
     // A count field is corruption- and attacker-controlled: it says how much to
     // allocate before anything has been read. Unbounded, a flipped byte here
@@ -1097,7 +1123,7 @@ void TstSubtitles::hostileCacheCountsAreRefused()
         quint32(0xFFFFFFFF),  // reads back as -1
     };
 
-    for (const qint64 offset : {trackCountAt, lineCountAt}) {
+    for (const qint64 offset : {trackCountAt, styleCountAt, lineCountAt}) {
         for (const quint32 poison : poisons) {
             QByteArray damaged = original;
             qToBigEndian(poison, damaged.data() + offset);

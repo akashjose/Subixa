@@ -3,13 +3,16 @@
 
 #include "SubtitleExtractor.h"
 
+#include "SubtitleStyle.h"
 #include "SubtitleText.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
+#include <QtCore/QSet>
 #include <QtCore/QStringList>
 #include <QtCore/QStringView>
+#include <QtCore/QVarLengthArray>
 #include <algorithm>
 
 extern "C" {
@@ -51,31 +54,59 @@ SubtitleKind kindFor(AVCodecID id)
     return SubtitleKind::Unknown;
 }
 
+// A decoded Dialogue event, split into the parts a browser can use. The views
+// point into the string handed to splitAssDialogue and live exactly as long.
+struct AssDialogue
+{
+    QStringView style;  // the [V4+ Styles] row this cue is drawn with
+    QStringView actor;  // the Name field: who speaks, when the file says
+    QStringView text;
+};
+
 // Every text subtitle decoder in ffmpeg normalises its output to ASS, so SRT,
 // ASS and mov_text all arrive here in the same shape:
 //
 //   ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 //
 // i.e. the text is everything past the 8th comma. ffmpeg before 4.0 emitted a
-// full "Dialogue: ..." line instead (9 fields ahead of the text); that form is
-// handled too rather than silently eating the first words of every cue.
-QString assDialogueText(const QString &ass)
+// full "Dialogue: ..." line instead, whose layout is
+//
+//   Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+//
+// -- 9 fields ahead of the text, and Style one place further along because two
+// timestamps sit where the read-order counter was. Both forms are handled rather
+// than silently eating the first words of every cue.
+AssDialogue splitAssDialogue(QStringView ass)
 {
-    QStringView v(ass);
+    AssDialogue out;
+
+    QStringView v = ass;
     int fieldsBeforeText = 8;
+    int styleField = 2;
     if (v.startsWith(QLatin1String("Dialogue:"))) {
         v = v.mid(9);
         fieldsBeforeText = 9;
+        styleField = 3;
     }
 
+    QVarLengthArray<QStringView, 9> fields;
     qsizetype pos = 0;
     for (int i = 0; i < fieldsBeforeText; ++i) {
         const qsizetype comma = v.indexOf(QLatin1Char(','), pos);
-        if (comma < 0)
-            return ass;  // not the layout we expect -- better whole than truncated
+        if (comma < 0) {
+            // Not the layout we expect -- better whole than truncated, and with
+            // no style rather than a field taken from the wrong column.
+            out.text = ass;
+            return out;
+        }
+        fields.append(v.sliced(pos, comma - pos));
         pos = comma + 1;
     }
-    return v.mid(pos).toString();
+
+    out.style = fields.at(styleField).trimmed();
+    out.actor = fields.at(styleField + 1).trimmed();
+    out.text = v.sliced(pos);
+    return out;
 }
 
 // Reduce an ASS payload to displayable text: drop {\...} override blocks, turn
@@ -395,6 +426,20 @@ bool SubtitleExtractor::readContainer(const QString &path, const QString &videoB
             continue;
         }
 
+        // avcodec_open2 publishes the ASS header -- [Script Info], [V4+ Styles]
+        // and their Format: lines -- here, and it is the only place the styles
+        // table is ever visible: the packets that follow carry a style *name* and
+        // nothing else. Read for every text codec, not just ass: mov_text's
+        // decoder builds real styles out of the tx3g sample description, and the
+        // headers the others synthesise are harmless because their Default style
+        // is ASS's own default, which toStyledText treats as "say nothing".
+        if (dctx.ctx->subtitle_header && dctx.ctx->subtitle_header_size > 0) {
+            const QString header = QString::fromUtf8(
+                reinterpret_cast<const char *>(dctx.ctx->subtitle_header),
+                dctx.ctx->subtitle_header_size);
+            track.styles = SubtitleStyle::parseStyleTable(header);
+        }
+
         trackForStream.insert(static_cast<int>(i), out.size());
         decoderForStream.insert(static_cast<int>(i), dctx.ctx);
         dctx.ctx = nullptr;  // ownership moved into decoderForStream
@@ -412,6 +457,20 @@ bool SubtitleExtractor::readContainer(const QString &path, const QString &videoB
     }
 
     const AVRational msBase{1, 1000};
+
+    // One QString per distinct style and actor name for the whole container,
+    // shared by reference into every cue that names it. A feature-length track is
+    // tens of thousands of cues drawn from a handful of styles, and a fresh
+    // QString for each would be megabytes of identical five-character strings
+    // sitting beside cue text that is the thing actually worth storing.
+    QSet<QString> internedNames;
+    auto intern = [&internedNames](QStringView view) -> QString {
+        if (view.isEmpty())
+            return {};
+        const QString name = view.toString();
+        const auto it = internedNames.constFind(name);
+        return it != internedNames.cend() ? *it : *internedNames.insert(name);
+    };
 
     // mpv rebases playback to start at zero (--rebase-start-time, on by default),
     // so a container whose timestamps begin elsewhere -- MPEG-TS routinely starts
@@ -472,19 +531,34 @@ bool SubtitleExtractor::readContainer(const QString &path, const QString &videoB
             pkt->duration > 0 ? av_rescale_q(pkt->duration, st->time_base, msBase) : 0;
 
         QStringList rawParts;
+        QString styleName;
+        QString actorName;
         for (unsigned r = 0; r < sub.num_rects; ++r) {
             const AVSubtitleRect *rect = sub.rects[r];
             if (!rect)
                 continue;
-            if (rect->ass && *rect->ass)
-                rawParts << assDialogueText(QString::fromUtf8(rect->ass));
-            else if (rect->text && *rect->text)
+            if (rect->ass && *rect->ass) {
+                // Held in a named string: the dialogue's views point into it.
+                const QString payload = QString::fromUtf8(rect->ass);
+                const AssDialogue dialogue = splitAssDialogue(payload);
+                rawParts << dialogue.text.toString();
+                // A cue is one event with one style; the several rects of a
+                // multi-part cue are the same event, so the first one that names
+                // a style names the cue's.
+                if (styleName.isEmpty())
+                    styleName = intern(dialogue.style);
+                if (actorName.isEmpty())
+                    actorName = intern(dialogue.actor);
+            } else if (rect->text && *rect->text) {
                 rawParts << QString::fromUtf8(rect->text);
+            }
         }
 
         if (!rawParts.isEmpty()) {
             SubtitleLine line;
             line.rawText = rawParts.join(QLatin1Char('\n'));
+            line.style = styleName;
+            line.actor = actorName;
             line.text = SubtitleText::decodeEntities(stripAssTags(line.rawText));
             line.startMs = baseMs + sub.start_display_time;
 

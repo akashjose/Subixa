@@ -26,7 +26,10 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QTextStream>
 
+#include <QtGui/QColor>
+
 #include "SubtitleExtractor.h"
+#include "SubtitleStyle.h"
 #include "SubtitleTypes.h"
 
 extern "C" {
@@ -71,24 +74,49 @@ QString escape(const QString &s)
     return out;
 }
 
+// The row colour the styled rendering is asserted against. Subtitle colours are
+// chosen to sit over a picture, so SubtitleStyle nudges them until they are
+// legible on the row they land on -- which means the answer depends on this
+// number. It is the same one tst_subtitles pins, so a cue's colour reads the same
+// in both files and neither can drift on its own.
+const QColor kRowBackground(0x12, 0x15, 0x1c);
+
 QString render(const QString &file, const SubtitleTrackList &tracks)
 {
     QString out;
     QTextStream ts(&out);
     ts << "FILE\t" << file << "\ttracks=" << tracks.size() << "\n";
     for (const SubtitleTrack &t : tracks) {
+        // styles= is the [V4+ Styles] table's size. It is the one number that
+        // says whether the header reached the extractor at all: a decoder that
+        // stops publishing subtitle_header, or a mux that drops CodecPrivate,
+        // takes it to zero while every cue still looks perfect.
         ts << "TRACK\t" << file << '\t' << t.id
            << '\t' << t.language
            << '\t' << escape(t.title)
            << '\t' << t.codecName
            << '\t' << (t.kind == SubtitleKind::Text ? "text" : "bitmap")
            << '\t' << (t.sidecar ? "sidecar" : "embedded")
-           << '\t' << "lines=" << t.lines.size() << "\n";
+           << '\t' << "lines=" << t.lines.size()
+           << '\t' << "styles=" << t.styles.size() << "\n";
         for (int i = 0; i < t.lines.size(); ++i) {
             const SubtitleLine &l = t.lines[i];
+            // The plain text is what the browser searches; the styled markup is
+            // what it *shows*, and it is the half this corpus used to say nothing
+            // about. A cue whose italics came out of its style table rather than
+            // out of an override tag is invisible in `text` -- the two forms are
+            // character-for-character identical -- so a regression in the styles
+            // path would have regolded to a byte-identical file and proved
+            // nothing. Both are recorded now, along with the style name that
+            // selects between them.
             ts << "CUE\t" << file << '\t' << t.id << '\t' << i
                << '\t' << l.startMs << '\t' << l.endMs
-               << '\t' << escape(l.text) << "\n";
+               << '\t' << escape(l.text)
+               << '\t' << escape(l.style)
+               << '\t' << escape(l.actor)
+               << '\t' << escape(SubtitleStyle::toStyledText(l.rawText, kRowBackground,
+                                                             t.styles.value(l.style)))
+               << "\n";
         }
     }
     return out;
@@ -100,6 +128,7 @@ QString render(const QString &file, const SubtitleTrackList &tracks)
 const char *const kCorpus[] = {
     "basic.mkv",       // three text tracks, language tags, ASS styles table
     "entities.mkv",    // &amp; &#39; &#x27; -- decoded by us, not by ffmpeg
+    "styletable.mkv",  // styled only by [V4+ Styles]: not one override tag in it
     "drawing.mkv",     // {\p1} vector shape beside real text
     "shifted.mkv",     // every stream at +1 h: the rebase must fire
     "noshift.mp4",     // video at 1 h, subtitles at 0: it must NOT fire

@@ -56,6 +56,17 @@ echo "entities.mkv"
 "$FF" "${q[@]}" -i clip.mp4 -i $SRC/entities.en.srt -map 0:v -map 1 \
     -c:v copy -c:s copy -metadata:s:s:0 language=eng "${bitexact[@]}" entities.mkv
 
+# Styling said entirely through the [V4+ Styles] table: not one cue in it carries
+# an override tag, which is how most professionally authored ASS is written. Read
+# without the table it comes out plain in the browser while libass draws it
+# italic, bold and coloured over the picture -- the two halves of the reader's
+# screen disagreeing. The last cue names a style the table does not declare,
+# which has to render as plain text rather than fail.
+echo "styletable.mkv (styles table, no override tags)"
+"$FF" "${q[@]}" -i clip.mp4 -i $SRC/styletable.en.ass -map 0:v -map 1 \
+    -c:v copy -c:s copy -metadata:s:s:0 language=eng \
+    -metadata:s:s:0 title="Table styled ASS" "${bitexact[@]}" styletable.mkv
+
 # A cue that is a vector shape rather than text (trap 14).
 echo "drawing.mkv"
 "$FF" "${q[@]}" -i clip.mp4 -i $SRC/drawing.en.ass -map 0:v -map 1 \
