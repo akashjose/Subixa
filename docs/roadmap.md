@@ -38,6 +38,33 @@ with the picture to match, and the track picker that replaces a 65-tab strip.
 Six suites pass, the render canary passes, and a from-scratch build is clean
 under `-Wall -Wextra`.
 
+## Since milestone 5
+
+Work on the `windows-build` branch, not a milestone of its own. Three strands.
+
+- **A Windows build exists.** MSYS2 UCRT64, gcc rather than MSVC, all six suites
+  passing, and a deployable payload of roughly 170 DLLs and 300 MB. `README.md`
+  has the toolchain, the configure line and the deployment sequence; what the
+  port turned up is in `docs/graphics.md`. Item 5 below is what remains.
+- **It runs on an ordinary Linux desktop.** Installed on Ubuntu rather than run
+  under WSL, three things broke that WSL had hidden: `mpv_create` returns null
+  under any `LC_NUMERIC` but `C`, gdk-pixbuf sniffs only a file's first kilobyte
+  for `<svg` so the icon was blank wherever GNOME drew one, and nothing tied a
+  running window to `subixa.desktop` without `setDesktopFileName`. Traps 24 and
+  25.
+- **The window answers the mouse.** A drop takes folders now, expanded by
+  `Playlist::expand` — depth-bounded, files before subfolders, symlinked
+  directories skipped, and filtered in `setFiles` rather than in the walk so one
+  unplayable file still reports mpv's error. Esc minimises outside fullscreen and
+  stops a film but not an album, which needed mpv's albumart flag carried through
+  `MpvEngine` so a tagged mp3 stops reading as a film. The wheel over the picture
+  is volume, accumulating deltas and spending them a notch at a time so a
+  trackpad's stream of small deltas is not forty steps. A right-click opens the
+  same overflow menu object the transport button opens. That last one exposed a
+  defect the shared components had all along: a `Menu` never consults its rows
+  for its width, so every row longer than the background's fixed 220 overflowed,
+  and `AppMenuItem` measured itself through `AppText`'s Loader and reported zero.
+
 ## Next
 
 In rough order of value.
@@ -47,7 +74,9 @@ In rough order of value.
    Flatpak is the right primary Linux target: FFmpeg and libmpv versions are the
    biggest portability variable and the runtime pins them. Minimum viable CI is
    an Ubuntu matrix running `ctest`, plus a sanitizer job — `-fsanitize=address`
-   would have caught the render-context lifetime bug directly.
+   would have caught the render-context lifetime bug directly. Packaging now has
+   two targets rather than one: the Windows deployment sequence in `README.md` is
+   the other half, and it is a sequence of commands rather than a script.
 
 2. **One settings service.** Three independent `QSettings` writers remain (the
    QML `Settings` objects, `PlaybackHistory`, `ShortcutRegistry`) with no schema,
@@ -79,8 +108,15 @@ In rough order of value.
      passes `toUtf8()`, with a regression test that was checked against a
      reverted build. See `docs/graphics.md`.
    - **Nothing is packaged.** Deployment is a documented sequence of commands,
-     not a script; there is no installer and nothing is signed. Folds into
-     item 1.
+     not a script; there is no installer and nothing is signed. The sequence at
+     least works off the PATH now — trying it that way found `windeployqt6`
+     exiting 0 having staged nothing, because it looks for `qmlimportscanner`
+     beside itself and MSYS2 ships it in `share/qt6/bin`, and then a bundle that
+     would not start, because MSYS2 puts the qml tree under `share/qt6` and
+     relocation preserves that offset while `windeployqt` stages to `qml/`. A
+     `qt.conf` reconciles them. Verified with `PATH` cut to `system32`, which is
+     MSYS2 off the PATH on this machine and still weaker than a clean one. Folds
+     into item 1.
    - **The reason for building it is still unmeasured**: hwdec, 4K/HEVC and HDR
      were what WSL could not judge, and none of them have been judged yet.
    - It does sidestep trap 22, as predicted — Mesa's D3D12 driver exists only
@@ -128,8 +164,14 @@ Worth folding into whatever touches them next.
   and `~SubtitleManager` waits on the thread unbounded — so the app will not exit.
 - **No `qsTr()` anywhere, and no accessibility.** Both get harder the longer they
   wait, and for a *reading* tool the second is more relevant than usual.
+- **Menus have no maximum width.** `AppMenu.fitToContents` sizes a menu to its
+  widest row, which fixed rows overflowing their background but leaves a
+  pathologically long track name producing a very wide menu instead of an
+  overlapping one. Better, not right.
 - **Prev/next are invisible with one file in the folder.** Correct behaviour, but
-  it reads as broken; they should be visible and disabled instead.
+  it reads as broken; they should be visible and disabled instead. Still true:
+  `TransportBar.showQueue` gates `visible` on `playlist.count > 1`, and the
+  buttons already carry the `enabled` binding the fix wants.
 - **The QML harness cannot see anything that needs pixels.** It runs `offscreen`,
   so delegate geometry, the FBO cap and whether the panel actually *scrolled* are
   outside it. Everything visual in milestone 5 was checked by screenshot instead,
