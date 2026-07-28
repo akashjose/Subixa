@@ -165,10 +165,24 @@ Worth folding into whatever touches them next.
   shared machine, or simply a preference. The policy already exists and is
   conservative (a clip under two minutes, the first thirty seconds and the last
   minute are never remembered, and finishing clears the position), so this is a
-  switch in Settings -> Playback over machinery that is already there rather than
-  new behaviour. Worth deciding whether "off" means *do not restore* or *do not
-  record*, because the second also disables remembering which subtitle track was
-  being read, and on a 65-track film that is the more valuable half.
+  switch over machinery that is already there rather than new behaviour.
+
+  **Two toggles, not one**, and they are independent by decision:
+
+  | Settings → Playback | |
+  |---|---|
+  | *Resume where you left off* | the position |
+  | *Remember the subtitle track per file* | which track was being read |
+
+  Collapsing them into one switch would be the easy reading and the wrong one.
+  `PlaybackHistory` already keeps the two in **separate groups** — `[resume]` and
+  `[subtitle]` — precisely because finishing a film clears the position and must
+  *not* forget that this household reads the Latin American Spanish track, which
+  `tests/tst_playbackhistory.cpp` already asserts. Someone who does not want the
+  player deciding where to start a film usually still wants it to stop asking
+  which of sixty-five tracks they read, and on that film the second is the more
+  valuable half.
+
   Note the write cadence changed in `f800e8c`: the position is now held in memory
   and written once it has moved `PositionWriteStep` (30 s), so a crash loses up
   to thirty seconds of it rather than five. Accepted deliberately; the constant is
