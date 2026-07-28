@@ -240,12 +240,18 @@ include(GNUInstallDirs)
 install(TARGETS subixa
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-install(FILES subixa.desktop
+# The desktop entry, the icon and metainfo all install under the application id
+# rather than the binary's name, which is what AppStream and every freedesktop
+# consumer key on. The binary itself stays `subixa`, and so do the QSettings
+# paths -- the id is the freedesktop identity, not the program's name.
+install(FILES com.akashjose.Subixa.desktop
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
 )
-# hicolor/scalable is what the desktop entry's `Icon=subixa` resolves against.
+# hicolor/scalable is what the entry's `Icon=com.akashjose.Subixa` resolves
+# against. The source keeps the short name; only the installed copy is renamed.
 install(FILES icons/subixa.svg
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
+    RENAME com.akashjose.Subixa.svg
 )
 install(FILES LICENSE
     DESTINATION ${CMAKE_INSTALL_DOCDIR}

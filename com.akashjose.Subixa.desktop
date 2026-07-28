@@ -1,0 +1,26 @@
+[Desktop Entry]
+Type=Application
+Name=Subixa Player
+GenericName=Media Player
+Comment=Watch films with a docked, searchable subtitle browser
+Exec=subixa %F
+# Resolves against hicolor/scalable/apps, where the icon installs under the
+# application id rather than the binary's name.
+Icon=com.akashjose.Subixa
+Terminal=false
+# The window's WM_CLASS, for shells that match on it rather than the entry name.
+#
+# This is the binary's name, NOT the application id, and the difference is not
+# cosmetic. The two platforms use different mechanisms: under X11 Qt sets
+# WM_CLASS from applicationName, which is "subixa" -- measured with xprop on a
+# running window, which reports `WM_CLASS(STRING) = "subixa", "subixa"`. Under
+# Wayland there is no WM_CLASS at all and the app id comes from
+# setDesktopFileName() instead, which is the reverse-DNS name.
+#
+# So both spellings are correct, each for its own platform, and putting the
+# application id here would match nothing under X11 -- a shell would show a
+# second, iconless window, which is the bug 672cb50 fixed.
+StartupWMClass=subixa
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/webm;video/x-msvideo;video/quicktime;video/mpeg;video/x-flv;video/3gpp;video/ogg;application/x-matroska;
+Keywords=video;movie;film;subtitle;subtitles;player;

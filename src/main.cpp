@@ -137,9 +137,21 @@ int main(int argc, char *argv[])
     // separately; this is what the window and the task switcher use.
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/subixa.svg")));
 
-    // Ties the window to subixa.desktop. The only mechanism under Wayland, which
-    // has no WM_CLASS for a shell to match on. Name goes without the suffix.
-    app.setDesktopFileName(QStringLiteral("subixa"));
+    // Ties the window to com.akashjose.Subixa.desktop. The only mechanism under
+    // Wayland, which has no WM_CLASS for a shell to match on. Name goes without
+    // the suffix, and is the application id rather than the binary's name.
+    //
+    // This does NOT set WM_CLASS. Under X11 Qt takes that from applicationName
+    // instead -- a running window measures as `WM_CLASS(STRING) = "subixa",
+    // "subixa"` under xprop -- which is why the desktop entry's StartupWMClass
+    // says "subixa" and not this. The two are different identifiers for
+    // different display servers, and making them agree would break X11.
+    //
+    // The application and organisation names above stay "subixa" for the same
+    // reason plus one more: they are what QSettings, the cue cache and the
+    // resume store build their paths from, and they are not the freedesktop
+    // identity.
+    app.setDesktopFileName(QStringLiteral("com.akashjose.Subixa"));
 
     // Grayscale glyphs, belt and braces with the render type above.
     //
