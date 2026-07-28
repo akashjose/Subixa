@@ -23,7 +23,7 @@ Milestones 1–5 are committed, and so is the work that followed on the
 Linux desktop turned up that WSL had hidden (traps 24 and 25), and the mouse work
 — folder drops, Esc to minimise, wheel volume, right-click menu.
 
-Since then, eight commits changed the ground the rest of this document stands on.
+Since then, 13 commits changed the ground the rest of this document stands on.
 
 **The dependency stack moved to current releases and is now built from source.**
 Linux was on Qt 6.9.3, FFmpeg 6.1.1 and mpv 0.37 — a 2023 stack — while the
@@ -76,21 +76,29 @@ the icon and any future AppStream or Flatpak metadata. `StartupWMClass` stays
 `subixa` and the difference is deliberate — measured with `xprop`, X11 takes
 `WM_CLASS` from `applicationName` while only Wayland uses the desktop file name.
 
-Seven suites pass, warning-free under `-Wall -Wextra` on every target.
+**The browser listed the wrong track, and no longer does.** Choosing a subtitle
+track from the transport menu moved the panel's tab and left `currentTrack`
+where it was, so the browser went on listing the previous track's cues and
+export wrote them. Two pieces of state for one decision: `currentTrack` is now
+derived from `panelUi.tabIndex` rather than assigned. Prev/next were separated
+from the queue chip in the same pass, so a folder holding one film shows them
+disabled rather than losing them. Both carry regression tests that fail without
+the fix.
+
+`SubtitleFilterModel`'s seven untested invokables now have characterization
+tests, pinning what the class does today because item 5 below plans to replace
+it and those are the invariants a base-class swap breaks silently.
+
+Seven suites pass, warning-free under `-Wall -Wextra` on every target:
+40 cases in `tst_subtitles`, 23 in `tst_playbackhistory`, 14 in `tst_qmlpanel`.
 
 ## Next
 
-In rough order of value. **None of items 1–6 from the previous version of this
-file has been completed** — the work above sits underneath them rather than
-through them.
+In rough order of value. The work recorded above sits mostly *underneath* these
+rather than through them — of the six the previous version of this file listed,
+one is partly done (the settings item, item 3) and the rest are untouched.
 
-1. **The subtitle track defect.** `syncPanelToSubtitleTrack` (`qml/Main.qml:631`)
-   moves the panel's tab but never updates `currentTrack` (`:303`), so choosing a
-   track from the transport menu leaves the browser listing the previous track's
-   cues and export keying off the stale one. It is a live bug in the feature the
-   product exists for, and it is small. *In flight.*
-
-2. **CI, and then packaging.** Still no CI anywhere — no `.github`, no
+1. **CI, and then packaging.** Still no CI anywhere — no `.github`, no
    `metainfo.xml`, no AppImage, Flatpak or `.deb`. This ranks above the
    engineering items because everything below is verified by "ctest passes", and
    until a machine runs ctest that sentence depends on someone remembering to.
@@ -98,7 +106,7 @@ through them.
    from source via `tools/build-deps.sh` and fetch Qt via `aqtinstall`, so the
    prefix must be cached or every push costs twenty minutes.
 
-3. **Per-style defaults and native `.ass` parsing.** The styling the browser
+2. **Per-style defaults and native `.ass` parsing.** The styling the browser
    renders comes only from the *override tags* in each cue; an ASS file's
    `[V4+ Styles]` table never reaches the extractor, so a track styled entirely
    that way reads plain in the list and italic on the picture. The two halves of a
@@ -107,16 +115,23 @@ through them.
    `avcodec_open2` — and the same pass gets the Name/Actor field, which is a
    strong browser column. Bump `SubtitleCache::kFormatVersion` with it (trap 14).
 
-4. **One settings service.** Five independent writers land in one file with no
+3. **One settings service.** Five independent writers land in one file with no
    schema and no version key: `PlaybackHistory` and `ShortcutRegistry` each hold
    a `QSettings`, `GraphicsSetup.cpp:132` constructs one on the stack, and
-   `qml/Main.qml` has two `Settings` blocks (`:68`, `:134`). `PlaybackHistory`
-   also calls `sync()` on a five-second timer, which for a two-hour film is ~1440
-   full rewrites of a file that only grows. The trap: that sync is currently the
-   *only* mid-session flush the QML groups get, so removing it without replacing
-   it drops preference durability to exit-only. *In flight.*
+   `qml/Main.qml` has two `Settings` blocks (`:68`, `:134`).
 
-5. **Drain `Main.qml`.** 1,502 lines, not the 1,300 the previous version of this
+   `PlaybackHistory`'s half of this landed in `f800e8c`: it holds the position
+   in memory and writes only once it has moved `PositionWriteStep`, instead of
+   handing every tick to `QSettings`. **The trap this file used to record here
+   was not real** — it claimed that timer was the only mid-session flush the QML
+   `Settings` groups got, so removing it would drop their durability to
+   exit-only. On Qt 6.12 `QQmlSettings` has its own write timer and `QSettings`
+   syncs itself from the event loop, so a group reaches disk about a second
+   after a change with nobody calling `sync()`. Measured against this Qt in a
+   standalone program, not assumed. What remains is the consolidation: one
+   service, a schema version key, and pruning.
+
+4. **Drain `Main.qml`.** 1,502 lines, not the 1,300 the previous version of this
    file claimed — and it was already 1,502 in the commit that wrote that line.
    The two-namespace track reconciliation is the most intricate logic in the
    product and is untyped JavaScript. Note that half of it already exists in C++:
@@ -124,7 +139,7 @@ through them.
    `src/MpvTrackList.h` with coverage in `tests/tst_mpvtracks.cpp`. What remains
    is the browser-namespace half and the arbitration between them.
 
-6. **The search proxy.** Filtering is a linear scan over every cue, on the GUI
+5. **The search proxy.** Filtering is a linear scan over every cue, on the GUI
    thread. Measure before building: the payoff the previous version claimed —
    "every keystroke after the first is O(matches)" — targets a case that
    `qml/SubtitlePanel.qml`'s 150 ms debounce already caps, so keystrokes never
@@ -132,7 +147,7 @@ through them.
    narrowing cannot help. The real cost may be that `invalidateRowsFilter`
    re-tests every rejected row and emits `countChanged` once per contiguous run.
 
-7. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then: nothing
+6. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then: nothing
    is packaged, deployment is a documented command sequence rather than a script,
    and nothing is signed. Azure Trusted Signing at about $10/month is the only
    certificate option that works headless in CI — OV certificates have needed a
