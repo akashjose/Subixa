@@ -92,7 +92,7 @@ else()
     add_library(Subixa::ffmpeg ALIAS PkgConfig::FFMPEG)
 endif()
 
-qt_standard_project_setup(REQUIRES 6.5)
+qt_standard_project_setup(REQUIRES 6.12)
 
 # Everything but main.cpp, shared verbatim between the app and the QML harness.
 # Listed once because a source that reaches only one of the two produces a link
@@ -407,12 +407,17 @@ set_tests_properties(mpvtracks PROPERTIES REQUIRED_FILES
 set_tests_properties(qmlpanel PROPERTIES REQUIRED_FILES
     "${SUBIXA_TESTDATA}/subs.mkv")
 
-# Backstop for the per-case QSKIPs inside tst_subtitles: if a fixture goes
-# missing some other way, the suite reports Skipped rather than Passed. ctest
-# still exits 0 on a skip, which is why REQUIRED_FILES above does the real work.
-set_tests_properties(subtitles mpvtracks qmlpanel PROPERTIES
-    SKIP_REGULAR_EXPRESSION "fixtures missing|missing -- run"
-)
+# There is deliberately no SKIP_REGULAR_EXPRESSION here, and it must not come
+# back. It reads like a safety net and is the opposite of one: the expression is
+# matched against the whole output, so a run that prints the phrase AND fails an
+# assertion AND exits 1 is reported ***Skipped, is not counted in "tests failed",
+# and ctest exits 0. Measured, not assumed -- a one-test project whose command is
+# `echo 'fixtures missing'; echo FAIL; exit 1` reports "100% tests passed" under
+# it. That is the exact defect the REQUIRED_FILES lists above exist to close, so
+# adding this alongside them reopened it by another route.
+#
+# A missing fixture is caught by REQUIRED_FILES before the binary runs, and by a
+# hard QVERIFY2 inside the suite if it disappears after that.
 
 # The render canary needs a window, a compositor and a capture path, so it is a
 # tool rather than a test. Registering it DISABLED gives it a name in `ctest -N`

@@ -175,9 +175,12 @@ private slots:
 
 void TstSubtitles::initTestCase()
 {
-    if (!QFileInfo::exists(fixture(QStringLiteral("subs.mkv")))) {
-        QSKIP("fixtures missing -- run ./testdata/make-fixtures.sh");
-    }
+    // Hard failure, not QSKIP. A skip exits 0, so a checkout that has never run
+    // make-fixtures.sh would report this suite green having asserted nothing.
+    // ctest's REQUIRED_FILES catches the usual case before the binary starts;
+    // this catches a fixture that vanishes after that, or a run outside ctest.
+    QVERIFY2(QFileInfo::exists(fixture(QStringLiteral("subs.mkv"))),
+             "subs.mkv missing -- run ./testdata/make-fixtures.sh");
 }
 
 void TstSubtitles::embeddedTracksAreEnumerated()
@@ -262,8 +265,8 @@ void TstSubtitles::assTagsAndEscapesAreResolved()
 void TstSubtitles::movTextKeepsItsFirstWords()
 {
     const QString path = fixture(QStringLiteral("movtext.mp4"));
-    if (!QFileInfo::exists(path))
-        QSKIP("movtext.mp4 missing -- run ./testdata/make-fixtures.sh");
+    QVERIFY2(QFileInfo::exists(path),
+             "movtext.mp4 missing -- run ./testdata/make-fixtures.sh");
 
     const SubtitleTrackList tracks = parse(path);
     QCOMPARE(tracks.size(), 1);
@@ -276,8 +279,8 @@ void TstSubtitles::movTextKeepsItsFirstWords()
 void TstSubtitles::wholesaleOffsetRebasesToZero()
 {
     const QString path = fixture(QStringLiteral("shifted.mkv"));
-    if (!QFileInfo::exists(path))
-        QSKIP("shifted.mkv missing -- run ./testdata/make-fixtures.sh");
+    QVERIFY2(QFileInfo::exists(path),
+             "shifted.mkv missing -- run ./testdata/make-fixtures.sh");
 
     const SubtitleTrackList tracks = parse(path);
     QVERIFY(!tracks.isEmpty());
@@ -292,8 +295,8 @@ void TstSubtitles::wholesaleOffsetRebasesToZero()
 void TstSubtitles::subtitlesAlreadyAtZeroAreNotRebased()
 {
     const QString path = fixture(QStringLiteral("shifted.mp4"));
-    if (!QFileInfo::exists(path))
-        QSKIP("shifted.mp4 missing -- run ./testdata/make-fixtures.sh");
+    QVERIFY2(QFileInfo::exists(path),
+             "shifted.mp4 missing -- run ./testdata/make-fixtures.sh");
 
     const SubtitleTrackList tracks = parse(path);
     QVERIFY(!tracks.isEmpty());
@@ -314,8 +317,8 @@ void TstSubtitles::subtitlesAlreadyAtZeroAreNotRebased()
 void TstSubtitles::sidecarsAreFoundNextToTheVideo()
 {
     const QString path = fixture(QStringLiteral("sidecar.mp4"));
-    if (!QFileInfo::exists(path))
-        QSKIP("sidecar.mp4 missing -- run ./testdata/make-fixtures.sh");
+    QVERIFY2(QFileInfo::exists(path),
+             "sidecar.mp4 missing -- run ./testdata/make-fixtures.sh");
 
     const SubtitleTrackList tracks = parse(path);
     // sidecar.srt, sidecar.ass and sidecar.fr.srt all sit beside the video.

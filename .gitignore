@@ -14,7 +14,8 @@ CMakeLists.txt.user*
 canary-failure/
 
 # Generated test media. testclip.mp4 is 15 s of testsrc2 with a burned-in
-# timecode; testdata/make-fixtures.sh prints the ffmpeg line to rebuild it.
+# timecode, and testdata/make-fixtures.sh generates it along with everything
+# muxed from it.
 testclip.mp4
 
 # Generated subtitle fixtures -- rebuild with testdata/make-fixtures.sh.

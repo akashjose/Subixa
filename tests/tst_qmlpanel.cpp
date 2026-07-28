@@ -89,8 +89,10 @@ private:
 void TstQmlPanel::initTestCase()
 {
     QVERIFY(m_home.isValid());
-    if (!QFileInfo::exists(fixture(QStringLiteral("subs.mkv"))))
-        QSKIP("fixtures missing -- run ./testdata/make-fixtures.sh");
+    // Hard failure, not QSKIP: a skip exits 0 and would report this suite
+    // green having asserted nothing. See tst_subtitles::initTestCase.
+    QVERIFY2(QFileInfo::exists(fixture(QStringLiteral("subs.mkv"))),
+             "subs.mkv missing -- run ./testdata/make-fixtures.sh");
 
     // Before any QSettings exists. PlaybackHistory, the QML Settings type and
     // the cue cache all resolve their paths from these.

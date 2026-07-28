@@ -81,8 +81,10 @@ private:
 void TstMpvTracks::initTestCase()
 {
     const QString path = fixture(QStringLiteral("subs.mkv"));
-    if (!QFileInfo::exists(path))
-        QSKIP("fixtures missing -- run ./testdata/make-fixtures.sh");
+    // Hard failure, not QSKIP: a skip exits 0 and would report this suite
+    // green having asserted nothing. See tst_subtitles::initTestCase.
+    QVERIFY2(QFileInfo::exists(path),
+             "subs.mkv missing -- run ./testdata/make-fixtures.sh");
 
     // Its own handle, so it needs its own call. See MpvEngine's constructor.
     std::setlocale(LC_NUMERIC, "C");
