@@ -80,6 +80,13 @@ Pass a different prefix as the first argument if you want it elsewhere.
 Installing into a prefix rather than `/usr/local` leaves your system's own `mpv`
 and `ffmpeg` alone and is reversible with `rm -rf`.
 
+Two things about the FFmpeg configuration, if you change it. `--enable-gpl` is
+required and is compatible with a GPL-3.0-or-later application; **never add
+`--enable-nonfree`**, which produces a binary that cannot legally be
+distributed. And do not reach for `--disable-encoders` to save space:
+`MpvEngine::screenshot` writes PNG and JPEG through libavcodec, so a build
+without those encoders silently breaks `Ctrl+S` with no diagnostic anywhere.
+
 ## 4. Qt
 
 ```bash

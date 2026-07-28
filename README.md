@@ -8,11 +8,11 @@ itself into view. It is built for people who *read* subtitles — language
 learners, subtitle editors, anyone doing a QC pass — rather than for people who
 happen to have them switched on.
 
-> **Pre-release, version 0.5.0. There are no downloads yet.**
-> No installer, no AppImage, no `.deb`, no Flatpak, no packages of any kind, and
-> no continuous integration. Building from source is currently the only way to
-> run it, and on Linux that means building three media libraries first — see
-> [Building](#building) before deciding whether that is a reasonable afternoon.
+> [!IMPORTANT]
+> Subixa is pre-release (0.5.0) and there are no downloads yet — no installer,
+> no AppImage, no `.deb`, no Flatpak, no packages of any kind. Building from
+> source is currently the only way to run it, and on Linux that means building
+> three media libraries first.
 
 ## Why this exists
 
@@ -154,9 +154,6 @@ already written down there.
 
 ## License
 
-GPL-3.0-or-later. See [`LICENSE`](LICENSE).
-
-Subixa links libmpv and the FFmpeg libraries, which carry their own licences.
-The build is configured with `--enable-gpl` and deliberately without
-`--enable-nonfree`, which would produce a binary that cannot legally be
-distributed.
+Subixa is released under the GPL-3.0-or-later license — see
+[`LICENSE`](LICENSE) for details. It links libmpv and the FFmpeg libraries,
+which carry their own.
