@@ -8,6 +8,11 @@ itself into view. It is built for people who *read* subtitles — language
 learners, subtitle editors, anyone doing a QC pass — rather than for people who
 happen to have them switched on.
 
+![The subtitle browser docked beside the video](docs/images/browser.jpg)
+
+*The highlighted row and the line on the picture are the same cue — the list
+follows playback, and clicking any row seeks there.*
+
 > [!IMPORTANT]
 > Subixa is pre-release (0.5.0) and there are no downloads yet — no installer,
 > no AppImage, no `.deb`, no Flatpak, no packages of any kind. Building from
@@ -56,10 +61,21 @@ not a base.
 - Remembers position, subtitle track and layout per file
 - Plays on to the next file in the folder, ordered the way a person would
 
-The browser docks beside the video or detaches into its own window (`Ctrl+D`).
+The browser docks beside the video or detaches into its own window (`Ctrl+D`),
+and `Tab` hides it entirely when you just want to watch:
+
+![The player with the browser hidden](docs/images/player.jpg)
+
 Settings (`Ctrl+,`) covers playback, subtitle appearance and timing, the
-browser, hotkeys and the interface. Default bindings are in
+browser, hotkeys and the interface. Everything is adjustable while a film is
+playing rather than in a config file. Default bindings are in
 [`docs/keyboard.md`](docs/keyboard.md).
+
+<img src="docs/images/settings.png" alt="The settings window" width="620">
+
+Screenshots show [*Sintel*](https://durian.blender.org/), © copyright Blender
+Foundation, used under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+Its ten embedded subtitle tracks are also why it is a good file to test against.
 
 Verified against a real 3 GB film with 65 embedded subtitle tracks: 93,350 cues
 parsed, and click-to-seek landing on the clicked line with the picture to match.
