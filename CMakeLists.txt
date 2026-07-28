@@ -342,6 +342,14 @@ target_link_libraries(tst_qmlpanel PRIVATE
     Subixa::ffmpeg
 )
 
+# The same warnings the app target gets. tst_qmlpanel recompiles the entire app
+# source list, so without this more than half of what compiles here was built
+# with warnings off while the tree was described as clean under -Wall -Wextra.
+foreach(t tst_playbackhistory tst_playlist tst_shortcuts tst_subtitles
+          tst_mpvtracks tst_qmlpanel)
+    target_compile_options(${t} PRIVATE -Wall -Wextra)
+endforeach()
+
 add_test(NAME subtitles COMMAND tst_subtitles)
 add_test(NAME mpvtracks COMMAND tst_mpvtracks)
 add_test(NAME playbackhistory COMMAND tst_playbackhistory)
@@ -361,6 +369,48 @@ set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts PROP
 set_tests_properties(qmlpanel PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 180
+)
+
+# ---- fixtures are not optional ------------------------------------------
+# Three suites -- ~2080 lines of assertions -- open a fixture in initTestCase and
+# QSKIP when it is absent. QSKIP exits 0, so a checkout that has never run
+# make-fixtures.sh reported six green having asserted almost nothing, and every
+# "verified by ctest" claim in this repository was unfalsifiable.
+#
+# REQUIRED_FILES is the fix: ctest marks a test NOT RUN and *fails* it when a
+# listed file is missing, so the absence is loud and the exit code is non-zero.
+# The lists are the fixtures each suite actually opens -- for `subtitles` that
+# includes the three sidecars, which are discovered beside sidecar.mp4 rather
+# than named in the source.
+set(SUBIXA_TESTDATA ${CMAKE_CURRENT_SOURCE_DIR}/testdata)
+
+set_tests_properties(subtitles PROPERTIES REQUIRED_FILES
+    "${SUBIXA_TESTDATA}/subs.mkv;${SUBIXA_TESTDATA}/movtext.mp4;${SUBIXA_TESTDATA}/shifted.mkv;${SUBIXA_TESTDATA}/shifted.mp4;${SUBIXA_TESTDATA}/sidecar.mp4;${SUBIXA_TESTDATA}/sidecar.srt;${SUBIXA_TESTDATA}/sidecar.ass;${SUBIXA_TESTDATA}/sidecar.fr.srt")
+
+set_tests_properties(mpvtracks PROPERTIES REQUIRED_FILES
+    "${SUBIXA_TESTDATA}/subs.mkv;${SUBIXA_TESTDATA}/en.srt;${SUBIXA_TESTDATA}/sidecar.srt")
+
+set_tests_properties(qmlpanel PROPERTIES REQUIRED_FILES
+    "${SUBIXA_TESTDATA}/subs.mkv")
+
+# Backstop for the per-case QSKIPs inside tst_subtitles: if a fixture goes
+# missing some other way, the suite reports Skipped rather than Passed. ctest
+# still exits 0 on a skip, which is why REQUIRED_FILES above does the real work.
+set_tests_properties(subtitles mpvtracks qmlpanel PROPERTIES
+    SKIP_REGULAR_EXPRESSION "fixtures missing|missing -- run"
+)
+
+# The render canary needs a window, a compositor and a capture path, so it is a
+# tool rather than a test. Registering it DISABLED gives it a name in `ctest -N`
+# and a way to be run deliberately -- `ctest -L manual --test-dir build
+# --force-new-ctest-process -R rendercanary` -- without ever running in a
+# headless batch, where it would fail for the wrong reason.
+add_test(NAME rendercanary COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/render-canary.sh)
+set_tests_properties(rendercanary PROPERTIES
+    DISABLED TRUE
+    RUN_SERIAL TRUE
+    LABELS manual
+    TIMEOUT 300
 )
 
 endif()  # SUBIXA_BUILD_TESTS
