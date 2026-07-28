@@ -106,16 +106,7 @@ one is partly done (the settings item, item 3) and the rest are untouched.
    from source via `tools/build-deps.sh` and fetch Qt via `aqtinstall`, so the
    prefix must be cached or every push costs twenty minutes.
 
-2. **Per-style defaults and native `.ass` parsing.** The styling the browser
-   renders comes only from the *override tags* in each cue; an ASS file's
-   `[V4+ Styles]` table never reaches the extractor, so a track styled entirely
-   that way reads plain in the list and italic on the picture. The two halves of a
-   subtitle-reader's screen visibly disagree, and no fixture catches it. The
-   header is already in memory — `avctx->subtitle_header` after
-   `avcodec_open2` — and the same pass gets the Name/Actor field, which is a
-   strong browser column. Bump `SubtitleCache::kFormatVersion` with it (trap 14).
-
-3. **One settings service.** Five independent writers land in one file with no
+2. **One settings service.** Five independent writers land in one file with no
    schema and no version key: `PlaybackHistory` and `ShortcutRegistry` each hold
    a `QSettings`, `GraphicsSetup.cpp:132` constructs one on the stack, and
    `qml/Main.qml` has two `Settings` blocks (`:68`, `:134`).
@@ -131,7 +122,7 @@ one is partly done (the settings item, item 3) and the rest are untouched.
    standalone program, not assumed. What remains is the consolidation: one
    service, a schema version key, and pruning.
 
-4. **Drain `Main.qml`.** 1,502 lines, not the 1,300 the previous version of this
+3. **Drain `Main.qml`.** 1,502 lines, not the 1,300 the previous version of this
    file claimed — and it was already 1,502 in the commit that wrote that line.
    The two-namespace track reconciliation is the most intricate logic in the
    product and is untyped JavaScript. Note that half of it already exists in C++:
@@ -139,7 +130,7 @@ one is partly done (the settings item, item 3) and the rest are untouched.
    `src/MpvTrackList.h` with coverage in `tests/tst_mpvtracks.cpp`. What remains
    is the browser-namespace half and the arbitration between them.
 
-5. **The search proxy.** Filtering is a linear scan over every cue, on the GUI
+4. **The search proxy.** Filtering is a linear scan over every cue, on the GUI
    thread. Measure before building: the payoff the previous version claimed —
    "every keystroke after the first is O(matches)" — targets a case that
    `qml/SubtitlePanel.qml`'s 150 ms debounce already caps, so keystrokes never
@@ -147,7 +138,7 @@ one is partly done (the settings item, item 3) and the rest are untouched.
    narrowing cannot help. The real cost may be that `invalidateRowsFilter`
    re-tests every rejected row and emits `countChanged` once per contiguous run.
 
-6. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then: nothing
+5. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then: nothing
    is packaged, deployment is a documented command sequence rather than a script,
    and nothing is signed. Azure Trusted Signing at about $10/month is the only
    certificate option that works headless in CI — OV certificates have needed a
