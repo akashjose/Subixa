@@ -481,6 +481,19 @@ void MpvEngine::refreshTracks()
         emit hasVideoChanged();
 }
 
+// Filtered on read rather than kept as two more members: the list has a handful
+// of entries, and the menus read it when they open or when tracksChanged says
+// it moved -- which is on load, on sub-add, and on a selection change.
+QVariantList MpvEngine::audioTracks() const
+{
+    return MpvTrackList::tracksOfType(m_tracks, "audio");
+}
+
+QVariantList MpvEngine::subtitleTracks() const
+{
+    return MpvTrackList::tracksOfType(m_tracks, "sub");
+}
+
 void MpvEngine::refreshChapters()
 {
     m_chapters.clear();
@@ -763,12 +776,19 @@ void MpvEngine::addSubtitleFile(const QString &path)
     command({QStringLiteral("sub-add"), path, QStringLiteral("select")});
 }
 
-bool MpvEngine::subtitleTrackMatches(int id, int ffIndex,
-                                     const QString &sidecarPath) const
+int MpvEngine::browserTrackForSubtitle(const QVariantList &browserTracks) const
 {
-    if (sidecarPath.isEmpty())
-        return MpvTrackList::subtitleIdForStream(m_tracks, ffIndex) == id;
-    return MpvTrackList::subtitleIdForFile(m_tracks, sidecarPath) == id;
+    return MpvTrackList::browserIndexForSubtitleId(browserTracks, m_tracks,
+                                                   m_subtitleTrack);
+}
+
+QVariantMap MpvEngine::subtitleHistoryEntry(const QVariantMap &track) const
+{
+    // Nothing here reads mpv's state: the caller has the track in hand, and
+    // between picking it and storing it mpv may not yet have applied the
+    // selection. Kept on this object anyway because the shape being translated
+    // *from* is this object's.
+    return MpvTrackList::historyEntryForTrack(track);
 }
 
 // ---- timing ------------------------------------------------------------

@@ -341,6 +341,17 @@ target_link_libraries(tst_subtitles PRIVATE
     Subixa::ffmpeg
 )
 
+# The search proxy on its own. Split out of tst_subtitles rather than appended to
+# it: that file is 1165 lines and is the single-writer bottleneck the audit
+# named, and the proxy is now a class in its own right rather than a
+# QSortFilterProxyModel subclass.
+qt_add_executable(tst_searchproxy tests/tst_searchproxy.cpp ${SUBIXA_MODEL_SOURCES})
+target_include_directories(tst_searchproxy PRIVATE src)
+target_compile_definitions(tst_searchproxy PRIVATE
+    SUBIXA_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+target_link_libraries(tst_searchproxy PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test Subixa::ffmpeg)
+
 # The golden-file check over the committed corpus. Separate from tst_subtitles
 # because it is the only suite whose inputs are bytes in git rather than media
 # muxed at test time -- which is what lets a Linux result and a Windows result be
@@ -409,7 +420,7 @@ target_link_libraries(tst_qmlpanel PRIVATE
 # source list, so without this more than half of what compiles here was built
 # with warnings off while the tree was described as clean under -Wall -Wextra.
 foreach(t tst_playbackhistory tst_playlist tst_shortcuts tst_subtitles
-          tst_mpvtracks tst_qmlpanel tst_conformance)
+          tst_mpvtracks tst_qmlpanel tst_conformance tst_searchproxy)
     target_compile_options(${t} PRIVATE -Wall -Wextra)
 endforeach()
 
@@ -420,9 +431,10 @@ add_test(NAME playlist COMMAND tst_playlist)
 add_test(NAME shortcuts COMMAND tst_shortcuts)
 add_test(NAME qmlpanel COMMAND tst_qmlpanel)
 add_test(NAME conformance COMMAND tst_conformance)
+add_test(NAME searchproxy COMMAND tst_searchproxy)
 
 # None of these needs a display; make sure they never try to open one.
-set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts conformance PROPERTIES
+set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts conformance searchproxy PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=minimal"
     TIMEOUT 120
 )

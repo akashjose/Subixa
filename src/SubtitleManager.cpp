@@ -3,6 +3,7 @@
 
 #include "SubtitleManager.h"
 
+#include "MpvTrackList.h"
 #include "SubtitleExtractor.h"
 #include "SubtitleLineModel.h"
 
@@ -261,6 +262,13 @@ SubtitleLineModel *SubtitleManager::model(int trackId) const
     // from an invokable and can collect it out from under us.
     QQmlEngine::setObjectOwnership(model, QQmlEngine::CppOwnership);
     return model;
+}
+
+int SubtitleManager::preferredTrackIndex(const QVariantMap &remembered,
+                                         const QString &preferredLanguage) const
+{
+    return MpvTrackList::preferredTrackIndex(m_tracksView, remembered,
+                                             preferredLanguage);
 }
 
 QString SubtitleManager::formatTimestamp(qint64 ms)

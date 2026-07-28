@@ -275,7 +275,14 @@ ApplicationWindow {
         // The tab is the whole selection -- currentTrack is derived from it --
         // so there is nothing else to set here. -1 when the file has no
         // browsable track, which reads back as "nothing to list".
-        onLoaded: panelUi.tabIndex = root.preferredTrackIndex()
+        //
+        // Which tab that is comes from C++: the track last read in this very
+        // file, else the language last chosen anywhere, else the first browsable
+        // one. What the store knows is passed in rather than looked up there, so
+        // neither of these two objects has to know about the other.
+        onLoaded: panelUi.tabIndex =
+            subs.preferredTrackIndex(history.subtitleFor(root.currentFile),
+                                     history.preferredLanguage())
     }
 
     PlaybackHistory {
@@ -564,62 +571,16 @@ ApplicationWindow {
                                  track.language)
     }
 
-    // Which tab a newly parsed file should open on: the track last read in this
-    // very file, else the language last chosen anywhere, else the first
-    // browsable track. Before this, every open reset to mpv's default -- on a
-    // film with 65 tracks that means hunting for the right one every time.
-    function preferredTrackIndex() {
-        // Hoisted. Every read of subs.tracks converts a QVariantList of
-        // QVariantMaps into a fresh JS array of JS objects, and this used to do
-        // it once per loop iteration -- about 4 200 conversions on the 65-track
-        // film, for one answer.
-        var tracks = subs.tracks
-        var i, t
-        var stored = history.subtitleFor(root.currentFile)
-
-        if (stored.streamIndex !== undefined) {
-            for (i = 0; i < tracks.length; ++i) {
-                t = tracks[i]
-                if (!t.browsable)
-                    continue
-                // Sidecars are matched by path and embedded tracks by ffmpeg
-                // stream index, the same split MpvEngine uses: neither numbering
-                // follows from the other.
-                var match = stored.sidecarPath !== ""
-                          ? (t.sidecar && t.sourcePath === stored.sidecarPath)
-                          : (!t.sidecar && t.streamIndex === stored.streamIndex)
-                if (match)
-                    return i
-            }
-        }
-
-        var lang = history.preferredLanguage()
-        if (lang !== "") {
-            for (i = 0; i < tracks.length; ++i) {
-                t = tracks[i]
-                if (t.browsable && t.language === lang)
-                    return i
-            }
-        }
-
-        for (i = 0; i < tracks.length; ++i) {
-            if (tracks[i].browsable)
-                return i
-        }
-        return -1
-    }
-
     // The transport's subtitle menu reaches tracks the panel cannot list, so a
-    // choice made there has to be remembered too. mpv describes a track by
-    // ff-index and, for a sidecar, by the filename it loaded.
+    // choice made there has to be remembered too. Which file it names is decided
+    // here; how mpv's description of a track becomes what the store keeps is
+    // decided in C++, because it is mpv's numbering being translated.
     function rememberMpvSubtitle(track) {
         if (root.currentFile === "" || track.id === undefined)
             return
-        var sidecar = track.external && track.externalFilename !== undefined
-                    ? track.externalFilename : ""
-        history.rememberSubtitle(root.currentFile,
-                                 sidecar === "" ? track.ffIndex : -1, sidecar,
-                                 track.language !== undefined ? track.language : "")
+        var entry = mpv.subtitleHistoryEntry(track)
+        history.rememberSubtitle(root.currentFile, entry.streamIndex,
+                                 entry.sidecarPath, entry.language)
     }
 
     // Tells mpv to burn the track the panel is showing over the video. Until this
@@ -639,22 +600,15 @@ ApplicationWindow {
     // the panel to the matching tab, so the two agree no matter which was used.
     // Moving the tab is the whole of it -- currentTrack derives from it, so the
     // list and the export target follow without a second write to keep in step.
-    // Path comparison happens in C++ -- one file can be named relatively in the
-    // extractor and absolutely by mpv.
+    //
+    // The whole search happens in C++, where the two numberings meet: one file
+    // can be named relatively in the extractor and absolutely by mpv. -1 means
+    // mpv is showing something the browser cannot list, or has not caught up
+    // with the file yet, and both mean leave the tab alone.
     function syncPanelToSubtitleTrack() {
-        if (mpv.subtitleTrack < 0)
-            return
-        var tracks = subs.tracks
-        for (var i = 0; i < tracks.length; ++i) {
-            var t = tracks[i]
-            if (!t.browsable)
-                continue
-            if (mpv.subtitleTrackMatches(mpv.subtitleTrack, t.streamIndex,
-                                         t.sidecar ? t.sourcePath : "")) {
-                panelUi.tabIndex = i
-                return
-            }
-        }
+        var index = mpv.browserTrackForSubtitle(subs.tracks)
+        if (index >= 0)
+            panelUi.tabIndex = index
     }
 
     Connections {
@@ -665,16 +619,6 @@ ApplicationWindow {
         // sub-add lands.
         function onTracksChanged() { root.applySubtitleSelection() }
         function onSubtitleTrackChanged() { root.syncPanelToSubtitleTrack() }
-    }
-
-    function tracksOfType(type) {
-        var all = mpv.tracks
-        var out = []
-        for (var i = 0; i < all.length; ++i) {
-            if (all[i].type === type)
-                out.push(all[i])
-        }
-        return out
     }
 
     function trackLabel(t) {
@@ -1508,8 +1452,8 @@ ApplicationWindow {
             playlist.setCurrentPath(playlist.files[index])
             root.openFile(playlist.currentPath)
         }
-        audioTracks: root.tracksOfType("audio")
-        subtitleTracks: root.tracksOfType("sub")
+        audioTracks: root.mpv.audioTracks
+        subtitleTracks: root.mpv.subtitleTracks
         trackLabeller: root.trackLabel
     }
 }

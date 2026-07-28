@@ -59,6 +59,15 @@ private slots:
     void mapsStreamIndexToSid();
     void mapsSidecarPathToSid();
     void mappingIgnoresOtherTrackTypes();
+    void splitsTracksByType();
+
+    // The browser's own numbering, and the arbitration between the two.
+    void opensOnTheTrackThisFileWasLeftOn();
+    void aRememberedSidecarSurvivesBeingRenamed();
+    void fallsBackToTheLanguageThenTheFirstTrack();
+    void skipsTracksTheBrowserCannotList();
+    void findsTheTabForMpvsSubtitle();
+    void storesAnMpvTrackTheWayTheHistoryKeepsIt();
 
 private:
     // Pumps mpv's event queue until `id` arrives. Every check here depends on
@@ -474,6 +483,280 @@ void TstMpvTracks::mappingIgnoresOtherTrackTypes()
     const QVariantList selected = {makeTrack(4, "sub", 5, true)};
     QVERIFY(MpvTrackList::isSelected(selected, 4));
     QVERIFY(!MpvTrackList::isSelected(selected, 9));
+}
+
+void TstMpvTracks::splitsTracksByType()
+{
+    const QVariantList tracks = {
+        makeTrack(1, "video", 0),
+        makeTrack(1, "audio", 1),
+        makeTrack(2, "audio", 2),
+        makeTrack(1, "sub", 3),
+    };
+
+    const QVariantList audio = MpvTrackList::tracksOfType(tracks, "audio");
+    QCOMPARE(audio.size(), 2);
+    // mpv's own order, because that is the order the transport's menu lists them
+    // in and a menu that reshuffles between openings is unusable.
+    QCOMPARE(audio.at(0).toMap().value(QStringLiteral("id")).toInt(), 1);
+    QCOMPARE(audio.at(1).toMap().value(QStringLiteral("id")).toInt(), 2);
+
+    QCOMPARE(MpvTrackList::tracksOfType(tracks, "sub").size(), 1);
+    QCOMPARE(MpvTrackList::tracksOfType(tracks, "video").size(), 1);
+    QCOMPARE(MpvTrackList::tracksOfType(tracks, "audio").size(), 2);
+    QVERIFY(MpvTrackList::tracksOfType(tracks, "nosuchtype").isEmpty());
+    QVERIFY(MpvTrackList::tracksOfType({}, "sub").isEmpty());
+}
+
+namespace {
+
+// One entry of SubtitleManager::tracks -- the browser's own numbering, which is
+// an index into that list and has nothing to do with mpv's sid. Only the keys
+// the reconciliation reads are set; the rest are labels for the tab bar.
+QVariantMap makeBrowserTrack(int streamIndex, const QString &language,
+                             bool browsable = true,
+                             const QString &sidecarPath = QString())
+{
+    QVariantMap track;
+    track[QStringLiteral("streamIndex")] = streamIndex;
+    track[QStringLiteral("language")] = language;
+    track[QStringLiteral("browsable")] = browsable;
+    track[QStringLiteral("sidecar")] = !sidecarPath.isEmpty();
+    track[QStringLiteral("sourcePath")] = sidecarPath;
+    return track;
+}
+
+// What PlaybackHistory::subtitleFor() returns for a file a track has been chosen
+// in. An empty map is a file that has never had one.
+QVariantMap remembered(int streamIndex, const QString &sidecarPath,
+                       const QString &language)
+{
+    QVariantMap out;
+    out[QStringLiteral("streamIndex")] = streamIndex;
+    out[QStringLiteral("sidecarPath")] = sidecarPath;
+    out[QStringLiteral("language")] = language;
+    return out;
+}
+
+}  // namespace
+
+void TstMpvTracks::opensOnTheTrackThisFileWasLeftOn()
+{
+    const QVariantList tracks = {
+        makeBrowserTrack(2, QStringLiteral("eng")),
+        makeBrowserTrack(3, QStringLiteral("jpn")),
+        makeBrowserTrack(4, QStringLiteral("fre")),
+    };
+
+    // The remembered track wins over both fallbacks, including a language that
+    // would otherwise pick a different tab.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, remembered(4, QString(), QStringLiteral("fre")),
+                 QStringLiteral("eng")),
+             2);
+
+    // Stream index, not position: the two coincide nowhere here, which is the
+    // whole reason the browser cannot just store a tab number.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, remembered(2, QString(), QStringLiteral("eng")), QString()),
+             0);
+
+    // Through QML the map makes a round trip via JavaScript, where every number
+    // is a double. It has to mean the same thing coming back.
+    QVariantMap viaJs;
+    viaJs[QStringLiteral("streamIndex")] = 3.0;
+    viaJs[QStringLiteral("sidecarPath")] = QString();
+    viaJs[QStringLiteral("language")] = QStringLiteral("jpn");
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, viaJs, QString()), 1);
+
+    // A stream this file no longer has -- a remux, or an entry from a file that
+    // has since been replaced -- falls through rather than selecting nothing.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, remembered(9, QString(), QStringLiteral("jpn")),
+                 QStringLiteral("jpn")),
+             1);
+
+    // A file no track has ever been chosen in: no entry at all, which is not the
+    // same as an entry saying stream 0.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QString()), 0);
+}
+
+void TstMpvTracks::aRememberedSidecarSurvivesBeingRenamed()
+{
+    const QString sidecar = fixture(QStringLiteral("sidecar.srt"));
+    const QVariantList tracks = {
+        makeBrowserTrack(2, QStringLiteral("eng")),
+        makeBrowserTrack(0, QStringLiteral("fre"), true, sidecar),
+    };
+
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, remembered(-1, sidecar, QStringLiteral("fre")), QString()),
+             1);
+
+    // The store holds an absolute path and the extractor may hold whatever
+    // spelling the file was opened with, so the comparison cannot be a string
+    // one. It was, and a sidecar opened by a relative path came back on the
+    // wrong tab.
+    const QString messy = QStringLiteral(SUBIXA_TESTDATA_DIR "/../testdata/sidecar.srt");
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, remembered(-1, messy, QStringLiteral("fre")), QString()),
+             1);
+
+    // The two branches must not leak into each other, and the list is ordered so
+    // that a leak gives a different answer from the fallback.
+    const QVariantList sidecarFirst = {
+        makeBrowserTrack(0, QStringLiteral("fre"), true, sidecar),
+        makeBrowserTrack(0, QStringLiteral("eng")),
+    };
+    // A remembered sidecar that is no longer beside the film must not select the
+    // embedded track that happens to carry the stream index stored with it: an
+    // external track's index counts within its own file. Falls back to the first
+    // browsable track, which here is the sidecar rather than index 1.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 sidecarFirst,
+                 remembered(0, fixture(QStringLiteral("gone.srt")), QString()),
+                 QString()),
+             0);
+    // And the reverse: a remembered embedded stream must find the embedded track
+    // rather than the sidecar sitting at stream 0 of its own file.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 sidecarFirst, remembered(0, QString(), QString()), QString()),
+             1);
+}
+
+void TstMpvTracks::fallsBackToTheLanguageThenTheFirstTrack()
+{
+    const QVariantList tracks = {
+        makeBrowserTrack(2, QStringLiteral("eng")),
+        makeBrowserTrack(3, QStringLiteral("eng")),
+        makeBrowserTrack(4, QStringLiteral("fre")),
+    };
+
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QStringLiteral("fre")), 2);
+    // Two tracks in one language is the ordinary case, not the exotic one -- a
+    // film with English and English SDH has it. The first wins; the language is
+    // a fallback, and there is nothing else to tell them apart.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QStringLiteral("eng")), 0);
+    // A language the file does not carry, and no language at all.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QStringLiteral("deu")), 0);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QString()), 0);
+}
+
+void TstMpvTracks::skipsTracksTheBrowserCannotList()
+{
+    // A PGS track and a text track that decoded to nothing. Both are in the list
+    // so the tab bar can say why they cannot be read, and neither may be landed
+    // on by any of the three passes.
+    const QVariantList tracks = {
+        makeBrowserTrack(2, QStringLiteral("eng"), false),
+        makeBrowserTrack(3, QStringLiteral("fre"), false),
+        makeBrowserTrack(4, QStringLiteral("fre")),
+    };
+
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, remembered(2, QString(), QStringLiteral("eng")), QString()),
+             2);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QStringLiteral("fre")), 2);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QString()), 2);
+
+    // A file whose subtitles are all bitmap opens on no tab at all, rather than
+    // on the previous film's tab over another film's cues.
+    const QVariantList unreadable = {
+        makeBrowserTrack(2, QStringLiteral("eng"), false),
+    };
+    QCOMPARE(MpvTrackList::preferredTrackIndex(unreadable, {}, QStringLiteral("eng")), -1);
+    QCOMPARE(MpvTrackList::preferredTrackIndex({}, {}, QString()), -1);
+}
+
+void TstMpvTracks::findsTheTabForMpvsSubtitle()
+{
+    const QString sidecar = fixture(QStringLiteral("sidecar.srt"));
+    // mpv's numbering: sid 1..3 over ffmpeg streams 2..4, plus a sidecar it
+    // auto-loaded. Nothing about it follows from the browser's list below.
+    const QVariantList mpvTracks = {
+        makeTrack(1, "video", 0),
+        makeTrack(1, "audio", 1),
+        makeTrack(1, "sub", 2),
+        makeTrack(2, "sub", 3),
+        makeTrack(3, "sub", 4),
+        makeTrack(4, "sub", 0, false, sidecar),
+    };
+    const QVariantList browserTracks = {
+        makeBrowserTrack(2, QStringLiteral("eng")),
+        makeBrowserTrack(4, QStringLiteral("fre")),
+        makeBrowserTrack(0, QStringLiteral("fre"), true, sidecar),
+    };
+
+    QCOMPARE(MpvTrackList::browserIndexForSubtitleId(browserTracks, mpvTracks, 1), 0);
+    QCOMPARE(MpvTrackList::browserIndexForSubtitleId(browserTracks, mpvTracks, 3), 1);
+    QCOMPARE(MpvTrackList::browserIndexForSubtitleId(browserTracks, mpvTracks, 4), 2);
+
+    // sid 2 is stream 3, which the browser has no tab for -- a bitmap track, say.
+    // The tab stays where it is rather than moving to something arbitrary.
+    QCOMPARE(MpvTrackList::browserIndexForSubtitleId(browserTracks, mpvTracks, 2), -1);
+    // Subtitles off.
+    QCOMPARE(MpvTrackList::browserIndexForSubtitleId(browserTracks, mpvTracks, -1), -1);
+    // mpv has not caught up with the file yet: it and the extractor open it
+    // independently, so the browser can have tabs before mpv has a track list.
+    QCOMPARE(MpvTrackList::browserIndexForSubtitleId(browserTracks, {}, 1), -1);
+
+    // The sidecar again, spelled the other way round in the browser's list.
+    const QVariantList messyBrowser = {
+        makeBrowserTrack(0, QStringLiteral("fre"), true,
+                         QStringLiteral(SUBIXA_TESTDATA_DIR "/../testdata/sidecar.srt")),
+    };
+    QCOMPARE(MpvTrackList::browserIndexForSubtitleId(messyBrowser, mpvTracks, 4), 0);
+
+    // A tab the browser cannot list is never the answer, even when its stream
+    // index would match.
+    const QVariantList unreadable = {
+        makeBrowserTrack(2, QStringLiteral("eng"), false),
+    };
+    QCOMPARE(MpvTrackList::browserIndexForSubtitleId(unreadable, mpvTracks, 1), -1);
+}
+
+void TstMpvTracks::storesAnMpvTrackTheWayTheHistoryKeepsIt()
+{
+    QVariantMap embedded = makeTrack(2, "sub", 3);
+    embedded[QStringLiteral("language")] = QStringLiteral("jpn");
+    const QVariantMap forEmbedded = MpvTrackList::historyEntryForTrack(embedded);
+    // ff-index, not sid: sid is mpv's own numbering and means nothing to the
+    // extractor, which is what has to find this track again next time.
+    QCOMPARE(forEmbedded.value(QStringLiteral("streamIndex")).toInt(), 3);
+    QVERIFY(forEmbedded.value(QStringLiteral("sidecarPath")).toString().isEmpty());
+    QCOMPARE(forEmbedded.value(QStringLiteral("language")).toString(),
+             QStringLiteral("jpn"));
+
+    const QString sidecar = fixture(QStringLiteral("sidecar.srt"));
+    QVariantMap external = makeTrack(4, "sub", 0, false, sidecar);
+    external[QStringLiteral("language")] = QStringLiteral("fre");
+    const QVariantMap forExternal = MpvTrackList::historyEntryForTrack(external);
+    // -1 rather than the external track's ff-index of 0, which counts within the
+    // sidecar's own file and would name an unrelated embedded stream on reopen.
+    QCOMPARE(forExternal.value(QStringLiteral("streamIndex")).toInt(), -1);
+    QCOMPARE(forExternal.value(QStringLiteral("sidecarPath")).toString(), sidecar);
+    QCOMPARE(forExternal.value(QStringLiteral("language")).toString(),
+             QStringLiteral("fre"));
+
+    // A track with no language tag and no ff-index at all -- mpv reports both as
+    // absent often enough. It must produce a storable entry rather than nothing.
+    QVariantMap bare;
+    bare[QStringLiteral("id")] = 1;
+    bare[QStringLiteral("type")] = QStringLiteral("sub");
+    const QVariantMap forBare = MpvTrackList::historyEntryForTrack(bare);
+    QCOMPARE(forBare.value(QStringLiteral("streamIndex")).toInt(), -1);
+    QVERIFY(forBare.value(QStringLiteral("sidecarPath")).toString().isEmpty());
+    QVERIFY(forBare.value(QStringLiteral("language")).toString().isEmpty());
+
+    // And what the two halves have to agree on: what is stored for a track has
+    // to find that same track again. Round-trip the sidecar through the store's
+    // shape and back into the browser's numbering.
+    const QVariantList browserTracks = {
+        makeBrowserTrack(3, QStringLiteral("jpn")),
+        makeBrowserTrack(0, QStringLiteral("fre"), true, sidecar),
+    };
+    QCOMPARE(MpvTrackList::preferredTrackIndex(browserTracks, forExternal, QString()), 1);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(browserTracks, forEmbedded, QString()), 0);
 }
 
 QTEST_MAIN(TstMpvTracks)
