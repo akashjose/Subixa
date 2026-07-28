@@ -398,6 +398,17 @@ ApplicationWindow {
         // and a shrug. The order is kept rather than sorted: someone who names
         // three files in a particular order meant that order.
         playlist.setFiles(paths)
+        // setFiles is where a queue is filtered, so several files that are none
+        // of them media leave nothing behind and openFile would return without a
+        // word. Saying so here, because opening something and having nothing
+        // happen at all looks like the window missed it. Worded for all three
+        // callers -- a drop, the file dialog and the command line -- rather than
+        // for the drop alone. One bad file needs no guard: it goes to mpv, which
+        // reports what it could not open.
+        if (playlist.currentPath === "") {
+            root.notify("Nothing playable in those files", "error")
+            return
+        }
         root.openFile(playlist.currentPath)
     }
 
@@ -1290,15 +1301,29 @@ ApplicationWindow {
                     // two sees the event first. The panel scrolls as it did:
                     // this is bounded by the picture.
                     WheelHandler {
+                        id: volumeWheel
+
+                        // A mouse notch is 120 units, but a trackpad and a
+                        // high-resolution mouse send a stream of much smaller
+                        // deltas instead. Stepping once per event would turn a
+                        // single flick into forty steps and slam the volume to
+                        // one end, so the deltas are accumulated and spent a
+                        // notch at a time.
+                        property real pending: 0
+
                         onWheel: (event) => {
-                            // A sideways scroll on a trackpad reports no
-                            // vertical movement; without this it would read as
-                            // a turn downwards and quietly lower the volume.
-                            if (event.angleDelta.y === 0)
+                            volumeWheel.pending += event.angleDelta.y
+                            // Truncated toward zero, so a half-notch of scroll
+                            // is held rather than rounded into a step nobody
+                            // asked for. This is also what makes a sideways
+                            // scroll harmless: it contributes no vertical
+                            // movement, so it can never reach a whole notch on
+                            // its own and be read as a turn downwards.
+                            var notches = Math.trunc(volumeWheel.pending / 120)
+                            if (notches === 0)
                                 return
-                            mpv.setVolume(mpv.volume + (event.angleDelta.y > 0
-                                                        ? prefs.volumeStep
-                                                        : -prefs.volumeStep))
+                            volumeWheel.pending -= notches * 120
+                            mpv.setVolume(mpv.volume + notches * prefs.volumeStep)
                             root.osd(Math.round(mpv.volume) + "%")
                         }
                     }
