@@ -1,179 +1,193 @@
 # Where the project is, and what is next
 
-> Where the project stands as of the most recent milestone, and the work that follows.
+> Where the project stands, and the work that follows.
 > Split out of `CLAUDE.md`, which is the entry point and links here.
+
+## How much of this document to trust
+
+This file was rewritten on 2026-07-29 after a ten-agent audit checked every claim
+in it against the tree and found **nineteen that were wrong** — items listed as
+outstanding that had already landed, counted figures that no longer matched, and
+one item asking for work that already existed in `MpvTrackList.h` with tests. It
+had drifted because it was written from memory rather than from the code.
+
+So: the numbers below were measured on the day of writing, and the ones that go
+stale fastest — line counts, version numbers, "there is no X" — are the ones to
+re-check rather than repeat. If you are about to quote a figure from here into a
+commit message or a plan, run the command first.
 
 ## State
 
-Milestones 1–4 (extraction, browser UI, player usability, caching and settings)
-and **milestone 5** are all committed. Milestone 5 was the pre-release pass: it
-came out of two reviews, one architectural and one of the interface, and touched
-most of the tree.
+Milestones 1–5 are committed, and so is the work that followed on the
+`windows-build` branch: a Windows build under MSYS2 UCRT64, the fixes an ordinary
+Linux desktop turned up that WSL had hidden (traps 24 and 25), and the mouse work
+— folder drops, Esc to minimise, wheel volume, right-click menu.
 
-What it changed, briefly:
+Since then, eight commits changed the ground the rest of this document stands on.
 
-- **Correctness.** Playback split out of the scene-graph item into `MpvEngine`,
-  so teardown runs in the order libmpv requires. Exact, millisecond-formatted
-  seeks — `QString::number(double)` is six significant digits, so clicking a cue
-  three hours into a film landed 123 ms off. Bounded cue-cache counts. Shared
-  entity decoding, so a cue's styled and plain text can no longer disagree.
-  Explicit `textFormat` everywhere, closing an `AutoText` path where a track
-  title out of a container could have made the player fetch an `<img src>`.
-- **The interface.** A design system with measured contrast, a control library
-  replacing the Basic style (which was never selected, and so drew every button
-  in the app), vector icons, a two-row transport, a rebuilt subtitle row, and a
-  settings window that did not previously exist.
-- **Features.** Subtitle delay applied to the browser's timestamps as well as
-  the picture, sync-to-this-line, per-cue seek, A-B loop, cue copy, screenshots,
-  audio delay, picture adjustments, an OSD, a queue popover, remappable keys.
-- **Release plumbing.** GPL-3.0-or-later, install rules, a desktop entry, an
-  icon, and the rename from the MVP's *custom media player* to **Subixa** —
-  carried through the CMake project, the binary, the desktop entry, the
-  `SUBIXA_*` environment switches and, since, the repository directory itself.
+**The dependency stack moved to current releases and is now built from source.**
+Linux was on Qt 6.9.3, FFmpeg 6.1.1 and mpv 0.37 — a 2023 stack — while the
+Windows side, which rolls, was already on FFmpeg 8 and Qt 6.11. Those were two
+platforms decoding subtitles with decoders two majors apart, which is trap 5
+waiting to happen *across* a build rather than within one. No distribution can
+close that: Ubuntu 24.04's apt candidate for `libavcodec-dev` is the installed
+6.1.1 and there is no upgrade. `tools/build-deps.sh` builds libplacebo 7.360.1,
+FFmpeg 8.1.2 and mpv 0.41.0 from pinned versions into a prefix, and
+`-DSUBIXA_DEPS_PREFIX=` points CMake at it.
 
-Verified against the real 3 GB / 65-track film, not just the fixtures: 93 350
-cues in 10.0 s cold and 33 ms cached, click-to-seek landing on the clicked line
-with the picture to match, and the track picker that replaces a 65-tab strip.
+| | |
+|---|---|
+| Qt | 6.12.0 |
+| FFmpeg | 8.1.2 (`libavcodec` 62.28.102) |
+| mpv | 0.41.0, client API 2.5.0 |
+| libplacebo | 7.360.1 |
+| Compiler | gcc 14.2, C++23, no extensions |
 
-Six suites pass, the render canary passes, and a from-scratch build is clean
-under `-Wall -Wextra`.
+Two consequences worth knowing. mpv 0.41 makes libplacebo's `gpu-next` the
+default renderer, so that bump changed the render path under the most delicate
+code in the project — the FBO handling trap 10 is about — and it has been
+exercised by hand but not by a test. And **the Windows build cannot configure
+until MSYS2 reaches Qt 6.12**, because the floor was raised deliberately.
 
-## Since milestone 5
+**The test suite stopped lying.** Three suites — about 2,080 lines of assertions
+— called `QSKIP` when fixtures were absent, and `QSKIP` exits 0, so a checkout
+that had never run `make-fixtures.sh` reported six green having asserted almost
+nothing. `REQUIRED_FILES` now fails those suites instead, `make-fixtures.sh`
+generates the base clip rather than printing the command for it, and the seven
+`QSKIP`s are `QVERIFY2`.
 
-Work on the `windows-build` branch, not a milestone of its own. Three strands.
+A first attempt at that fix made it worse and is worth remembering:
+`SKIP_REGULAR_EXPRESSION` was added as a "backstop", and because it matches a
+test's whole output rather than its exit status, a run that printed the phrase
+*and* failed an assertion *and* exited 1 was reported `***Skipped` with ctest
+exiting 0. It reopened the exact defect it was meant to close. Measured, then
+deleted.
 
-- **A Windows build exists.** MSYS2 UCRT64, gcc rather than MSVC, all six suites
-  passing, and a deployable payload of roughly 170 DLLs and 300 MB. `README.md`
-  has the toolchain, the configure line and the deployment sequence; what the
-  port turned up is in `docs/graphics.md`. Item 5 below is what remains.
-- **It runs on an ordinary Linux desktop.** Installed on Ubuntu rather than run
-  under WSL, three things broke that WSL had hidden: `mpv_create` returns null
-  under any `LC_NUMERIC` but `C`, gdk-pixbuf sniffs only a file's first kilobyte
-  for `<svg` so the icon was blank wherever GNOME drew one, and nothing tied a
-  running window to `subixa.desktop` without `setDesktopFileName`. Traps 24 and
-  25.
-- **The window answers the mouse.** A drop takes folders now, expanded by
-  `Playlist::expand` — depth-bounded, files before subfolders, symlinked
-  directories skipped, and filtered in `setFiles` rather than in the walk so one
-  unplayable file still reports mpv's error. Esc minimises outside fullscreen and
-  stops a film but not an album, which needed mpv's albumart flag carried through
-  `MpvEngine` so a tagged mp3 stops reading as a film. The wheel over the picture
-  is volume, accumulating deltas and spending them a notch at a time so a
-  trackpad's stream of small deltas is not forty steps. A right-click opens the
-  same overflow menu object the transport button opens. That last one exposed a
-  defect the shared components had all along: a `Menu` never consults its rows
-  for its width, so every row longer than the background's fixed 220 overflowed,
-  and `AppMenuItem` measured itself through `AppText`'s Loader and reported zero.
+**There is a conformance corpus.** `git ls-files testdata/` used to return four
+files; every container was muxed at test time by whatever ffmpeg was installed,
+so a Linux run and a Windows run each decoded inputs they had produced
+themselves. `testdata/conformance/` is 35 KB committed as bytes, and
+`golden.tsv` pins what the extractor makes of it, cue by cue. It is the only
+mechanism in the tree by which "both platforms agree" is evidence rather than
+coincidence.
+
+**The application id exists**: `com.akashjose.Subixa`, keying the desktop entry,
+the icon and any future AppStream or Flatpak metadata. `StartupWMClass` stays
+`subixa` and the difference is deliberate — measured with `xprop`, X11 takes
+`WM_CLASS` from `applicationName` while only Wayland uses the desktop file name.
+
+Seven suites pass, warning-free under `-Wall -Wextra` on every target.
 
 ## Next
 
-In rough order of value.
+In rough order of value. **None of items 1–6 from the previous version of this
+file has been completed** — the work above sits underneath them rather than
+through them.
 
-1. **CI and packaging.** There is a `LICENSE`, install rules, a `.desktop` entry
-   and an icon, but no CI, no AppImage or Flatpak, and no `metainfo.xml`.
-   Flatpak is the right primary Linux target: FFmpeg and libmpv versions are the
-   biggest portability variable and the runtime pins them. Minimum viable CI is
-   an Ubuntu matrix running `ctest`, plus a sanitizer job — `-fsanitize=address`
-   would have caught the render-context lifetime bug directly. Packaging now has
-   two targets rather than one: the Windows deployment sequence in `README.md` is
-   the other half, and it is a sequence of commands rather than a script.
+1. **The subtitle track defect.** `syncPanelToSubtitleTrack` (`qml/Main.qml:631`)
+   moves the panel's tab but never updates `currentTrack` (`:303`), so choosing a
+   track from the transport menu leaves the browser listing the previous track's
+   cues and export keying off the stale one. It is a live bug in the feature the
+   product exists for, and it is small. *In flight.*
 
-2. **One settings service.** Three independent `QSettings` writers remain (the
-   QML `Settings` objects, `PlaybackHistory`, `ShortcutRegistry`) with no schema,
-   no migration hook, and `PlaybackHistory::remember` calling `sync()` on a
-   five-second timer, which rewrites the whole file including whatever the QML
-   `Settings` objects are buffering.
+2. **CI, and then packaging.** Still no CI anywhere — no `.github`, no
+   `metainfo.xml`, no AppImage, Flatpak or `.deb`. This ranks above the
+   engineering items because everything below is verified by "ctest passes", and
+   until a machine runs ctest that sentence depends on someone remembering to.
+   Budget for the part nobody accounts for: a runner has to build the media stack
+   from source via `tools/build-deps.sh` and fetch Qt via `aqtinstall`, so the
+   prefix must be cached or every push costs twenty minutes.
 
-3. **Drain `Main.qml`.** Still around 1 300 lines. The two-namespace subtitle
-   track reconciliation is the most intricate logic in the product, it is untyped
-   JavaScript, and its only coverage is one integration test. It belongs in C++
-   beside `MpvTrackList.h`.
+3. **Per-style defaults and native `.ass` parsing.** The styling the browser
+   renders comes only from the *override tags* in each cue; an ASS file's
+   `[V4+ Styles]` table never reaches the extractor, so a track styled entirely
+   that way reads plain in the list and italic on the picture. The two halves of a
+   subtitle-reader's screen visibly disagree, and no fixture catches it. The
+   header is already in memory — `avctx->subtitle_header` after
+   `avcodec_open2` — and the same pass gets the Name/Actor field, which is a
+   strong browser column. Bump `SubtitleCache::kFormatVersion` with it (trap 14).
 
-4. **The search proxy.** Filtering is still a linear scan over every cue per
-   keystroke, on the GUI thread, coalesced by a 150 ms timer. The fix is
-   incremental narrowing: when the new pattern extends the old one, only
-   currently-accepted rows can still match, which makes every keystroke after the
-   first O(matches). `QSortFilterProxyModel` cannot express that, so it means a
-   small custom proxy.
+4. **One settings service.** Five independent writers land in one file with no
+   schema and no version key: `PlaybackHistory` and `ShortcutRegistry` each hold
+   a `QSettings`, `GraphicsSetup.cpp:132` constructs one on the stack, and
+   `qml/Main.qml` has two `Settings` blocks (`:68`, `:134`). `PlaybackHistory`
+   also calls `sync()` on a five-second timer, which for a two-hour film is ~1440
+   full rewrites of a file that only grows. The trap: that sync is currently the
+   *only* mid-session flush the QML groups get, so removing it without replacing
+   it drops preference durability to exit-only. *In flight.*
 
-5. **Finish the Windows build.** It exists — MSYS2 UCRT64, gcc rather than MSVC,
-   all six suites passing, and a deployable payload; `README.md` has the steps
-   and `docs/graphics.md` what the port turned up. The thesis argued for it: the
-   product is "PotPlayer's subtitle list, done properly", and PotPlayer's users
-   are on Windows. What remains before it is a target rather than a build:
+5. **Drain `Main.qml`.** 1,502 lines, not the 1,300 the previous version of this
+   file claimed — and it was already 1,502 in the commit that wrote that line.
+   The two-namespace track reconciliation is the most intricate logic in the
+   product and is untyped JavaScript. Note that half of it already exists in C++:
+   `subtitleIdForStream`, `subtitleIdForFile`, `sameFile` and `isSelected` are in
+   `src/MpvTrackList.h` with coverage in `tests/tst_mpvtracks.cpp`. What remains
+   is the browser-namespace half and the arbitration between them.
 
-   - **A non-ASCII path broke subtitle extraction** — `QFile::encodeName` is the
-     local codepage there, and `avformat_open_input` refuses what it produces.
-     Found by measurement rather than suspected, and fixed: the call site now
-     passes `toUtf8()`, with a regression test that was checked against a
-     reverted build. See `docs/graphics.md`.
-   - **Nothing is packaged.** Deployment is a documented sequence of commands,
-     not a script; there is no installer and nothing is signed. The sequence at
-     least works off the PATH now — trying it that way found `windeployqt6`
-     exiting 0 having staged nothing, because it looks for `qmlimportscanner`
-     beside itself and MSYS2 ships it in `share/qt6/bin`, and then a bundle that
-     would not start, because MSYS2 puts the qml tree under `share/qt6` and
-     relocation preserves that offset while `windeployqt` stages to `qml/`. A
-     `qt.conf` reconciles them. Verified with `PATH` cut to `system32`, which is
-     MSYS2 off the PATH on this machine and still weaker than a clean one. Folds
-     into item 1.
-   - **The reason for building it is still unmeasured**: hwdec, 4K/HEVC and HDR
-     were what WSL could not judge, and none of them have been judged yet.
-   - It does sidestep trap 22, as predicted — Mesa's D3D12 driver exists only
-     for WSL — though `AppText` still chooses at runtime, so no QML changes.
+6. **The search proxy.** Filtering is a linear scan over every cue, on the GUI
+   thread. Measure before building: the payoff the previous version claimed —
+   "every keystroke after the first is O(matches)" — targets a case that
+   `qml/SubtitlePanel.qml`'s 150 ms debounce already caps, so keystrokes never
+   reach the proxy. The expensive scan is the first one, which incremental
+   narrowing cannot help. The real cost may be that `invalidateRowsFilter`
+   re-tests every rejected row and emits `countChanged` once per contiguous run.
 
-6. **Per-style defaults and native `.ass` parsing.** The styling rendered comes
-   from the *override tags* in each cue; an ASS file's `[V4+ Styles]` table never
-   reaches the extractor, so a track styled entirely that way reads plain in the
-   list and italic on the picture. Native parsing would also give the Name/Actor
-   field, which is a strong browser column, and make `.ass` round-trip export
-   possible.
+7. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then: nothing
+   is packaged, deployment is a documented command sequence rather than a script,
+   and nothing is signed. Azure Trusted Signing at about $10/month is the only
+   certificate option that works headless in CI — OV certificates have needed a
+   hardware token since June 2023. The reason the port was argued for is still
+   unmeasured: 4K, HEVC and HDR have not been judged. `hwdec` is no longer among
+   them — it resolves to `d3d11va-copy` on Windows and `vaapi-copy` on this Linux
+   host.
 
 ## Loose ends
 
 Worth folding into whatever touches them next.
 
-- **Trap 22 has no upstream fix and no bug report.** Reproduced on Mesa 26.1.5,
-  the current release. The report was written off deliberately, not forgotten.
-  The reproducer is twelve lines of QML against Qt's own `qml` binary if it is
-  ever wanted.
-- **`PaintedText` has no test.** It is a `Text` replacement with its own metrics,
-  wrapping, eliding and `QTextDocument` path, and nothing asserts it agrees with
-  the native item. A headless comparison of `contentWidth`/`contentHeight`
-  between the two would be cheap, and would catch a layout regression that a
-  screenshot on a healthy driver never would.
-- **The canary cannot run itself.** It needs a window and the Windows-side
-  capture, so it is a tool rather than a `ctest` case, and nothing makes anyone
-  run it. An in-process `grabWindow()` could not replace it — trap 10 records
-  `toImage()` returning a *perfect* frame while the screen was wrong.
-- **`hostileCacheCountsAreRefused` pins behaviour, not the allocation.** Removing
-  the bound and re-running leaves every case passing, because the read loop then
-  fails on the next record and reports the same miss one enormous `reserve()`
-  later. Making that observable needs a memory-limited run or an allocation hook.
-- **The FBO cap's threshold is a guess**, if a conservative one. `FboCap::SafeArea`
-  is 2.0 MP, chosen below the observed boundary (2.86 MP clean, 2.99 MP corrupt)
-  rather than at it, because the failure depends on render load as well as area.
-  Nobody has mapped whether the real variable is area, height, or something else.
-- **Path identity is `absoluteFilePath`**, which does not resolve symlinks or
-  `..`, in `PlaybackHistory`, `SubtitleCache`, `Playlist` and `MpvTrackList`. The
-  same film reached through a symlink gets two cache entries and two resume
-  positions, which a user experiences as "it forgot where I was". One
-  `canonicalFilePath` helper, four call sites.
+- **`canonicalFilePath` appears zero times in the tree.** Path identity is
+  `absoluteFilePath`, which resolves neither symlinks nor `..`, across
+  `PlaybackHistory`, `SubtitleCache`, `Playlist` and `MpvTrackList`. The same
+  film reached through a symlink gets two cache entries and two resume positions,
+  which a user experiences as "it forgot where I was". A naive swap is worse than
+  the bug: `canonicalFilePath` returns empty for a path that does not exist, so
+  every missing file would hash to the same key and collapse onto one entry.
 - **`SubtitleExtractor` has no ffmpeg interrupt callback**, so
-  `avformat_open_input` on a stalled network or 9p mount can block indefinitely,
-  and `~SubtitleManager` waits on the thread unbounded — so the app will not exit.
-- **No `qsTr()` anywhere, and no accessibility.** Both get harder the longer they
-  wait, and for a *reading* tool the second is more relevant than usual.
-- **Menus have no maximum width.** `AppMenu.fitToContents` sizes a menu to its
-  widest row, which fixed rows overflowing their background but leaves a
-  pathologically long track name producing a very wide menu instead of an
-  overlapping one. Better, not right.
-- **Prev/next are invisible with one file in the folder.** Correct behaviour, but
-  it reads as broken; they should be visible and disabled instead. Still true:
-  `TransportBar.showQueue` gates `visible` on `playlist.count > 1`, and the
-  buttons already carry the `enabled` binding the fix wants.
-- **The QML harness cannot see anything that needs pixels.** It runs `offscreen`,
-  so delegate geometry, the FBO cap and whether the panel actually *scrolled* are
-  outside it. Everything visual in milestone 5 was checked by screenshot instead,
-  which is why the layout traps (17–21) were each found once by eye rather than
-  caught by a test.
+  `avformat_open_input`, `find_stream_info` and `av_read_frame` are all unbounded
+  on a stalled network or 9p mount, and `~SubtitleManager` waits on the thread —
+  so the application will not exit. The code and a FIFO-based test are
+  straightforward; proving it against a genuinely stalled mount is not.
+- **`PaintedText` has no test**, and neither does `GraphicsSetup` (175 lines, in
+  no test target) or `MpvEngine` (894 lines, no suite of its own).
+- **The canary cannot run on a machine that is not WSL.** It is registered as a
+  `DISABLED`, `RUN_SERIAL`, `manual` ctest so it has a name, but it shells to
+  `powershell.exe` and `tools/wsl-screenshot.ps1`. On X11 its three checks —
+  painting, moving, right clip — are a few lines with `import` and two captures a
+  second apart. Nothing has been written.
+- **The QML harness runs `offscreen`**, so delegate geometry, the FBO cap and
+  whether the panel actually *scrolled* are outside it. Both cheap substitutes
+  are ruled out in writing: Xvfb returns byte-identical captures a second apart,
+  and trap 10 records `toImage()` returning a perfect frame while the screen was
+  wrong. This is why traps 17–22 were each found by eye.
+- **`hostileCacheCountsAreRefused` pins behaviour, not the allocation.** Removing
+  the bound leaves every case passing, because the read loop then fails on the
+  next record one enormous `reserve()` later.
+- **The FBO cap's threshold is a guess.** `FboCap::SafeArea` is 2.0 MP, chosen
+  below the observed boundary (2.86 MP clean, 2.99 MP corrupt) rather than at it.
+  Nobody has mapped whether the real variable is area, height or render load.
+- **`docs/traps.md` records no platform for any of its 25 entries**, and several
+  read as universal that are not — 1, 20 and 22 are WSLg-only, 9 and 10 are
+  software-rasterizer-only, 24 and 25 came off an ordinary Ubuntu desktop. One is
+  openly unresolved (around line 143). Adding a scope line to each is cheap and
+  would have saved time already.
+- **No `qsTr()` anywhere, and no accessibility.** Zero files. Both get harder the
+  longer they wait, and for a *reading* tool the second is more relevant than
+  usual. Note `SubtitleManager.cpp` builds `"%1 track%2, %3 line%4%5"` by
+  appending an English `s`, which a translator cannot reorder.
+- **`AppMenu.fitToContents` has no maximum**, so a pathologically long track name
+  produces a very wide menu instead of an overlapping one. Better, not right.
+- **Trap 22 has no upstream bug report.** Written off deliberately. The
+  reproducer is twelve lines of QML against Qt's own `qml` binary.
+- **Nothing is pushed.** The branch of record is `feature/finish_all_milestones`;
+  `master` sits at `721ebb6` with none of the Windows work, the UTF-8 path fix or
+  anything above.
