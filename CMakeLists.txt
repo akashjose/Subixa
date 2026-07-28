@@ -25,12 +25,12 @@ set(SUBIXA_QT_COMPONENTS Core Gui Quick Qml QuickControls2 OpenGL Svg)
 if(SUBIXA_BUILD_TESTS)
     list(APPEND SUBIXA_QT_COMPONENTS Test)
 endif()
-# 6.9 is the floor the code actually needs, not the 6.5 this used to claim: trap
-# 15 turns on `font.family` being the only spelling, and trap 20 on Menu
-# defaulting to a native popup. The target is the current 6.11 -- which the MSYS2
-# side already builds against -- but the floor stays where the tree is known to
-# compile, so raising it is a deliberate step rather than a surprise.
-find_package(Qt6 6.9 REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
+# The floor is the current release, not the oldest thing that happens to
+# compile. Nothing has shipped yet, so there is no installed base to carry, and
+# a floor that tracks the release lets the tree use the current spelling of an
+# API rather than the deprecated one -- QSortFilterProxyModel's begin/end
+# FilterChange pair being the first case. The MSYS2 side moves with it.
+find_package(Qt6 6.12 REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
 
 # ---- libmpv and FFmpeg --------------------------------------------------
 # Subtitle text is demuxed and decoded directly rather than read from mpv: mpv

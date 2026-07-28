@@ -28,7 +28,11 @@ namespace {
 void touch(const QString &path)
 {
     QFile file(path);
-    file.open(QIODevice::WriteOnly);
+    // Qt 6.12 marks open() nodiscard. A fixture that cannot be created is not a
+    // test failure to be reported later -- every case after it would be
+    // meaningless -- so it stops here.
+    if (!file.open(QIODevice::WriteOnly))
+        qFatal("cannot create test fixture %s", qPrintable(path));
     file.write("x");
 }
 

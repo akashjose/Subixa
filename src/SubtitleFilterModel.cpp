@@ -69,9 +69,11 @@ void SubtitleFilterModel::setPattern(const QString &pattern)
         m_needle.append(folded.toCaseFolded());
     }
 
-    // Rows only, not sort order: nothing here sorts, and invalidate() would
-    // redo that work on every keystroke.
-    invalidateRowsFilter();
+    // Rows only, not sort order: nothing here sorts, and endFilterChange with
+    // Direction::Both would redo that work on every keystroke. This replaces
+    // invalidateRowsFilter(), which Qt 6.12 deprecates.
+    beginFilterChange();
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
     emit patternChanged();
     emit countChanged();
 }
