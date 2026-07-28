@@ -4,8 +4,11 @@
 cmake_minimum_required(VERSION 3.21)
 project(subixa VERSION 0.5.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# No compiler extensions: -std=c++23 rather than -std=gnu++23, so what builds
+# under gcc here builds under the MSYS2 UCRT64 toolchain too.
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(SUBIXA_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
@@ -22,7 +25,12 @@ set(SUBIXA_QT_COMPONENTS Core Gui Quick Qml QuickControls2 OpenGL Svg)
 if(SUBIXA_BUILD_TESTS)
     list(APPEND SUBIXA_QT_COMPONENTS Test)
 endif()
-find_package(Qt6 6.5 REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
+# 6.9 is the floor the code actually needs, not the 6.5 this used to claim: trap
+# 15 turns on `font.family` being the only spelling, and trap 20 on Menu
+# defaulting to a native popup. The target is the current 6.11 -- which the MSYS2
+# side already builds against -- but the floor stays where the tree is known to
+# compile, so raising it is a deliberate step rather than a surprise.
+find_package(Qt6 6.9 REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
 
 # ---- libmpv and FFmpeg --------------------------------------------------
 # Subtitle text is demuxed and decoded directly rather than read from mpv: mpv
