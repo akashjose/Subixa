@@ -1,0 +1,68 @@
+# Extractor output over testdata/conformance/, asserted byte-identical.
+# Regenerate with tools/regold.sh; never edit by hand.
+#
+# updated : 2026-07-28T19:32:44Z
+# commit  : 381fbe1
+# reason  : initial corpus: FFmpeg 8.1.2, mpv 0.41.0
+# built against: libavcodec 62.28.102, mpv client API 2.5, Qt 6.12.0
+FILE	basic.mkv	tracks=3
+TRACK	basic.mkv	0	eng	English SRT	subrip	text	embedded	lines=2
+CUE	basic.mkv	0	0	100	1000	First line
+CUE	basic.mkv	0	1	1200	2000	Second line
+TRACK	basic.mkv	1	jpn	Styled ASS	ass	text	embedded	lines=2
+CUE	basic.mkv	1	0	100	1000	Plain then italic back
+CUE	basic.mkv	1	1	1200	2000	Coloured and \nbroken
+TRACK	basic.mkv	2	fre	French SRT	subrip	text	embedded	lines=1
+CUE	basic.mkv	2	0	100	1000	Premiere ligne
+FILE	entities.mkv	tracks=1
+TRACK	entities.mkv	0	eng		subrip	text	embedded	lines=3
+CUE	entities.mkv	0	0	100	1000	Tom & Jerry
+CUE	entities.mkv	0	1	1200	2000	It's 'quoted'
+CUE	entities.mkv	0	2	2200	3000	<not a tag>
+FILE	drawing.mkv	tracks=1
+TRACK	drawing.mkv	0	eng		ass	text	embedded	lines=1
+CUE	drawing.mkv	0	0	1200	2000	Real text after a shape
+FILE	shifted.mkv	tracks=3
+TRACK	shifted.mkv	0	eng	English SRT	subrip	text	embedded	lines=2
+CUE	shifted.mkv	0	0	100	1000	First line
+CUE	shifted.mkv	0	1	1200	2000	Second line
+TRACK	shifted.mkv	1	jpn	Styled ASS	ass	text	embedded	lines=2
+CUE	shifted.mkv	1	0	100	1000	Plain then italic back
+CUE	shifted.mkv	1	1	1200	2000	Coloured and \nbroken
+TRACK	shifted.mkv	2	fre	French SRT	subrip	text	embedded	lines=1
+CUE	shifted.mkv	2	0	100	1000	Premiere ligne
+FILE	noshift.mp4	tracks=1
+TRACK	noshift.mp4	0	eng		mov_text	text	embedded	lines=2
+CUE	noshift.mp4	0	0	100	1000	First line
+CUE	noshift.mp4	0	1	1200	2000	Second line
+FILE	manytracks.mkv	tracks=8
+TRACK	manytracks.mkv	0	eng	Track 1	subrip	text	embedded	lines=2
+CUE	manytracks.mkv	0	0	100	1000	First line
+CUE	manytracks.mkv	0	1	1200	2000	Second line
+TRACK	manytracks.mkv	1	fre	Track 2	subrip	text	embedded	lines=2
+CUE	manytracks.mkv	1	0	100	1000	First line
+CUE	manytracks.mkv	1	1	1200	2000	Second line
+TRACK	manytracks.mkv	2	deu	Track 3	subrip	text	embedded	lines=2
+CUE	manytracks.mkv	2	0	100	1000	First line
+CUE	manytracks.mkv	2	1	1200	2000	Second line
+TRACK	manytracks.mkv	3	spa	Track 4	subrip	text	embedded	lines=2
+CUE	manytracks.mkv	3	0	100	1000	First line
+CUE	manytracks.mkv	3	1	1200	2000	Second line
+TRACK	manytracks.mkv	4	ita	Track 5	subrip	text	embedded	lines=2
+CUE	manytracks.mkv	4	0	100	1000	First line
+CUE	manytracks.mkv	4	1	1200	2000	Second line
+TRACK	manytracks.mkv	5	jpn	Track 6	subrip	text	embedded	lines=2
+CUE	manytracks.mkv	5	0	100	1000	First line
+CUE	manytracks.mkv	5	1	1200	2000	Second line
+TRACK	manytracks.mkv	6	kor	Track 7	subrip	text	embedded	lines=2
+CUE	manytracks.mkv	6	0	100	1000	First line
+CUE	manytracks.mkv	6	1	1200	2000	Second line
+TRACK	manytracks.mkv	7	zho	Track 8	subrip	text	embedded	lines=2
+CUE	manytracks.mkv	7	0	100	1000	First line
+CUE	manytracks.mkv	7	1	1200	2000	Second line
+FILE	sidecar.mp4	tracks=2
+TRACK	sidecar.mp4	0	fr	sidecar.fr.srt	subrip	text	sidecar	lines=1
+CUE	sidecar.mp4	0	0	100	1000	Premiere ligne
+TRACK	sidecar.mp4	1		sidecar.srt	subrip	text	sidecar	lines=2
+CUE	sidecar.mp4	1	0	100	1000	First line
+CUE	sidecar.mp4	1	1	1200	2000	Second line
