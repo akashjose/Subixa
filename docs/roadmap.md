@@ -160,6 +160,20 @@ one is partly done (the settings item, item 3) and the rest are untouched.
 
 Worth folding into whatever touches them next.
 
+- **Resume should be optional, and it is not.** Reopening a film always returns
+  you to where you stopped, and some people do not want that — a rewatch, a
+  shared machine, or simply a preference. The policy already exists and is
+  conservative (a clip under two minutes, the first thirty seconds and the last
+  minute are never remembered, and finishing clears the position), so this is a
+  switch in Settings -> Playback over machinery that is already there rather than
+  new behaviour. Worth deciding whether "off" means *do not restore* or *do not
+  record*, because the second also disables remembering which subtitle track was
+  being read, and on a 65-track film that is the more valuable half.
+  Note the write cadence changed in `f800e8c`: the position is now held in memory
+  and written once it has moved `PositionWriteStep` (30 s), so a crash loses up
+  to thirty seconds of it rather than five. Accepted deliberately; the constant is
+  named and commented if it wants lowering.
+
 - **`canonicalFilePath` appears zero times in the tree.** Path identity is
   `absoluteFilePath`, which resolves neither symlinks nor `..`, across
   `PlaybackHistory`, `SubtitleCache`, `Playlist` and `MpvTrackList`. The same
