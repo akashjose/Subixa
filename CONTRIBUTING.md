@@ -86,10 +86,13 @@ Don't hard-wrap mid-sentence; break at sentence boundaries.
 
 ## What is most useful right now
 
-[`docs/roadmap.md`](docs/roadmap.md) is ordered by value and honest about what is
-blocked. The top of it is pushing, so that the CI workflow — written, but never
-executed, because nothing has been pushed — runs for the first time; packaging
-comes next, and does not exist in any format yet.
+0.5.0 is feature complete, so the useful work is release engineering rather than
+features. [`docs/roadmap.md`](docs/roadmap.md) is ordered by value and honest
+about what is blocked. The top of it is pushing, so that the CI workflow —
+written, but never executed, because nothing has been pushed — runs for the
+first time; packaging comes next, AppImage first, and does not exist in any
+format yet; after those, the release hardening in the roadmap's loose ends,
+none of which is a feature either.
 
 Things that need a human rather than a patch: anything requiring a screenshot to
 judge, anything on Windows, and the 4K/HEVC/HDR measurements that the Windows

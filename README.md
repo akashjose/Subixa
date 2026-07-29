@@ -15,9 +15,11 @@ follows playback, and clicking any row seeks there.*
 
 > [!IMPORTANT]
 > Subixa is pre-release (0.5.0) and there are no downloads yet — no installer,
-> no AppImage, no `.deb`, no Flatpak, no packages of any kind. Building from
-> source is currently the only way to run it, and on Linux that means building
-> three media libraries first.
+> no AppImage, no `.deb`, no Flatpak, no packages of any kind. The features are
+> finished; what stands between this and a release is release engineering —
+> packaging, and CI that has run somewhere other than the development machine.
+> Building from source is currently the only way to run it, and on Linux that
+> means building three media libraries first.
 
 ## Why this exists
 
@@ -38,7 +40,10 @@ not a base.
 - One tab per subtitle track, or a picker when a file has too many for tabs
 - Every line as a timestamped row, with full-text search across the track
 - The subtitler's own italics, bold and speaker colours rendered rather than
-  stripped
+  stripped — read from the ASS styles table as well as the override tags, so
+  the browser and the picture agree
+- Speaker names above their lines, screenplay-style, on the rows whose ASS
+  Name field carries one
 - Click a row to seek there; auto-follow highlights the current line and keeps
   it in view
 - Search-hit navigation, which stays usable on a 200,000-cue track
@@ -123,10 +128,13 @@ cmake --build build
 ./build/subixa /path/to/video.mkv
 ```
 
-`cmake --install build` puts the binary, the desktop entry, the icon and the
-AppStream metainfo under the application id `com.akashjose.Subixa` where a
-distribution package expects them. There is no CPack configuration and nothing
-is signed.
+On Linux, `tools/install-linux.sh` does the build and the install in one
+command — a Release tree, then `cmake --install`, asking for sudo only when
+the prefix needs it. The install writes real rpaths, so the installed binary
+finds Qt and the media stack with no environment set, and it puts the binary,
+the desktop entry, the icon and the AppStream metainfo under the application
+id `com.akashjose.Subixa` where a distribution package expects them. There is
+no CPack configuration and nothing is signed.
 
 ## Tests
 

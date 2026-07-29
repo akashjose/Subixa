@@ -17,8 +17,9 @@ cd build && ctest --output-on-failure     # or run ./build/tst_subtitles directl
 ```
 
 Ten headless suites, none needing a compositor or a rendered frame —
-deliberately, because a screenshot is the least reliable evidence available here
-(see the degraded-state note below). An eleventh ctest entry, `rendercanary`, is
+deliberately, because on the WSL leg a screenshot is the least reliable evidence
+available (see the degraded-state note below), and a suite that needs no window
+runs the same on every platform. An eleventh ctest entry, `rendercanary`, is
 registered `DISABLED` under the `manual` label so it has a name without ever
 running in a headless batch. Run these before reaching for the UI.
 
@@ -157,8 +158,12 @@ keep the optimised `QString::contains()` path.
 
 ## The render canary
 
-The one thing the suites above cannot see is whether a picture appeared. That is
-also the thing this environment lies about most, so it has its own tool:
+The one thing the suites above cannot see is whether a picture appeared. Under
+WSLg that is also the thing the environment lies about most, so the WSL leg has
+its own tool — and it is WSL tooling through and through: it grabs its frames
+via `wsl-screenshot.ps1`, and on any other host it exits at once with *cannot
+reach the Windows side*. The X11 equivalent — `import`, two captures a second
+apart — is a few lines nobody has written yet; the roadmap carries it.
 
 ```bash
 ./tools/render-canary.sh                 # testclip.mp4, the right clip for it
@@ -224,6 +229,11 @@ pixel test that runs under Xvfb will report failures that are not there, which a
 rules Xvfb out for the QQuickTest harness idea below as far as video pixels go.
 
 ## Seeing the UI from WSL
+
+Everything from here down is the WSL leg's operating manual — on the native host
+a plain `import -window` capture is trustworthy and none of it applies. It stays
+because WSL is a supported target, and because every paragraph in it was paid
+for.
 
 WSLg windows are Wayland surfaces and do **not** show up in an XWayland root grab
 (`ffmpeg -f x11grab -i :0.0` comes back black, with or without `QT_QPA_PLATFORM=xcb`).
@@ -293,23 +303,24 @@ is the likely mechanism, which is consistent with fills, shapes and video all be
 
 Neither `QQuickWindow::setTextRenderType(QtTextRendering)` nor
 `QFont::NoSubpixelAntialias` fixes it; both are set anyway because both are right
-independently. **The only known workaround is to avoid the driver: `SUBIXA_NO_GPU=1` renders
-the UI correctly.**
-
-That leaves a genuine trade, unresolved at the time of writing, and it should be settled
-before release because it decides whether the product's central feature is legible:
+independently. When this was found, the only workaround was to avoid the driver
+(`SUBIXA_NO_GPU=1`), which was a genuine trade, because it decided whether the product's
+central feature was legible:
 
 | | UI text | video |
 |---|---|---|
 | D3D12 | destroyed | 10-bit native, any window size |
 | llvmpipe | correct | capped to 1280x720 by `FboCap`, ~800% CPU on 720p |
 
-The shape of the fix is to extend `GraphicsSetup`'s existing child-process probe — it
-already re-runs the binary to check `GL_RENDERER` — so it also samples a single-channel
-texture and rejects a driver that gets it wrong, with an override in Settings.
+That trade has since been dissolved rather than taken: `PaintedText` draws glyphs through
+QPainter into an ordinary texture, which the driver colours correctly, and `AppText`
+switches to it at runtime when the real `GL_RENDERER` is the one that lies — with an
+override in Settings — so D3D12 keeps its video and the text survives it. The
+single-channel-texture probe this file once sketched was never needed.
 
-Consequence for screenshots meanwhile: **verify colours on rectangles, never on glyphs**,
-and check which driver the run used before reading anything into text colour.
+Consequence for screenshots on this driver: **verify colours on rectangles, never on bare
+`Text` glyphs**, and check which driver the run used before reading anything into text
+colour.
 
 Two things to know before believing a black window:
 
