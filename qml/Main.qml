@@ -109,6 +109,15 @@ ApplicationWindow {
         // decision to watch, and a player that begins the moment it reappears is
         // the more startling of the two defaults. Pressing play is one key.
         property bool resumeOnRestore: false
+        // The two halves of per-file memory, independent on purpose: finishing
+        // a film clears its position and must not also forget which of
+        // sixty-five tracks this household reads -- PlaybackHistory keeps them
+        // in separate groups for exactly this reason. Off gates only the
+        // restore; the history keeps being written, so switching one back on
+        // remembers everything, including the period it was off. Both default
+        // on, which is the behaviour the player has always had.
+        property bool resumeWhereLeftOff: true
+        property bool rememberSubtitleTrack: true
         property int seekStep: 5
         property int seekStepLarge: 10
         property int volumeStep: 5
@@ -280,8 +289,17 @@ ApplicationWindow {
         // file, else the language last chosen anywhere, else the first browsable
         // one. What the store knows is passed in rather than looked up there, so
         // neither of these two objects has to know about the other.
+        //
+        // The per-file toggle empties the map rather than skipping the
+        // assignment: preferredTrackIndex must still run so the tab gets the
+        // language-fallback-or-first default instead of inheriting the
+        // previous film's index. The language fallback stays active in both
+        // states -- the toggle says "per file", and the language carrying
+        // forward is a preference, not history.
         onLoaded: panelUi.tabIndex =
-            subs.preferredTrackIndex(history.subtitleFor(root.currentFile),
+            subs.preferredTrackIndex(prefs.rememberSubtitleTrack
+                                         ? history.subtitleFor(root.currentFile)
+                                         : ({}),
                                      history.preferredLanguage())
     }
 
@@ -387,7 +405,11 @@ ApplicationWindow {
         // Save where the outgoing file got to before its position is gone.
         root.rememberPosition()
         root.currentFile = path
-        root.pendingResume = history.resumeFor(path)
+        // The stored position is looked up only when resuming is wanted; the
+        // store itself keeps recording either way, so the toggle is a choice
+        // about behaviour rather than about what is remembered.
+        root.pendingResume =
+            prefs.resumeWhereLeftOff ? history.resumeFor(path) : -1
 
         // A file already in the queue keeps it -- that is a playlist advance, or
         // someone reopening a file they dropped. Anything else starts a new

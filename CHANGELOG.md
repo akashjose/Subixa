@@ -8,6 +8,15 @@ Nothing has been released, so there are no version tags to organise this by.
 
 ## Unreleased — since milestone 5
 
+**The settings file has one owner, and resume is a choice.** `SettingsService`
+holds the schema version, migrates old files, and prunes per-file entries — a
+year unwatched or past the newest 500 per group. The other writers borrow its
+store instead of opening their own. On top of it, two independent toggles under
+Settings → Playback: *Resume where you left off* and *Remember the subtitle
+track per file* — separate because finishing a film clears its position and
+must not forget the track. Off gates only the restore; the history keeps being
+written, so switching back on remembers everything.
+
 **CI, and the first packaging metadata.** `.github/workflows/ci.yml` runs three
 jobs: freedesktop metadata validation, an Ubuntu 24.04 Debug/Release matrix that
 builds the media stack from source — the prefix cached on a hash of

@@ -132,21 +132,28 @@ Windows box, or a decision rather than an afternoon.
    the media-stack rpath (`CMAKE_BUILD_RPATH` only), which whichever format goes
    first has to solve.
 
-2. **One settings service.** Five independent writers land in one file with no
-   schema and no version key: `PlaybackHistory` and `ShortcutRegistry` each hold
-   a `QSettings`, `GraphicsSetup.cpp:132` constructs one on the stack, and
-   `qml/Main.qml` has two `Settings` blocks (`:68`, `:134`).
+2. **One settings service — done, 2026-07-29.** `src/SettingsService` owns the
+   file: `meta/schemaVersion`, migration, and pruning of the per-file entries
+   (a year unwatched or past the newest 500 per group, aged by a `lastUsed`
+   stamp; entries predating the stamp are stamped rather than dropped, and a
+   file written by a *newer* schema is left entirely alone). `GraphicsSetup`
+   takes the store as a parameter; `PlaybackHistory` and `ShortcutRegistry`
+   borrow it through `instance()` with an owned fallback. The two QML
+   `Settings` blocks stay, deliberately: `QQmlSettings` self-syncs fine on Qt
+   6.12 (measured, see below), migration runs in `main()` before the QML
+   engine exists so no stale copy can write pre-migration data back, and
+   converting ~44 properties to Q_PROPERTY boilerplate would buy compile-time
+   names at the cost of recreating the trap-19 injection surface. What full
+   consolidation would still buy is recorded here in case that trade ever
+   flips.
 
-   `PlaybackHistory`'s half of this landed in `f800e8c`: it holds the position
-   in memory and writes only once it has moved `PositionWriteStep`, instead of
-   handing every tick to `QSettings`. **The trap this file used to record here
-   was not real** — it claimed that timer was the only mid-session flush the QML
-   `Settings` groups got, so removing it would drop their durability to
-   exit-only. On Qt 6.12 `QQmlSettings` has its own write timer and `QSettings`
-   syncs itself from the event loop, so a group reaches disk about a second
-   after a change with nobody calling `sync()`. Measured against this Qt in a
-   standalone program, not assumed. What remains is the consolidation: one
-   service, a schema version key, and pruning.
+   `PlaybackHistory`'s write-cadence half landed earlier, in `f800e8c`: the
+   position is held in memory and written only once it has moved
+   `PositionWriteStep`. **The trap this file used to record here was not
+   real** — it claimed that timer was the only mid-session flush the QML
+   `Settings` groups got. On Qt 6.12 `QQmlSettings` has its own write timer
+   and `QSettings` syncs itself from the event loop; measured against this Qt
+   in a standalone program, not assumed.
 
 3. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then:
    nothing is packaged, deployment is scripted (`tools/deploy-win.sh`) but the
@@ -163,33 +170,22 @@ Windows box, or a decision rather than an afternoon.
 
 Worth folding into whatever touches them next.
 
-- **Resume should be optional, and it is not.** Reopening a film always returns
-  you to where you stopped, and some people do not want that — a rewatch, a
-  shared machine, or simply a preference. The policy already exists and is
-  conservative (a clip under two minutes, the first thirty seconds and the last
-  minute are never remembered, and finishing clears the position), so this is a
-  switch over machinery that is already there rather than new behaviour.
+- **Resume is a choice now — done, 2026-07-29.** The two toggles sit under
+  Settings → Playback exactly as decided: *Resume where you left off* and
+  *Remember the subtitle track per file*, independent because finishing a film
+  clears the position and must not forget which track this household reads.
+  Off gates only the restore — the history keeps being written, so switching
+  back on remembers everything, chosen so that turning resume off never breaks
+  finish-clears-the-position bookkeeping. The subtitle gate empties the map
+  rather than skipping the assignment, so the tab still gets the
+  language-fallback-or-first default instead of inheriting the previous film's
+  index; the language fallback stays active in both states, because the
+  language carrying forward is a preference, not history. Both paths carry
+  qmlpanel regression tests, mutation-checked to fail without the gates.
 
-  **Two toggles, not one**, and they are independent by decision:
-
-  | Settings → Playback | |
-  |---|---|
-  | *Resume where you left off* | the position |
-  | *Remember the subtitle track per file* | which track was being read |
-
-  Collapsing them into one switch would be the easy reading and the wrong one.
-  `PlaybackHistory` already keeps the two in **separate groups** — `[resume]` and
-  `[subtitle]` — precisely because finishing a film clears the position and must
-  *not* forget that this household reads the Latin American Spanish track, which
-  `tests/tst_playbackhistory.cpp` already asserts. Someone who does not want the
-  player deciding where to start a film usually still wants it to stop asking
-  which of sixty-five tracks they read, and on that film the second is the more
-  valuable half.
-
-  Note the write cadence changed in `f800e8c`: the position is now held in memory
-  and written once it has moved `PositionWriteStep` (30 s), so a crash loses up
-  to thirty seconds of it rather than five. Accepted deliberately; the constant is
-  named and commented if it wants lowering.
+  Note the write cadence from `f800e8c` stands: a crash loses up to thirty
+  seconds of position (`PositionWriteStep`), named and commented if it wants
+  lowering.
 
 - **`canonicalFilePath` appears zero times in the tree.** Path identity is
   `absoluteFilePath`, which resolves neither symlinks nor `..`, across

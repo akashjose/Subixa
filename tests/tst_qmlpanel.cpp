@@ -68,6 +68,8 @@ private slots:
     void openingAFileQueuesItsFolder();
     void aDroppedSetBecomesTheQueue();
     void remembersTheTrackPerFile();
+    void resumeToggleOffIgnoresAStoredPosition();
+    void subtitleToggleOffOpensOnTheDefaultTrack();
     void detachingKeepsTheViewState();
     void themeReachesBothWindows();
 
@@ -490,6 +492,86 @@ void TstQmlPanel::remembersTheTrackPerFile()
     QCOMPARE(named(m_root, "lineList")->property("count").toInt(), 3);
     // And the tab has to follow the content. A panel showing one track with
     // another tab lit is worse than not remembering at all.
+    QTRY_COMPARE(named(m_root, "trackTabs")->property("currentIndex").toInt(), 2);
+}
+
+void TstQmlPanel::resumeToggleOffIgnoresAStoredPosition()
+{
+    QObject *history = named(m_root, "playbackHistory");
+    QVERIFY(history);
+
+    // An hour into a feature-length film: a position the policy keeps.
+    const QString path = QFileInfo(fixture(QStringLiteral("subs.mkv")))
+                             .absoluteFilePath();
+    QVERIFY(QMetaObject::invokeMethod(history, "remember", Q_ARG(QString, path),
+                                      Q_ARG(double, 3600.0),
+                                      Q_ARG(double, 8634.0)));
+    QVERIFY(QMetaObject::invokeMethod(history, "flush"));
+
+    // Second launch, with resuming switched off.
+    cleanup();
+    QVERIFY(startApp());
+    QObject *prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("resumeWhereLeftOff", false));
+
+    // pendingResume is set in openFile() and, under offscreen, never consumed
+    // -- no render context means mpv loads nothing (trap 2) -- which is
+    // exactly what leaves it observable here.
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QCOMPARE(m_root->property("pendingResume").toDouble(), -1.0);
+
+    // Third launch, switched back on: the position was kept the whole time.
+    // The toggle gates the restore, not the memory.
+    cleanup();
+    QVERIFY(startApp());
+    prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("resumeWhereLeftOff", true));
+
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QCOMPARE(m_root->property("pendingResume").toDouble(), 3600.0);
+}
+
+void TstQmlPanel::subtitleToggleOffOpensOnTheDefaultTrack()
+{
+    QObject *history = named(m_root, "playbackHistory");
+    QVERIFY(history);
+
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    const QString path = QFileInfo(fixture(QStringLiteral("subs.mkv")))
+                             .absoluteFilePath();
+    // The French track, stream index 4 -- but with no language recorded, so
+    // the preferred-language fallback stays empty and cannot answer for the
+    // per-file entry. That separation is what makes the toggle observable:
+    // with a language stored, the fallback would reopen the same track and
+    // off would look identical to on.
+    QVERIFY(QMetaObject::invokeMethod(history, "rememberSubtitle",
+                                      Q_ARG(QString, path), Q_ARG(int, 4),
+                                      Q_ARG(QString, QString()),
+                                      Q_ARG(QString, QString())));
+
+    // Second launch, with the per-file memory switched off: the panel opens on
+    // the first browsable track, exactly as it would for a file never seen.
+    cleanup();
+    QVERIFY(startApp());
+    QObject *prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("rememberSubtitleTrack", false));
+
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QCOMPARE(m_root->property("currentTrack").toInt(), 0);
+    QTRY_COMPARE(named(m_root, "trackTabs")->property("currentIndex").toInt(), 0);
+
+    // Third launch, switched back on: the entry survived the off period.
+    cleanup();
+    QVERIFY(startApp());
+    prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("rememberSubtitleTrack", true));
+
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QCOMPARE(m_root->property("currentTrack").toInt(), 2);
     QTRY_COMPARE(named(m_root, "trackTabs")->property("currentIndex").toInt(), 2);
 }
 

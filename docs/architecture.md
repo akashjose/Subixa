@@ -186,7 +186,16 @@ being bound. The tab index is the awkward one, and trap 13 explains why it is re
 `populated` rather than in `Component.onCompleted`.
 
 **What is remembered, and where.** Two stores, one file
-(`~/.config/subixa/subixa.conf`):
+(`~/.config/subixa/subixa.conf`), and since 2026-07-29 the file has one owner:
+`SettingsService`, constructed on `main()`'s stack before anything reads it. It
+holds the schema version (`meta/schemaVersion`), migrates on upgrade, and
+prunes the per-file entries — a year unwatched, or past the newest 500 per
+group, aged by a `lastUsed` stamp. `GraphicsSetup` takes its store as a
+parameter; `PlaybackHistory` and `ShortcutRegistry` borrow it through
+`instance()`, falling back to owning one when no service exists (which is how
+their test suites run them). The QML `Settings` blocks stay declarative on
+purpose — migration has finished before the QML engine exists, which is what
+makes that safe.
 
 - *Per application*, through the QML `Settings` type (`import QtCore`) in the `[ui]` group:
   window geometry and maximised state, panel width, visible, detached, the detached
@@ -206,6 +215,12 @@ A new file with no entry of its own falls back to the language last chosen anywh
 to the first browsable track. Only an explicit choice is remembered — a tab click or the
 transport's Subs menu — never what the sync handlers do, or mpv's default would overwrite
 the reader's track on every open.
+
+Both restores are optional: *Resume where you left off* and *Remember the subtitle track
+per file*, under Settings → Playback, independent because finishing a film clears its
+position and must not forget the track. Off gates only the restore — recording continues,
+so nothing is lost to the period a toggle was off, and finish-clears-the-position keeps
+working either way.
 
 **The browser shows the subtitler's own styling** (`SubtitleStyle`). `rawText` was kept per
 cue from the start for this: italics, bold and speaker colours carry meaning, and the list

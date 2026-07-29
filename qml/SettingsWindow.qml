@@ -180,6 +180,32 @@ Window {
                     }
 
                     FormRow {
+                        label: "Resume where you left off"
+                        help: "Reopening a film returns you to where you "
+                              + "stopped. Positions are still kept while this "
+                              + "is off — the player just stops jumping to them."
+                        AppSwitch {
+                            checked: win.prefs.resumeWhereLeftOff
+                            onToggled: win.prefs.resumeWhereLeftOff = checked
+                        }
+                    }
+
+                    // Deliberately its own switch, not folded into the one
+                    // above: someone who does not want the player deciding
+                    // where a film starts usually still wants it to stop
+                    // asking which of sixty-five tracks they read.
+                    FormRow {
+                        label: "Remember the subtitle track per file"
+                        help: "Reopen a film on the track you were reading. "
+                              + "Your reading language still carries over to "
+                              + "new files either way."
+                        AppSwitch {
+                            checked: win.prefs.rememberSubtitleTrack
+                            onToggled: win.prefs.rememberSubtitleTrack = checked
+                        }
+                    }
+
+                    FormRow {
                         label: "Pause when the window is minimised"
                         help: "Only films. Music keeps playing, since minimising "
                               + "is how an album is put on in the background."

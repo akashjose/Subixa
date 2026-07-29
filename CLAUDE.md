@@ -104,6 +104,7 @@ src/PaintedText.{h,cpp}       text via QPainter, for drivers that miscolour glyp
 src/ShortcutRegistry.{h,cpp}  every keyboard action, its default, any rebinding
 src/Subtitle*.{h,cpp}         extraction, caching, models, styling, search
 src/PlaybackHistory.{h,cpp}   per-file resume positions and remembered tracks
+src/SettingsService.{h,cpp}   the settings file's owner: version, migration, pruning
 src/Playlist.{h,cpp}          what plays next: the folder as a queue
 src/GraphicsSetup.{h,cpp}     picks a GL driver before Qt makes a context
 qml/Main.qml                  the window: services, actions, layout, file lifecycle
