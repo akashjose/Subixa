@@ -128,6 +128,10 @@ ApplicationWindow {
         // Browser behaviour
         property bool showEndTime: false
         property bool showCueDuration: false
+        // On by default, unlike the QC readouts above: who is speaking is
+        // reading material, not tooling, and it costs nothing on the tracks
+        // (most of them) that carry no names.
+        property bool showActors: true
         property bool followOffOnScroll: true
     }
 
@@ -1074,6 +1078,7 @@ ApplicationWindow {
             subtitleDelay: root.mpv.subtitleDelay
             showEndTime: root.prefsStore.showEndTime
             showCueDuration: root.prefsStore.showCueDuration
+            showActors: root.prefsStore.showActors
             followOffOnScroll: root.prefsStore.followOffOnScroll
             onSeekRequested: (seconds) => root.mpv.seek(seconds)
             onTrackActivated: (index) => root.selectTrack(index)

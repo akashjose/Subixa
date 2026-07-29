@@ -90,8 +90,12 @@ tags inside each cue, so a track styled entirely through named styles — how mo
 professionally authored ASS is written — read plain in the panel while libass
 rendered it italic and coloured on the picture. `avctx->subtitle_header` was
 already in memory and nothing read it. The cache format went 2 → 3 with the
-record layout (trap 14), and the actor name is now retained, which is the column
-the browser has not yet grown.
+record layout (trap 14), and the actor name is retained — and, as of
+2026-07-29, shown: a speaker overline above the cue text, screenplay-style,
+only on rows that name one, toggleable on the Browser settings page and pinned
+by a qmlpanel test against the committed `styletable.mkv`. Search still
+matches the cue text only; whether it should also match the speaker is an open
+question for when someone actually wants it.
 
 That change also exposed a hole in the corpus and closed it. `golden.tsv`
 recorded only the tag-stripped plain text, in which a cue styled through its

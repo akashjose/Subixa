@@ -35,6 +35,8 @@
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
+#include <functional>
+
 namespace {
 
 QString fixture(const QString &name)
@@ -70,6 +72,7 @@ private slots:
     void remembersTheTrackPerFile();
     void resumeToggleOffIgnoresAStoredPosition();
     void subtitleToggleOffOpensOnTheDefaultTrack();
+    void speakerNamesShowWhenTheTrackCarriesThem();
     void detachingKeepsTheViewState();
     void themeReachesBothWindows();
 
@@ -577,6 +580,48 @@ void TstQmlPanel::subtitleToggleOffOpensOnTheDefaultTrack()
     QVERIFY(openFixture(QStringLiteral("subs.mkv")));
     QCOMPARE(m_root->property("currentTrack").toInt(), 2);
     QTRY_COMPARE(named(m_root, "trackTabs")->property("currentIndex").toInt(), 2);
+}
+
+void TstQmlPanel::speakerNamesShowWhenTheTrackCarriesThem()
+{
+    // The conformance fixture styled entirely through its tables is also the
+    // one whose Dialogue lines carry the ASS Name field -- "Narrator" on the
+    // first cue. Committed bytes, so this cannot drift with the local ffmpeg.
+    QVERIFY(openFixture(QStringLiteral("conformance/styletable.mkv")));
+
+    // The label is an overline above the cue text, uppercased, and only on
+    // rows whose cue names a speaker. Collected by walking the *item* tree:
+    // delegates are incubated without a QObject parent, so findChildren from
+    // the root never reaches them -- measured, not assumed.
+    std::function<void(QQuickItem *, QStringList &)> collect =
+        [&collect](QQuickItem *item, QStringList &out) {
+            for (QQuickItem *child : item->childItems()) {
+                if (child->objectName() == QLatin1String("actorLabel")
+                    && child->isVisible()) {
+                    out << child->property("text").toString();
+                }
+                collect(child, out);
+            }
+        };
+    auto visibleActorTexts = [this, &collect]() {
+        QStringList texts;
+        if (auto *list = qobject_cast<QQuickItem *>(named(m_root, "lineList")))
+            collect(list, texts);
+        return texts;
+    };
+
+    QTRY_VERIFY(visibleActorTexts().contains(QStringLiteral("NARRATOR")));
+
+    // The toggle removes them without touching the rows.
+    QObject *prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("showActors", false));
+    QTRY_VERIFY(visibleActorTexts().isEmpty());
+
+    // And a track that never names a speaker shows no labels with it back on.
+    QVERIFY(prefs->setProperty("showActors", true));
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QTRY_VERIFY(visibleActorTexts().isEmpty());
 }
 
 void TstQmlPanel::detachingKeepsTheViewState()

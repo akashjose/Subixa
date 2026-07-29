@@ -42,7 +42,14 @@ T.ItemDelegate {
     property bool wide: true
     property bool showEndTime: false
     property bool showCueDuration: false
+    property bool showActors: true
     property int delayMs: 0
+
+    // The ASS Name field: who speaks this line. Empty on most tracks -- SRT
+    // and VTT do not have the field at all -- so the label below costs nothing
+    // unless the subtitler wrote names. Guarded with ?? because a delegate can
+    // outlive its model during a track switch.
+    readonly property string actor: row.model.actor ?? ""
 
     signal seekRequested(int ms)
     signal copyRequested(bool withTimestamp)
@@ -166,24 +173,56 @@ T.ItemDelegate {
                 opacity: 0.6
             }
 
-            AppText {
+            Column {
                 width: parent.width - x
-                leftPadding: Theme.space.lg
-                rightPadding: Theme.space.lg
-                color: row.current ? Theme.color.textPrimary : Theme.color.textSecondary
-                font.family: Theme.type.sans
-                font.pixelSize: Theme.rowFontSize
-                lineHeight: Theme.type.cueLine
-                wrapMode: Text.WordWrap
-                // StyledText renders the subtitler's own italics, bold and
-                // speaker colours; PlainText is the escape hatch for a track
-                // that overuses them. Either way it is `text` that search
-                // matches, so the two cannot disagree about which rows show.
-                textFormat: Theme.showStyling ? Text.StyledText : Text.PlainText
-                text: Theme.showStyling ? row.model.styled : row.model.text
+                spacing: 1
 
-                Behavior on color {
-                    ColorAnimation { duration: Theme.motion.cueFade }
+                // The speaker, above the line the way a screenplay sets it.
+                // An overline rather than a column: a second column would
+                // spend width on every track for a field most tracks leave
+                // empty, and would break the straight left edge the eye scans.
+                AppText {
+                    objectName: "actorLabel"
+                    visible: row.showActors && row.actor !== ""
+                    width: parent.width
+                    leftPadding: Theme.space.lg
+                    rightPadding: Theme.space.lg
+                    // One wrapped line, not elide: elide plus padding inside
+                    // AppText's anchors-filled Loader is an implicitWidth
+                    // binding loop. A pathological name truncates without an
+                    // ellipsis, which is the cheaper imperfection.
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 1
+                    // Uppercased for the screenplay register, and because it
+                    // keeps the label from reading as the first word of the
+                    // cue. A no-op for scripts without case.
+                    text: row.actor.toUpperCase()
+                    textFormat: Text.PlainText
+                    color: Theme.color.textTertiary
+                    font.family: Theme.type.sans
+                    font.pixelSize: Theme.type.overlineSize
+                    font.weight: Theme.type.weightMedium
+                }
+
+                AppText {
+                    width: parent.width
+                    leftPadding: Theme.space.lg
+                    rightPadding: Theme.space.lg
+                    color: row.current ? Theme.color.textPrimary : Theme.color.textSecondary
+                    font.family: Theme.type.sans
+                    font.pixelSize: Theme.rowFontSize
+                    lineHeight: Theme.type.cueLine
+                    wrapMode: Text.WordWrap
+                    // StyledText renders the subtitler's own italics, bold and
+                    // speaker colours; PlainText is the escape hatch for a track
+                    // that overuses them. Either way it is `text` that search
+                    // matches, so the two cannot disagree about which rows show.
+                    textFormat: Theme.showStyling ? Text.StyledText : Text.PlainText
+                    text: Theme.showStyling ? row.model.styled : row.model.text
+
+                    Behavior on color {
+                        ColorAnimation { duration: Theme.motion.cueFade }
+                    }
                 }
             }
         }
@@ -205,6 +244,19 @@ T.ItemDelegate {
                 color: row.current ? Theme.color.timestampCurrent : Theme.color.timestamp
                 font.family: Theme.type.mono
                 font.pixelSize: Math.max(9, Theme.rowFontSize - 3)
+            }
+
+            AppText {
+                visible: row.showActors && row.actor !== ""
+                width: parent.width
+                wrapMode: Text.Wrap
+                maximumLineCount: 1
+                text: row.actor.toUpperCase()
+                textFormat: Text.PlainText
+                color: Theme.color.textTertiary
+                font.family: Theme.type.sans
+                font.pixelSize: Theme.type.overlineSize
+                font.weight: Theme.type.weightMedium
             }
 
             AppText {

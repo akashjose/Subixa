@@ -544,6 +544,17 @@ Window {
                     }
 
                     FormRow {
+                        label: "Show speaker names"
+                        help: "ASS tracks can name who speaks each line. "
+                              + "Shown above the line, only when the track "
+                              + "carries names."
+                        AppSwitch {
+                            checked: win.prefs.showActors
+                            onToggled: win.prefs.showActors = checked
+                        }
+                    }
+
+                    FormRow {
                         label: "Show cue duration"
                         help: "Adds each line's length, flagged amber above 21 "
                               + "characters a second — faster than most people read."

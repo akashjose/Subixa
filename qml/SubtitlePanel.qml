@@ -37,6 +37,7 @@ Rectangle {
     property real subtitleDelay: 0
     property bool showEndTime: false
     property bool showCueDuration: false
+    property bool showActors: true
     property bool followOffOnScroll: true
 
     signal seekRequested(real seconds)
@@ -592,6 +593,7 @@ Rectangle {
                     current: index === panel.currentRow
                     showEndTime: panel.showEndTime
                     showCueDuration: panel.showCueDuration
+                    showActors: panel.showActors
                     delayMs: Math.round(panel.subtitleDelay * 1000)
                     onSeekRequested: (ms) => panel.seekRequested(ms / 1000)
                     onCopyRequested: (withStamp) => panel.copyRow(index, withStamp)

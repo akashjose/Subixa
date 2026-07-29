@@ -8,6 +8,13 @@ Nothing has been released, so there are no version tags to organise this by.
 
 ## Unreleased — since milestone 5
 
+**The browser names the speaker.** ASS tracks carry a Name field per line —
+who speaks it — and the extractor had kept it since the styles-table work
+without the browser showing it. It is now an overline above the cue text,
+screenplay-style, uppercased, only on rows that name a speaker, and toggleable
+under Settings → Browser. Tracks without names — every SRT and VTT — look
+exactly as before.
+
 **Two small corrections.** The About card now prints the running Qt's version
 through `qVersion()` — `Qt.application.version` is the application's own, so it
 said "Built on Qt 0.5.0", plausibly enough that nobody noticed. And every entry
