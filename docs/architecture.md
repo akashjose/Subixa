@@ -35,8 +35,10 @@ library can move what the browser shows.
 ```
 src/MpvEngine.{h,cpp}         playback: owns mpv_handle, every property and command
 src/MpvVideoItem.{h,cpp}      the video surface: owns only the render context and the FBO
+src/PaintedText.{h,cpp}       text via QPainter, for drivers that miscolour glyphs
 src/main.cpp                  OpenGL RHI, the Basic style, the engine, and argv parsing
 src/GraphicsSetup.{h,cpp}     picks a GL driver before Qt makes a context, probing first
+src/SettingsService.{h,cpp}   the settings file's owner: schema version, migration, pruning
 src/ShortcutRegistry.{h,cpp}  every keyboard action, its default, and any rebinding
 src/SubtitleTypes.h           SubtitleLine / SubtitleTrack plain structs
 src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker thread
@@ -46,7 +48,7 @@ src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed trac
 src/SubtitleLineModel.{h,cpp} QAbstractListModel over one track's cues
 src/SubtitleStyle.{h,cpp}     ASS override tags -> markup the browser can show
 src/SubtitleFilterModel.{h,cpp} search proxy, the row mapping auto-follow needs, the delay
-src/PlaybackHistory.{h,cpp}   per-file resume positions in QSettings, and their policy
+src/PlaybackHistory.{h,cpp}   per-file resume positions and remembered tracks, on SettingsService's store
 src/Playlist.{h,cpp}          what plays next: the folder as a queue, in natural order
 src/FboCap.h                  how large a framebuffer to give mpv on a software rasterizer
 src/MpvTrackList.h            maps browser tracks onto mpv's, header-only so it is testable
@@ -145,7 +147,7 @@ subtitle row delegate does exactly that.
 No files, no icon font, no decode, and tinting is one colour property rather than a colorize
 pass — which matters because this app runs on a software rasterizer often enough that an
 extra pass per icon is real. Note that `QtQuick.Shapes` has **no public CMake package** in
-Qt 6.9 (only `Qt6QuickShapesPrivate`); a dynamically linked build resolves the QML plugin at
+Qt 6.9 (only `Qt6QuickShapesPrivate`; unverified against 6.12); a dynamically linked build resolves the QML plugin at
 runtime with no link-time dependency, and a future static build will need the private module
 plus `qt_import_qml_plugins`.
 

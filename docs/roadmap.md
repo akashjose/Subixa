@@ -66,13 +66,13 @@ deleted.
 **There is a conformance corpus.** `git ls-files testdata/` used to return four
 files; every container was muxed at test time by whatever ffmpeg was installed,
 so a Linux run and a Windows run each decoded inputs they had produced
-themselves. `testdata/conformance/` is 35 KB committed as bytes, and
+themselves. `testdata/conformance/` is 47 KB committed as bytes, and
 `golden.tsv` pins what the extractor makes of it, cue by cue. It is the only
 mechanism in the tree by which "both platforms agree" is evidence rather than
 coincidence.
 
 **The application id exists**: `com.akashjose.Subixa`, keying the desktop entry,
-the icon and any future AppStream or Flatpak metadata. `StartupWMClass` stays
+the icon, the AppStream metainfo and any future Flatpak metadata. `StartupWMClass` stays
 `subixa` and the difference is deliberate — measured with `xprop`, X11 takes
 `WM_CLASS` from `applicationName` while only Wayland uses the desktop file name.
 
@@ -110,14 +110,14 @@ were not touched.
 3.7% and worth stating as such: the value is that the most intricate logic in the
 product now has a compiler and 20 cases in `tst_mpvtracks`, not the line count.
 
-Nine suites pass, warning-free under `-Wall -Wextra` on every target.
+Ten suites pass, warning-free under `-Wall -Wextra` on every target.
 
 ## Next
 
-In rough order of value. Three of the six this file listed on 2026-07-29 have
-landed — the ASS styles table, the search proxy and the `Main.qml` drain — and
-the settings item is half done. What is left is mostly what needs a machine, a
-Windows box, or a decision rather than an afternoon.
+In rough order of value. Four of the six this file listed on 2026-07-29 have
+landed — the ASS styles table, the search proxy, the `Main.qml` drain and the
+settings service. What is left is mostly what needs a machine, a Windows box,
+or a decision rather than an afternoon.
 
 1. **Push, so CI runs; then packaging.** The workflow exists as of 2026-07-29 —
    `.github/workflows/ci.yml`: freedesktop metadata validation, an Ubuntu 24.04
@@ -199,8 +199,8 @@ Worth folding into whatever touches them next.
   on a stalled network or 9p mount, and `~SubtitleManager` waits on the thread —
   so the application will not exit. The code and a FIFO-based test are
   straightforward; proving it against a genuinely stalled mount is not.
-- **`PaintedText` has no test**, and neither does `GraphicsSetup` (175 lines, in
-  no test target) or `MpvEngine` (894 lines, no suite of its own).
+- **`PaintedText` has no test**, and neither does `GraphicsSetup` (174 lines, in
+  no test target) or `MpvEngine` (914 lines, no suite of its own).
 - **The canary cannot run on a machine that is not WSL.** It is registered as a
   `DISABLED`, `RUN_SERIAL`, `manual` ctest so it has a name, but it shells to
   `powershell.exe` and `tools/wsl-screenshot.ps1`. On X11 its three checks —
@@ -218,9 +218,10 @@ Worth folding into whatever touches them next.
   below the observed boundary (2.86 MP clean, 2.99 MP corrupt) rather than at it.
   Nobody has mapped whether the real variable is area, height or render load.
 - **`docs/traps.md` now carries a scope line on all 25 entries** (pass of
-  2026-07-29): 1, 20 and 22 are WSLg-only, 9 and 10 software-rasterizer-only,
-  24 and 25 came off an ordinary Ubuntu desktop, and the Qt/FFmpeg-semantics
-  traps are marked universal. What remains open is trap 10's question — llvmpipe
+  2026-07-29): 20 and 22 are WSLg-only, 1 was found under WSLg but its rule
+  binds everywhere, 9 and 10 are software-rasterizer-only, 24 and 25 came off
+  an ordinary Ubuntu desktop, and the Qt/FFmpeg-semantics traps are marked
+  universal. What remains open is trap 10's question — llvmpipe
   generally, or WSLg? — which still needs llvmpipe on a non-WSLg desktop to
   settle.
 - **No `qsTr()` anywhere, and no accessibility.** Zero files. Both get harder the

@@ -12,11 +12,12 @@ arbitrary sledgehammers until you read why they exist. If you are touching the
 render path, the subtitle extractor or anything in `qml/ui/`, that file will save
 you more time than it takes.
 
-Two warnings about it. It does **not** record which platform each entry applies
-to, and several read as universal that are not — traps 1, 20 and 22 are WSLg
-only, 9 and 10 apply to software rasterizers, 24 and 25 came off an ordinary
-Ubuntu desktop. And one entry is openly unresolved. Check which platform an entry
-belongs to before treating it as a constraint on yours.
+Two warnings about it. Every entry carries a *Scope:* line as of 2026-07-29,
+because several used to read as universal that are not — traps 20 and 22 are
+WSLg only, trap 1 was found under WSLg but its rule binds everywhere, 9 and 10
+apply to software rasterizers, 24 and 25 came off an ordinary Ubuntu desktop.
+And one entry is openly unresolved (trap 10). Check an entry's scope before
+treating it as a constraint on yours.
 
 [`CLAUDE.md`](CLAUDE.md) is the orientation file: architecture, conventions and
 the trap index in one page.
@@ -32,7 +33,7 @@ required FFmpeg.
 cd build && ctest --output-on-failure
 ```
 
-Seven suites must pass. Three of them **fail** rather than skip when fixtures are
+Ten suites must pass. Three of them **fail** rather than skip when fixtures are
 absent — that is deliberate, because a skip exits 0 and the suite used to report
 green having asserted almost nothing.
 
@@ -86,8 +87,9 @@ Don't hard-wrap mid-sentence; break at sentence boundaries.
 ## What is most useful right now
 
 [`docs/roadmap.md`](docs/roadmap.md) is ordered by value and honest about what is
-blocked. The top of it is a live bug in the subtitle browser, and below that CI —
-which does not exist at all, and which everything else is nominally verified by.
+blocked. The top of it is pushing, so that the CI workflow — written, but never
+executed, because nothing has been pushed — runs for the first time; packaging
+comes next, and does not exist in any format yet.
 
 Things that need a human rather than a patch: anything requiring a screenshot to
 judge, anything on Windows, and the 4K/HEVC/HDR measurements that the Windows

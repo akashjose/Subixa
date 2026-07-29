@@ -26,8 +26,9 @@ prints `GL_RENDERER` and exits non-zero if it got a software rasterizer.
 
 The child matters. A forced `GALLIUM_DRIVER` does not fall back — if the driver cannot
 load, context creation simply fails — so the risky attempt happens in a throwaway process
-rather than in the player. The answer is cached in `QSettings`, keyed by kernel version, so
-only the first launch pays for it. `SUBIXA_NO_GPU=1` opts out and stays on software, which is
+rather than in the player. The answer is cached in `QSettings` — the store handed in as a
+parameter, `configure(argc, argv, QSettings &)`, so the settings file keeps one owner —
+keyed by kernel version, so only the first launch pays for it. `SUBIXA_NO_GPU=1` opts out and stays on software, which is
 how to test the workarounds.
 
 Setting `GALLIUM_DRIVER` by hand still works and is honoured as-is:
@@ -74,7 +75,8 @@ without further work. `SUBIXA_HWDEC=<value>` pins it to anything mpv accepts (`n
 
 ## Platform: the development host, and the Windows build
 
-Development stays on WSL, and that is a decision rather than an accident. WSL genuinely
+Development stayed on WSL through the period this file describes, and that was a decision
+rather than an accident — the current host is native Ubuntu 24.04 on X11. WSL genuinely
 cannot test hwdec (software rendering only), GPU decode performance, or the D3D11 RHI
 path. Those matter for shipping, but not for the subtitle browser, which is the reason the
 project exists — so the browser is developed where it is cheapest to develop, and the

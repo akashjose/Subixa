@@ -121,7 +121,7 @@ jobs:
         run: ./testdata/make-fixtures.sh
 
       # No display, no Xvfb: per-test QT_QPA_PLATFORM is already set by CMake
-      # (minimal for eight suites, offscreen for qmlpanel), and rendercanary
+      # (minimal for nine suites, offscreen for qmlpanel), and rendercanary
       # self-excludes as DISABLED. Xvfb is explicitly ruled out in
       # docs/testing.md -- it produces false failures, not coverage.
       - name: Run the test suites

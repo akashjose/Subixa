@@ -8,6 +8,12 @@ Nothing has been released, so there are no version tags to organise this by.
 
 ## Unreleased — since milestone 5
 
+**Two small corrections.** The About card now prints the running Qt's version
+through `qVersion()` — `Qt.application.version` is the application's own, so it
+said "Built on Qt 0.5.0", plausibly enough that nobody noticed. And every entry
+in `docs/traps.md` now carries a platform *Scope:* line, reconstructed from its
+evidence, because several read as universal that are not.
+
 **The settings file has one owner, and resume is a choice.** `SettingsService`
 holds the schema version, migrates old files, and prunes per-file entries — a
 year unwatched or past the newest 500 per group. The other writers borrow its

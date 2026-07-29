@@ -160,7 +160,7 @@ packaging rather than here, and must keep the `png` and `mjpeg` encoders:
   fallback if they go missing.
 - **The test suites build and run unchanged**: `cd build-win && ctest
   --output-on-failure`. Six passed here on 2026-07-26 — a record that predates
-  `tst_conformance`, so it covers six of the current seven. They are left as
+  `tst_conformance`, so it covers six of the current ten. They are left as
   console programs on purpose, since ctest reads their stdout. Two needed
   portability fixes to get there: `tst_qmlpanel` was reaching the developer's
   real registry and profile rather than a temporary one, and `tst_mpvtracks` has

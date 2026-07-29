@@ -136,7 +136,7 @@ asserted almost nothing.
 cd build && ctest --output-on-failure
 ```
 
-Seven suites. `testdata/conformance/` is the exception to the generate-locally
+Ten suites. `testdata/conformance/` is the exception to the generate-locally
 rule and is committed as bytes; see [`testing.md`](testing.md).
 
 ## Installing
@@ -153,6 +153,7 @@ Ninja, so there is no Makefile in the build tree. It installs:
 | `bin/subixa` | the binary |
 | `share/applications/com.akashjose.Subixa.desktop` | the desktop entry |
 | `share/icons/hicolor/scalable/apps/com.akashjose.Subixa.svg` | the icon, renamed to the application id |
+| `share/metainfo/com.akashjose.Subixa.metainfo.xml` | the AppStream metainfo |
 | `share/doc/subixa/LICENSE` | |
 
 There is no CPack configuration, no `.deb`, no AppImage and no Flatpak.

@@ -58,7 +58,8 @@ not a base.
 - Subtitle appearance — font, size, colour, outline, shadow, position —
   adjustable while playing rather than in a config file
 - Remappable keyboard shortcuts and fullscreen
-- Remembers position, subtitle track and layout per file
+- Remembers position, subtitle track and layout per file — the first two
+  optional, as two independent switches in Settings
 - Plays on to the next file in the folder, ordered the way a person would
 
 The browser docks beside the video or detaches into its own window (`Ctrl+D`),
@@ -122,15 +123,17 @@ cmake --build build
 ./build/subixa /path/to/video.mkv
 ```
 
-`cmake --install build` puts the binary, the desktop entry and the icon under
-the application id `com.akashjose.Subixa` where a distribution package expects
-them. There is no CPack configuration and nothing is signed.
+`cmake --install build` puts the binary, the desktop entry, the icon and the
+AppStream metainfo under the application id `com.akashjose.Subixa` where a
+distribution package expects them. There is no CPack configuration and nothing
+is signed.
 
 ## Tests
 
-Seven suites: `subtitles`, `mpvtracks`, `playbackhistory`, `playlist`,
-`shortcuts`, `qmlpanel`, `conformance`. An eighth entry, `rendercanary`, is
-registered `DISABLED` under the `manual` label because it needs a display.
+Ten suites: `subtitles`, `mpvtracks`, `playbackhistory`, `playlist`,
+`shortcuts`, `qmlpanel`, `conformance`, `searchproxy`, `assstyles`,
+`settingsservice`. An eleventh entry, `rendercanary`, is registered `DISABLED`
+under the `manual` label because it needs a display.
 
 Most media fixtures are generated rather than committed, so **a fresh clone must
 build them first** — three suites will fail rather than skip without them, which
@@ -141,7 +144,7 @@ is deliberate:
 cd build && ctest --output-on-failure
 ```
 
-`testdata/conformance/` is the exception: 35 KB committed as bytes, so that every
+`testdata/conformance/` is the exception: 47 KB committed as bytes, so that every
 platform decodes identical input and a golden file can pin what the extractor
 makes of it. See [`docs/testing.md`](docs/testing.md).
 

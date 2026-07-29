@@ -16,9 +16,9 @@ to report every suite green having asserted almost nothing.
 cd build && ctest --output-on-failure     # or run ./build/tst_subtitles directly
 ```
 
-Seven headless suites, none needing a compositor or a rendered frame —
+Ten headless suites, none needing a compositor or a rendered frame —
 deliberately, because a screenshot is the least reliable evidence available here
-(see the degraded-state note below). An eighth ctest entry, `rendercanary`, is
+(see the degraded-state note below). An eleventh ctest entry, `rendercanary`, is
 registered `DISABLED` under the `manual` label so it has a name without ever
 running in a headless batch. Run these before reaching for the UI.
 
@@ -33,6 +33,16 @@ running in a headless batch. Run these before reaching for the UI.
   Sources are compiled into the test target rather than shared via a static
   library: `qt_add_qml_module` registers the QML-exposed types from the sources
   listed in `qt_add_executable`, and moving them out breaks that registration.
+- **`tst_searchproxy`** — what the rebuilt search model *emits*, rather than
+  what it answers. The answers — the seven characterization invokables — stay
+  pinned in `tst_subtitles` and were the specification the rewrite was held to;
+  this suite pins the traffic, which is the half a caller cannot see by asking
+  questions: one `modelReset` per filter change, never a row-level insert or
+  remove, and nothing at all when the accepted rows do not move. Also the edge
+  that would fail silently: a pattern gaining or losing its space flips the
+  hard-space-folding path, and both directions rescan from the source rather
+  than from the survivors. It needs no fixtures and no window — the tracks are
+  built in memory, because what is under test is signal shape, not parsing.
 - **`tst_mpvtracks`** — libmpv directly, `vo=null`. Verifies that selecting a
   track changes what mpv *would* burn over the video, read back as text from
   `sub-text` rather than looked at. `track-list/N/ff-index` is confirmed present,
@@ -42,8 +52,9 @@ running in a headless batch. Run these before reaching for the UI.
   nothing at all (trap 2).
 - **`tst_conformance`** — the only suite whose inputs are bytes in git rather
   than media muxed at test time, which is the whole reason it exists separately.
-  `testdata/conformance/` is 35 KB of containers built from a 32x32 token video
-  stream, and `golden.tsv` records what the extractor made of every cue in them.
+  `testdata/conformance/` is 33 KB of containers (47 KB tracked with the golden
+  and sources) built from a 32x32 token video stream, and `golden.tsv` records
+  what the extractor made of every cue in them.
   Every other fixture is muxed by whatever ffmpeg is installed, so a Linux run
   and a Windows run each decode inputs they produced themselves and their
   agreement proves nothing; this one decodes identical bytes everywhere. A
@@ -59,13 +70,26 @@ running in a headless batch. Run these before reaching for the UI.
   and the reason is recorded in the file. A golden that rewrites itself on failure
   does not test anything: the first person to see a red re-runs with the flag, the
   diff scrolls past, and the regression becomes the expected output.
+- **`tst_assstyles`** — the ASS `[V4+ Styles]` table, from the header to the
+  browser: the `Format:` line deciding which column is which, `&HAABBGGRR`
+  colours read as ABGR rather than RGB, `-1` as true, override tags beating the
+  base style, and a cue naming a style the table lacks reading plain rather
+  than taking another row's. The cases are the ones where a plausible
+  implementation is wrong rather than broken — a swapped colour or an inverted
+  flag produces output that looks fine. One case runs end to end through the
+  committed `styletable.mkv`, and another corrupts a cache entry's version byte
+  to assert a version-2 entry is *refused* rather than read with the version-3
+  layout (trap 14).
 - **`tst_qmlpanel`** — the QML layer, which until now had no harness at all. It
   loads the real `Main.qml` (not a mock) under `QT_QPA_PLATFORM=offscreen` and
   drives it through the object tree: a tab click swaps the model, the search box
   reaches the proxy after its debounce, `currentRow` scrolls the view and stops
   when follow is off, a remembered track is restored on the next open, detaching
   keeps search text and tab, and the theme singleton reaches a panel in either
-  window. Nothing in it asserts a pixel. It needs `offscreen` rather than
+  window. Two newer cases, `resumeToggleOffIgnoresAStoredPosition` and
+  `subtitleToggleOffOpensOnTheDefaultTrack`, pin that switching either restore
+  off gates only the restore — the memory survives the off period and is back
+  the moment the toggle is. Nothing in it asserts a pixel. It needs `offscreen` rather than
   `minimal` — `minimal` has no scene graph, so Loaders never instantiate and the
   panel never exists. It writes into a temporary `XDG_CONFIG_HOME`/`XDG_CACHE_HOME`,
   since the player now remembers things and a test that quietly wrote into the
@@ -103,6 +127,17 @@ running in a headless batch. Run these before reaching for the UI.
   also remembers the subtitle track being read, it covers that the two are kept in
   separate groups: finishing a film clears the position and must *not* forget that
   this household reads the Latin American Spanish track.
+
+- **`tst_settingsservice`** — the settings file's owner, where construction *is*
+  the operation under test: the service migrates and prunes in its constructor,
+  so every case writes a raw ini, constructs a service over it, and asserts on
+  what is left. Mostly the version key (a fresh file gets it, a file written by
+  a *newer* schema is left entirely alone) and the prune's complements — a
+  prune that deletes too much looks identical to one that works until a year of
+  positions disappears, so the assertions are about what must survive it: a
+  legacy entry is stamped rather than dropped, a recent entry keeps its stamp,
+  the preferred language outlives its group's prune, and the preference groups
+  are never touched at all.
 
 `tst_subtitles` also now covers two things that were bugs rather than
 hypotheticals: that a poisoned count in a cache entry reads back as a miss with
