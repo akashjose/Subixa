@@ -216,6 +216,14 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("mpvEngine"), &mpvEngine);
     engine.rootContext()->setContextProperty(QStringLiteral("initialFiles"),
                                              parser.positionalArguments());
+    // The Qt actually loaded, for the About card. QML's own
+    // Qt.application.version is *this application's* version -- the About card
+    // once printed it after the words "Built on Qt", which read plausibly and
+    // was wrong. qVersion() is the runtime answer, which is the one an About
+    // box owes: it names the Qt the user is running, not the one compiled
+    // against.
+    engine.rootContext()->setContextProperty(QStringLiteral("qtRuntimeVersion"),
+                                             QString::fromLatin1(qVersion()));
 
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,

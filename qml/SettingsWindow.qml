@@ -27,6 +27,10 @@ Window {
     required property var prefs
     required property var subStyle
     required property var shortcuts
+    // qVersion() from C++, because QML cannot ask: Qt.application.version is
+    // this application's version, which is how the About card once printed
+    // "Built on Qt 0.5.0" without anyone noticing it was wrong.
+    property string qtVersion: ""
 
     signal subtitleStyleChanged()
     signal textRenderingChanged()
@@ -877,7 +881,7 @@ Window {
                         }
                         AppText {
                             Layout.fillWidth: true
-                            text: "Built on Qt " + Qt.application.version
+                            text: "Built on Qt " + win.qtVersion
                                   + " and libmpv. Graphics: "
                                   + (win.mpv.softwareRendering
                                      ? "software rasterizer" : "hardware GL") + "."

@@ -175,6 +175,10 @@ bool TstQmlPanel::startApp()
     // main.cpp passes the positional arguments this way; empty is "no file yet".
     m_engine->rootContext()->setContextProperty(QStringLiteral("initialFiles"),
                                                 QStringList());
+    // And the Qt version for the About card, so a test that opens the
+    // settings window never meets an undefined name main() would have set.
+    m_engine->rootContext()->setContextProperty(QStringLiteral("qtRuntimeVersion"),
+                                                QString::fromLatin1(qVersion()));
     m_engine->loadFromModule("Subixa", "Main");
 
     if (m_engine->rootObjects().isEmpty()) {

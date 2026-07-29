@@ -1051,6 +1051,7 @@ ApplicationWindow {
             prefs: root.prefsStore
             subStyle: root.subStyleStore
             shortcuts: root.shortcutStore
+            qtVersion: qtRuntimeVersion
             onClosing: settingsLoader.active = false
             onSubtitleStyleChanged: root.applySubtitleStyle()
             onTextRenderingChanged: root.applyTextRendering()
