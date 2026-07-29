@@ -221,11 +221,12 @@ Worth folding into whatever touches them next.
 - **The FBO cap's threshold is a guess.** `FboCap::SafeArea` is 2.0 MP, chosen
   below the observed boundary (2.86 MP clean, 2.99 MP corrupt) rather than at it.
   Nobody has mapped whether the real variable is area, height or render load.
-- **`docs/traps.md` records no platform for any of its 25 entries**, and several
-  read as universal that are not — 1, 20 and 22 are WSLg-only, 9 and 10 are
-  software-rasterizer-only, 24 and 25 came off an ordinary Ubuntu desktop. One is
-  openly unresolved (around line 143). Adding a scope line to each is cheap and
-  would have saved time already.
+- **`docs/traps.md` now carries a scope line on all 25 entries** (pass of
+  2026-07-29): 1, 20 and 22 are WSLg-only, 9 and 10 software-rasterizer-only,
+  24 and 25 came off an ordinary Ubuntu desktop, and the Qt/FFmpeg-semantics
+  traps are marked universal. What remains open is trap 10's question — llvmpipe
+  generally, or WSLg? — which still needs llvmpipe on a non-WSLg desktop to
+  settle.
 - **No `qsTr()` anywhere, and no accessibility.** Zero files. Both get harder the
   longer they wait, and for a *reading* tool the second is more relevant than
   usual. Note `SubtitleManager.cpp` builds `"%1 track%2, %3 line%4%5"` by

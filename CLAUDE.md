@@ -157,15 +157,18 @@ not an order. The index:
 | 24 | `mpv_create` fails outside a `C` locale | and says so only on a terminal |
 | 25 | `<svg` must be in the first 1 KB | or gdk-pixbuf cannot see the icon at all |
 
-**None of these entries records which platform it applies to, and that has cost
-real time.** Development moved between Linux, Windows and WSL in stretches, so a
-trap was found on whichever machine was in use and written up without saying so.
-Several read as universal and are not: 1, 20 and 22 are WSLg-only; 9 and 10 are
+**Every entry now carries a scope line saying which platform it applies to** —
+reconstructed from the evidence after the lack of one had cost real time.
+Development moved between Linux, Windows and WSL in stretches, so a trap was
+found on whichever machine was in use and written up without saying so.
+Several read as universal and are not: 20 and 22 are WSLg-only; 9 and 10 are
 software-rasterizer-only; 24 and 25 were found on an ordinary Ubuntu desktop; the
-non-ASCII path bug came off Windows. `docs/traps.md` around line 143 has one that
-is openly unresolved — *"Is this llvmpipe generally, or WSLg?"*. Check which
-platform a trap belongs to before treating it as a constraint, and add the scope
-to any entry you touch.
+non-ASCII path bug came off Windows. Trap 1 cuts the other way: found under
+WSLg, but the ordering it demands is libmpv's contract and binds on every
+platform. Trap 10's scope is the one still openly
+unresolved — *"Is this llvmpipe generally, or WSLg?"*. Check the scope line
+before treating a trap as a constraint, and keep it current in any entry you
+touch.
 
 Trap 22 is the clearest case. **It is a Mesa D3D12 bug, and that driver exists
 only under WSLg** — on native Linux and on Windows it does not arise. There, Qt
