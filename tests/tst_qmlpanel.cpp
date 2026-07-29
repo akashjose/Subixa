@@ -28,6 +28,7 @@
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QGuiApplication>
 #include "MpvEngine.h"
+#include "SettingsService.h"
 
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
@@ -83,6 +84,7 @@ private:
     QString queueFolderFile(const QString &name);
 
     QTemporaryDir m_home;
+    std::unique_ptr<SettingsService> m_service;
     std::unique_ptr<MpvEngine> m_mpv;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QObject *m_root = nullptr;
@@ -143,13 +145,21 @@ void TstQmlPanel::init()
 void TstQmlPanel::cleanup()
 {
     m_root = nullptr;
-    // Reverse of construction, for the same reason main() relies on.
+    // Reverse of construction, for the same reason main() relies on. The
+    // service goes last: PlaybackHistory and ShortcutRegistry, destroyed with
+    // the engine, flush into the store they borrow from it.
     m_engine.reset();
     m_mpv.reset();
+    m_service.reset();
 }
 
 bool TstQmlPanel::startApp()
 {
+    // First, exactly as main() constructs it first: the QML-created
+    // PlaybackHistory and ShortcutRegistry borrow this store, and its default
+    // QSettings honours the IniFormat redirect in initTestCase.
+    m_service = std::make_unique<SettingsService>();
+
     // Declared before the engine, and destroyed after it, exactly as main.cpp
     // does -- see MpvEngine on why that order is load-bearing. Under `offscreen`
     // no render context is ever created, so this half of it is not exercised

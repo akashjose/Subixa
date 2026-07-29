@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Akash Jose
 
 #include "PlaybackHistory.h"
+#include "SettingsService.h"
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QFileInfo>
@@ -18,15 +19,26 @@ constexpr auto kPreferredLanguageKey = "subtitle/preferredLanguage";
 }  // namespace
 
 PlaybackHistory::PlaybackHistory(QObject *parent)
-    : QObject(parent), m_settings(std::make_unique<QSettings>())
+    : QObject(parent)
 {
+    // Borrow the store main() built, so this class reads a file that has
+    // already been migrated and pruned. The fallback is what the service
+    // would have opened anyway; it keeps a harness that builds no service --
+    // and the QML tooling instantiating types speculatively -- working.
+    if (auto *service = SettingsService::instance()) {
+        m_settings = &service->store();
+    } else {
+        m_owned = std::make_unique<QSettings>();
+        m_settings = m_owned.get();
+    }
     startFlushTimer();
 }
 
 PlaybackHistory::PlaybackHistory(const QString &settingsPath, QObject *parent)
     : QObject(parent),
-      m_settings(std::make_unique<QSettings>(settingsPath, QSettings::IniFormat))
+      m_owned(std::make_unique<QSettings>(settingsPath, QSettings::IniFormat))
 {
+    m_settings = m_owned.get();
     startFlushTimer();
 }
 

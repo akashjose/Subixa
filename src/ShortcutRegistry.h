@@ -84,6 +84,10 @@ signals:
 private:
     void load();
 
-    std::unique_ptr<QSettings> m_settings;
+    // Borrowed from SettingsService when main() built one, owned otherwise.
+    // Same shape as PlaybackHistory, for the same reason: QML instantiates
+    // this class, so there is no caller to inject the store.
+    QSettings *m_settings = nullptr;
+    std::unique_ptr<QSettings> m_owned;
     QHash<QString, QString> m_overrides;
 };

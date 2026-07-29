@@ -105,7 +105,7 @@ int runProbe()
     return isSoftwareRenderer(renderer) ? 1 : 0;
 }
 
-Choice configure(int argc, char *argv[])
+Choice configure(int argc, char *argv[], QSettings &settings)
 {
     Q_UNUSED(argc);
 
@@ -129,7 +129,6 @@ Choice configure(int argc, char *argv[])
     }
 
     // Ask the cache before spending a process on it.
-    QSettings settings;
     const QString key = cacheKey();
     const QVariant cached = settings.value(key);
     if (cached.isValid()) {

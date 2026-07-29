@@ -154,6 +154,8 @@ set(SUBIXA_APP_SOURCES
     src/PlaybackHistory.h
     src/Playlist.cpp
     src/Playlist.h
+    src/SettingsService.cpp
+    src/SettingsService.h
     src/ShortcutRegistry.cpp
     src/ShortcutRegistry.h
     src/PaintedText.cpp
@@ -316,7 +318,8 @@ set(SUBIXA_MODEL_SOURCES
 
 # Resume-position store. Its policy is what the tests are really about, so it is
 # built as its own target rather than folded into the subtitle suite.
-qt_add_executable(tst_playbackhistory tests/tst_playbackhistory.cpp src/PlaybackHistory.cpp)
+qt_add_executable(tst_playbackhistory tests/tst_playbackhistory.cpp
+    src/PlaybackHistory.cpp src/SettingsService.cpp)
 target_include_directories(tst_playbackhistory PRIVATE src)
 target_link_libraries(tst_playbackhistory PRIVATE Qt6::Core Qt6::Qml Qt6::Test)
 
@@ -328,7 +331,8 @@ target_include_directories(tst_playlist PRIVATE src)
 target_link_libraries(tst_playlist PRIVATE Qt6::Core Qt6::Qml Qt6::Test)
 
 # The hotkey table and its overrides. Pure policy over a temporary ini file.
-qt_add_executable(tst_shortcuts tests/tst_shortcuts.cpp src/ShortcutRegistry.cpp)
+qt_add_executable(tst_shortcuts tests/tst_shortcuts.cpp
+    src/ShortcutRegistry.cpp src/SettingsService.cpp)
 target_include_directories(tst_shortcuts PRIVATE src)
 target_link_libraries(tst_shortcuts PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test)
 

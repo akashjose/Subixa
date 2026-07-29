@@ -3,6 +3,7 @@
 
 #include "GraphicsSetup.h"
 #include "MpvEngine.h"
+#include "SettingsService.h"
 
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QDebug>
@@ -119,9 +120,19 @@ int main(int argc, char *argv[])
         return GraphicsSetup::runProbe();
     }
 
+    // The owner of the settings file, and its place in this sequence is
+    // load-bearing three ways: after the names above (QSettings resolves its
+    // path from them), after the probe early-exit (the throwaway child must
+    // not touch the file), and before anything reads it -- the graphics cache
+    // next, then everything the QML engine creates. Declared before MpvEngine
+    // and the engine, so it is destroyed last, after ~PlaybackHistory and
+    // ~ShortcutRegistry have flushed the store they borrow from it.
+    SettingsService settings;
+
     // Mesa reads GALLIUM_DRIVER when it loads the driver, which happens on the
     // first context -- so this has to run before QGuiApplication.
-    const GraphicsSetup::Choice graphics = GraphicsSetup::configure(argc, argv);
+    const GraphicsSetup::Choice graphics =
+        GraphicsSetup::configure(argc, argv, settings.store());
 
     // Pinned rather than left to Qt's per-platform default. Every control in the
     // app is drawn by components under qml/ui/ against the theme, and those need

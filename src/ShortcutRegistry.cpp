@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Akash Jose
 
 #include "ShortcutRegistry.h"
+#include "SettingsService.h"
 
 #include <QtCore/QHash>
 #include <QtCore/QSettings>
@@ -91,15 +92,24 @@ const QVector<ShortcutRegistry::Action> &ShortcutRegistry::actions()
 }
 
 ShortcutRegistry::ShortcutRegistry(QObject *parent)
-    : QObject(parent), m_settings(std::make_unique<QSettings>())
+    : QObject(parent)
 {
+    // Borrow the store main() built; own one only when no service exists.
+    // See PlaybackHistory's default constructor -- the two must not diverge.
+    if (auto *service = SettingsService::instance()) {
+        m_settings = &service->store();
+    } else {
+        m_owned = std::make_unique<QSettings>();
+        m_settings = m_owned.get();
+    }
     load();
 }
 
 ShortcutRegistry::ShortcutRegistry(const QString &settingsPath, QObject *parent)
     : QObject(parent),
-      m_settings(std::make_unique<QSettings>(settingsPath, QSettings::IniFormat))
+      m_owned(std::make_unique<QSettings>(settingsPath, QSettings::IniFormat))
 {
+    m_settings = m_owned.get();
     load();
 }
 

@@ -132,7 +132,12 @@ private:
     // purpose: without it the next flush would write the old value straight back.
     void resetPending();
 
-    std::unique_ptr<QSettings> m_settings;
+    // Borrowed from SettingsService when main() built one, owned otherwise --
+    // the QML engine creates this class declaratively, so there is no caller
+    // to hand the store in through the constructor. m_owned is only the
+    // fallback's storage; every use goes through m_settings.
+    QSettings *m_settings = nullptr;
+    std::unique_ptr<QSettings> m_owned;
     QTimer m_flushTimer;
 
     // The resume key remember() was last called for, and what it was told. Most
