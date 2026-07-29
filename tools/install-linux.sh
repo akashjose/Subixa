@@ -22,6 +22,21 @@ export CMAKE_PREFIX_PATH
 
 DEPS=${SUBIXA_DEPS_PREFIX-$HOME/data/subixa-stack}
 
+# Decide about sudo before spending minutes on the build. Without a terminal
+# sudo cannot ask for a password (unless its credentials are still cached), and
+# finding that out after the build is the annoying order to find it out in.
+SUDO=""
+if [[ ! -w "$PREFIX" ]]; then
+    SUDO=sudo
+    if [[ ! -t 0 ]] && ! sudo -n true 2>/dev/null; then
+        echo "error: installing to $PREFIX needs sudo, and there is no" >&2
+        echo "       terminal to ask for the password on. Run this from a" >&2
+        echo "       terminal, or pass a writable prefix instead:" >&2
+        echo "           tools/install-linux.sh ~/.local" >&2
+        exit 1
+    fi
+fi
+
 # Release, tests off: this tree exists to be installed, not to develop in.
 # ctest belongs to build/, which this script deliberately does not touch.
 cmake -S . -B build-rel -G Ninja \
@@ -30,11 +45,7 @@ cmake -S . -B build-rel -G Ninja \
     -DSUBIXA_DEPS_PREFIX="$DEPS"
 cmake --build build-rel
 
-SUDO=""
-if [[ ! -w "$PREFIX" ]]; then
-    SUDO=sudo
-    echo "== $PREFIX is not writable; installing with sudo =="
-fi
+[[ -z "$SUDO" ]] || echo "== $PREFIX is not writable; installing with sudo =="
 $SUDO cmake --install build-rel --prefix "$PREFIX"
 
 # Files from an install made before the application-id rename sit under the old
