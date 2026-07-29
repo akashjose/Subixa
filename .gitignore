@@ -1,6 +1,8 @@
-# build/ is the Linux tree; a second one keeps a Windows build from overwriting
-# it when both are made from the same checkout.
+# build/ is the Linux tree; the others keep a Windows build and the Release
+# tree tools/install-linux.sh makes from overwriting it when all are made from
+# the same checkout.
 build/
+build-rel/
 build-win/
 dist/
 .cache/
