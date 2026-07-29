@@ -46,6 +46,29 @@ public:
 
     QSettings &store();
 
+    // The layout this build writes, stored as meta/schemaVersion. Version 1 is
+    // the groups as they stand -- meta, ui, subtitleStyle, resume, subtitle,
+    // hotkeys, graphics -- plus a lastUsed epoch-seconds stamp on every
+    // per-file entry, which is what pruning ages against. A file whose stored
+    // version is *newer* than this is left entirely alone: its keys still read
+    // (the format is additive), but pruning under a schema this build does not
+    // know could destroy entries a newer build keys differently.
+    static constexpr int SchemaVersion = 1;
+
+    // The prune policy, applied to the per-file entries of [resume] and
+    // [subtitle] only -- preferences are never pruned. A film untouched for a
+    // year is not being come back to, and past the cap the oldest go first.
+    // Deliberately generous: this exists to stop unbounded growth, not to
+    // economise, and an entry is a few hundred bytes.
+    static constexpr qint64 MaxEntryAgeDays = 365;
+    static constexpr int MaxEntriesPerGroup = 500;
+
 private:
+    // Migration and pruning, run by both constructors before any borrower
+    // exists -- which is the only moment it is safe to delete entries, because
+    // nothing can be holding a copy it might write back.
+    void initialise();
+    void prune();
+
     QSettings m_settings;
 };

@@ -5,6 +5,7 @@
 #include "SettingsService.h"
 
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QDateTime>
 #include <QtCore/QFileInfo>
 #include <QtCore/QSettings>
 
@@ -161,6 +162,11 @@ void PlaybackHistory::storePending()
     // Not read back -- it is here so the settings file can be read by a person.
     m_settings->setValue(m_pendingKey + QStringLiteral("/path"),
                          QFileInfo(m_pendingPath).absoluteFilePath());
+    // What SettingsService ages the entry by. Strictly inside this branch: a
+    // tick that says nothing new must keep saying nothing to the file, and the
+    // write-cadence tests watch the file to hold it to that.
+    m_settings->setValue(m_pendingKey + QStringLiteral("/lastUsed"),
+                         QDateTime::currentSecsSinceEpoch());
     m_storedPosition = m_pendingPosition;
 }
 
@@ -217,6 +223,9 @@ void PlaybackHistory::rememberSubtitle(const QString &path, int streamIndex,
     m_settings->setValue(key + QStringLiteral("/language"), language);
     m_settings->setValue(key + QStringLiteral("/path"),
                          QFileInfo(path).absoluteFilePath());
+    // What SettingsService ages the entry by.
+    m_settings->setValue(key + QStringLiteral("/lastUsed"),
+                         QDateTime::currentSecsSinceEpoch());
 
     // The fallback for files with no entry of their own. Only a real language
     // tag is worth keeping -- "und" would match half a container.

@@ -54,6 +54,7 @@ private slots:
     void preferredLanguageFollowsTheLastChoice();
 
     void aFlushPutsThePositionInTheFile();
+    void aStoredPositionCarriesItsLastUsedStamp();
     void aTickThatHasNotMovedFarNeverReachesTheFile();
     void anUnchangedPositionNeverWritesTheFile();
     void aFileNotWorthRememberingNeverWritesTheFile();
@@ -306,6 +307,27 @@ void TstPlaybackHistory::aFlushPutsThePositionInTheFile()
     // And a fresh store reads it back, which is the point of writing at all.
     PlaybackHistory reopened(settingsFile());
     QCOMPARE(reopened.resumeFor(film), 1805.0);
+}
+
+void TstPlaybackHistory::aStoredPositionCarriesItsLastUsedStamp()
+{
+    PlaybackHistory history(settingsFile());
+    history.remember(QStringLiteral("/media/films/example.mkv"), 1800.0, 8634.0);
+    history.flush();
+
+    // The stamp is what SettingsService ages the entry by, and it rides the
+    // same write as the position -- strictly inside the changed-position
+    // branch, or the never-writes cases above stop holding.
+    QVERIFY(fileText().contains(QStringLiteral("lastUsed=")));
+
+    // Same for a subtitle choice.
+    history.rememberSubtitle(QStringLiteral("/media/films/example.mkv"), 2,
+                             QString(), QStringLiteral("spa"));
+    QSettings raw(settingsFile(), QSettings::IniFormat);
+    raw.beginGroup(QStringLiteral("subtitle"));
+    const QStringList entries = raw.childGroups();
+    QCOMPARE(entries.size(), 1);
+    QVERIFY(raw.value(entries.first() + QStringLiteral("/lastUsed")).toLongLong() > 0);
 }
 
 void TstPlaybackHistory::aTickThatHasNotMovedFarNeverReachesTheFile()

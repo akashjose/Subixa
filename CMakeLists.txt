@@ -336,6 +336,14 @@ qt_add_executable(tst_shortcuts tests/tst_shortcuts.cpp
 target_include_directories(tst_shortcuts PRIVATE src)
 target_link_libraries(tst_shortcuts PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test)
 
+# The settings file's owner: the version key, migration, and pruning. Mostly
+# what must *survive* a prune -- one that deletes too much looks identical to
+# one that works until somebody's year of positions disappears.
+qt_add_executable(tst_settingsservice tests/tst_settingsservice.cpp
+    src/SettingsService.cpp)
+target_include_directories(tst_settingsservice PRIVATE src)
+target_link_libraries(tst_settingsservice PRIVATE Qt6::Core Qt6::Test)
+
 qt_add_executable(tst_subtitles tests/tst_subtitles.cpp ${SUBIXA_MODEL_SOURCES})
 target_include_directories(tst_subtitles PRIVATE src)
 target_compile_definitions(tst_subtitles PRIVATE
@@ -437,7 +445,8 @@ target_link_libraries(tst_qmlpanel PRIVATE
 # source list, so without this more than half of what compiles here was built
 # with warnings off while the tree was described as clean under -Wall -Wextra.
 foreach(t tst_playbackhistory tst_playlist tst_shortcuts tst_subtitles
-          tst_mpvtracks tst_qmlpanel tst_conformance tst_searchproxy tst_assstyles)
+          tst_mpvtracks tst_qmlpanel tst_conformance tst_searchproxy tst_assstyles
+          tst_settingsservice)
     target_compile_options(${t} PRIVATE -Wall -Wextra)
 endforeach()
 
@@ -450,9 +459,10 @@ add_test(NAME qmlpanel COMMAND tst_qmlpanel)
 add_test(NAME conformance COMMAND tst_conformance)
 add_test(NAME searchproxy COMMAND tst_searchproxy)
 add_test(NAME assstyles COMMAND tst_assstyles)
+add_test(NAME settingsservice COMMAND tst_settingsservice)
 
 # None of these needs a display; make sure they never try to open one.
-set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts conformance searchproxy assstyles PROPERTIES
+set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts conformance searchproxy assstyles settingsservice PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=minimal"
     TIMEOUT 120
 )
