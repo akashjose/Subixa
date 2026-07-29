@@ -125,6 +125,24 @@ endif()
 
 qt_standard_project_setup(REQUIRES 6.12)
 
+# An install rpath to everything the binary was built against, or `cmake
+# --install` produces a binary that quietly loads the distribution's older Qt
+# and FFmpeg -- the exact drift the pinned stack exists to prevent, surviving
+# into the installed copy after the build tree's rpath is stripped. Measured,
+# not assumed: without these an installed binary resolved libQt6Core from
+# /lib/x86_64-linux-gnu and died on `Qt_6.12 not found`. Qt's own dir must be
+# spelled out too -- qt_standard_project_setup writes only $ORIGIN entries
+# here. Absolute paths are correct: this serves an install on the machine that
+# built it, and packaging tools rewrite rpaths to $ORIGIN when they bundle.
+if(NOT WIN32)
+    list(APPEND CMAKE_INSTALL_RPATH "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_LIBS}")
+    if(SUBIXA_DEPS_PREFIX)
+        list(APPEND CMAKE_INSTALL_RPATH
+            "${SUBIXA_DEPS_PREFIX}/lib"
+            "${SUBIXA_DEPS_PREFIX}/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+    endif()
+endif()
+
 # Everything but main.cpp, shared verbatim between the app and the QML harness.
 # Listed once because a source that reaches only one of the two produces a link
 # error in the other, at a place that says nothing about the omission.

@@ -156,6 +156,13 @@ Ninja, so there is no Makefile in the build tree. It installs:
 | `share/metainfo/com.akashjose.Subixa.metainfo.xml` | the AppStream metainfo |
 | `share/doc/subixa/LICENSE` | |
 
+The installed binary finds Qt and the media stack through absolute rpaths
+written at install time, so it runs on the machine that built it with no
+environment set — verified by running an installed copy from outside the repo.
+`tools/install-linux.sh` scripts the whole update — Release build, install,
+and removing any pre-rename leftovers — asking for sudo only when the prefix
+needs it.
+
 There is no CPack configuration, no `.deb`, no AppImage and no Flatpak.
 
 ## Environment switches

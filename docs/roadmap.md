@@ -23,7 +23,7 @@ Milestones 1–5 are committed, and so is the work that followed on the
 Linux desktop turned up that WSL had hidden (traps 24 and 25), and the mouse work
 — folder drops, Esc to minimise, wheel volume, right-click menu.
 
-Since then, 19 commits changed the ground the rest of this document stands on.
+Since then, 27 commits changed the ground the rest of this document stands on.
 
 **The dependency stack moved to current releases and is now built from source.**
 Linux was on Qt 6.9.3, FFmpeg 6.1.1 and mpv 0.37 — a 2023 stack — while the
@@ -128,9 +128,12 @@ or a decision rather than an afternoon.
    workflow has never executed: nothing is pushed, so "ctest passes" is still a
    sentence about one desk, and the first push will also be the workflow's first
    real test — budget a debugging round for it. Packaging is the half that has
-   not started: no AppImage, Flatpak or `.deb`, and the installed binary drops
-   the media-stack rpath (`CMAKE_BUILD_RPATH` only), which whichever format goes
-   first has to solve.
+   not started: no AppImage, Flatpak or `.deb`. The install-rpath half of it is
+   solved as of 2026-07-29 — `cmake --install` writes Qt and the media stack
+   into RUNPATH, verified by running an installed copy from outside the repo,
+   and `tools/install-linux.sh` scripts the update — so what packaging still
+   owes is relocatability, which the absolute rpaths deliberately do not
+   attempt.
 
 2. **One settings service — done, 2026-07-29.** `src/SettingsService` owns the
    file: `meta/schemaVersion`, migration, and pruning of the per-file entries

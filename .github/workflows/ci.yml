@@ -128,9 +128,10 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       # The installed tree, not a package: no AppImage/Flatpak/deb exists yet
-      # (roadmap item 1, second half), and the binary resolves the media stack
-      # through a build rpath that `cmake --install` does not carry, so this
-      # artifact documents what installs rather than something relocatable.
+      # (roadmap item 1, second half). The binary carries absolute install
+      # rpaths to the runner's Qt and media stack, so it runs where it was
+      # built and nowhere else -- this artifact documents what installs rather
+      # than something relocatable.
       - name: Stage the install tree
         if: matrix.build_type == 'Release'
         run: cmake --install build --prefix "$PWD/stage/usr"
