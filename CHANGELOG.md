@@ -8,6 +8,16 @@ Nothing has been released, so there are no version tags to organise this by.
 
 ## Unreleased — since milestone 5
 
+**CI, and the first packaging metadata.** `.github/workflows/ci.yml` runs three
+jobs: freedesktop metadata validation, an Ubuntu 24.04 Debug/Release matrix that
+builds the media stack from source — the prefix cached on a hash of
+`tools/build-deps.sh`, because cold it costs twenty minutes — and runs every
+headless suite, and an MSYS2 UCRT64 job that checks the rolling Qt against the
+deliberate 6.12 floor and skips with a notice until MSYS2 ships it. The Windows
+deployment sequence became a script, `tools/deploy-win.sh`, with a guard for
+`windeployqt6`'s silent empty staging. And AppStream metadata exists and
+installs: `com.akashjose.Subixa.metainfo.xml`.
+
 **The dependency stack moved to current releases and is built from source.**
 Linux was on Qt 6.9.3, FFmpeg 6.1.1 and mpv 0.37 while the Windows side was
 already on FFmpeg 8 and Qt 6.11 — two platforms decoding subtitles with decoders

@@ -74,6 +74,10 @@ current instructions.
 
 ## Deploying
 
+Scripted as `tools/deploy-win.sh`, which runs the sequence below plus the
+guards a script needs — chiefly refusing to continue when `windeployqt6` stages
+nothing. The listing stays here because the *reasons* live in its comments.
+
 `windeployqt6` handles Qt and nothing else. libmpv's dependency tree is the
 larger half of the payload and has to be walked separately.
 

@@ -278,6 +278,9 @@ install(TARGETS subixa
 install(FILES com.akashjose.Subixa.desktop
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
 )
+install(FILES com.akashjose.Subixa.metainfo.xml
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo
+)
 # hicolor/scalable is what the entry's `Icon=com.akashjose.Subixa` resolves
 # against. The source keeps the short name; only the installed copy is renamed.
 install(FILES icons/subixa.svg

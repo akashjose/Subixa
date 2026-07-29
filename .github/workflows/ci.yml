@@ -1,0 +1,215 @@
+# CI for the three targets docs/roadmap.md names.
+#
+# Linux builds against the from-source media stack (tools/build-deps.sh) and
+# runs every headless suite. The prefix is cached on a hash of that script --
+# its version pins live inside it -- because building it cold costs ~20 minutes
+# and the cached prefix is 74 MB.
+#
+# Windows builds under MSYS2 UCRT64 exactly as docs/windows.md describes, but
+# only once MSYS2 ships Qt >= 6.12: the CMake floor is deliberate
+# (CMakeLists.txt, find_package(Qt6 6.12 REQUIRED)), so until then the job
+# checks the available Qt and skips with a notice instead of failing every run.
+#
+# WSL has no job of its own and cannot have an honest one: it runs the same
+# Linux ELF, and what makes it distinct -- WSLg's compositor and the Mesa D3D12
+# driver (traps 1, 20, 22) -- needs a display a runner does not have. The Linux
+# job's headless suites are the coverage CI can give it; the visual half stays
+# manual (tools/render-canary.sh).
+name: CI
+
+on:
+  push:
+    branches: [feature/finish_all_milestones, master]
+  pull_request:
+    branches: [feature/finish_all_milestones, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Desktop entry and metainfo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y appstream desktop-file-utils
+      - name: Validate freedesktop metadata
+        # --no-net: the screenshot URLs point at master, which only gains the
+        # images when a release merges it (see the comment in the metainfo).
+        run: |
+          desktop-file-validate com.akashjose.Subixa.desktop
+          appstreamcli validate --no-net com.akashjose.Subixa.metainfo.xml
+
+  linux:
+    name: Linux ${{ matrix.build_type }} (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The apt line from docs/building.md, verbatim, plus what CI itself
+      # needs: a distribution ffmpeg for testdata/make-fixtures.sh (any ffmpeg
+      # with libx264 -- the fixtures deliberately do not require the
+      # from-source stack).
+      - name: Install system prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config git curl \
+            nasm g++-14 \
+            glslang-dev glslang-tools libshaderc-dev spirv-tools liblcms2-dev libunwind-dev \
+            libdav1d-dev libxml2-dev libzimg-dev libass-dev libvulkan-dev \
+            libpulse-dev libasound2-dev libpipewire-0.3-dev \
+            libxrandr-dev libxpresent-dev libxss-dev libxkbcommon-dev libxinerama-dev \
+            libegl1-mesa-dev libgl-dev libgbm-dev \
+            ffmpeg
+
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ~/data/Qt
+          key: qt-6.12.0-linux-gcc64-shadertools-imageformats
+
+      # qtdeclarative is not a valid module name here -- Quick, QML, Controls
+      # and Svg ship inside the base desktop package (docs/building.md).
+      - name: Install Qt 6.12.0
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          pipx install aqtinstall
+          aqt install-qt linux desktop 6.12.0 linux_gcc_64 \
+            -m qtshadertools qtimageformats -O "$HOME/data/Qt"
+
+      - name: Cache the media stack
+        id: cache-stack
+        uses: actions/cache@v4
+        with:
+          path: ~/data/subixa-stack
+          key: subixa-stack-ubuntu-24.04-${{ hashFiles('tools/build-deps.sh') }}
+
+      # build-deps.sh has no self-skip and meson wipes its build trees on every
+      # run, so it only runs on a cache miss. meson comes from pipx: Ubuntu
+      # 24.04's python is externally managed and its apt meson is too old for
+      # libplacebo.
+      - name: Build libplacebo, FFmpeg and mpv from source
+        if: steps.cache-stack.outputs.cache-hit != 'true'
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          pipx install meson
+          ./tools/build-deps.sh "$HOME/data/subixa-stack"
+
+      - name: Configure and build
+        run: |
+          export CMAKE_PREFIX_PATH="$HOME/data/Qt/6.12.0/gcc_64"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_CXX_COMPILER=g++-14 \
+            -DSUBIXA_DEPS_PREFIX="$HOME/data/subixa-stack"
+          cmake --build build
+
+      - name: Generate test fixtures
+        run: ./testdata/make-fixtures.sh
+
+      # No display, no Xvfb: per-test QT_QPA_PLATFORM is already set by CMake
+      # (minimal for eight suites, offscreen for qmlpanel), and rendercanary
+      # self-excludes as DISABLED. Xvfb is explicitly ruled out in
+      # docs/testing.md -- it produces false failures, not coverage.
+      - name: Run the test suites
+        run: ctest --test-dir build --output-on-failure
+
+      # The installed tree, not a package: no AppImage/Flatpak/deb exists yet
+      # (roadmap item 1, second half), and the binary resolves the media stack
+      # through a build rpath that `cmake --install` does not carry, so this
+      # artifact documents what installs rather than something relocatable.
+      - name: Stage the install tree
+        if: matrix.build_type == 'Release'
+        run: cmake --install build --prefix "$PWD/stage/usr"
+
+      - name: Upload the Linux install tree
+        if: matrix.build_type == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: subixa-linux-x86_64-installtree
+          path: stage/
+          if-no-files-found: error
+
+  windows:
+    name: Windows (MSYS2 UCRT64)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      # update: true does the two-pass core update docs/windows.md requires.
+      # qt6-tools is not in the docs' install line but owns windeployqt6, which
+      # the deploy step needs.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-declarative
+            mingw-w64-ucrt-x86_64-qt6-svg
+            mingw-w64-ucrt-x86_64-qt6-shadertools
+            mingw-w64-ucrt-x86_64-qt6-tools
+            mingw-w64-ucrt-x86_64-mpv
+            mingw-w64-ucrt-x86_64-ffmpeg
+
+      # The 6.12 floor is deliberate and a 6.11 prefix failing find_package is
+      # "intended behaviour and not a build error to work around"
+      # (docs/windows.md). MSYS2 rolls; when it ships 6.12 this gate opens on
+      # its own and the rest of the job runs unchanged.
+      - name: Check MSYS2 Qt against the 6.12 floor
+        id: qt-gate
+        run: |
+          ver=$(pacman -Q mingw-w64-ucrt-x86_64-qt6-base | awk '{print $2}' | cut -d- -f1)
+          echo "MSYS2 qt6-base is $ver"
+          if [ "$(printf '%s\n' 6.12.0 "$ver" | sort -V | head -n1)" = "6.12.0" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Windows build waiting on MSYS2::qt6-base is $ver, below the deliberate Qt 6.12 floor. The build half of this job is skipped until MSYS2 ships 6.12."
+          fi
+
+      - name: Configure and build
+        if: steps.qt-gate.outputs.ok == 'true'
+        run: |
+          cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-win
+
+      - name: Generate test fixtures
+        if: steps.qt-gate.outputs.ok == 'true'
+        run: ./testdata/make-fixtures.sh
+
+      - name: Run the test suites
+        if: steps.qt-gate.outputs.ok == 'true'
+        run: ctest --test-dir build-win --output-on-failure
+
+      - name: Stage the deployable bundle
+        if: steps.qt-gate.outputs.ok == 'true'
+        run: ./tools/deploy-win.sh build-win dist/subixa-win64
+
+      - name: Upload the Windows bundle
+        if: steps.qt-gate.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: subixa-win64
+          path: dist/subixa-win64/
+          if-no-files-found: error

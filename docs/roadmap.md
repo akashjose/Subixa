@@ -119,13 +119,18 @@ landed — the ASS styles table, the search proxy and the `Main.qml` drain — a
 the settings item is half done. What is left is mostly what needs a machine, a
 Windows box, or a decision rather than an afternoon.
 
-1. **CI, and then packaging.** Still no CI anywhere — no `.github`, no
-   `metainfo.xml`, no AppImage, Flatpak or `.deb`. This ranks above the
-   engineering items because everything below is verified by "ctest passes", and
-   until a machine runs ctest that sentence depends on someone remembering to.
-   Budget for the part nobody accounts for: a runner has to build the media stack
-   from source via `tools/build-deps.sh` and fetch Qt via `aqtinstall`, so the
-   prefix must be cached or every push costs twenty minutes.
+1. **Push, so CI runs; then packaging.** The workflow exists as of 2026-07-29 —
+   `.github/workflows/ci.yml`: freedesktop metadata validation, an Ubuntu 24.04
+   Debug/Release matrix that builds the media stack from source with the prefix
+   cached on a hash of `tools/build-deps.sh`, and an MSYS2 UCRT64 job gated on
+   MSYS2 reaching the Qt 6.12 floor (6.11.1 on 2026-07-29, so it skips with a
+   notice until then). `metainfo.xml` exists, validates and installs. But the
+   workflow has never executed: nothing is pushed, so "ctest passes" is still a
+   sentence about one desk, and the first push will also be the workflow's first
+   real test — budget a debugging round for it. Packaging is the half that has
+   not started: no AppImage, Flatpak or `.deb`, and the installed binary drops
+   the media-stack rpath (`CMAKE_BUILD_RPATH` only), which whichever format goes
+   first has to solve.
 
 2. **One settings service.** Five independent writers land in one file with no
    schema and no version key: `PlaybackHistory` and `ShortcutRegistry` each hold
@@ -143,9 +148,11 @@ Windows box, or a decision rather than an afternoon.
    standalone program, not assumed. What remains is the consolidation: one
    service, a schema version key, and pruning.
 
-3. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then: nothing
-   is packaged, deployment is a documented command sequence rather than a script,
-   and nothing is signed. Azure Trusted Signing at about $10/month is the only
+3. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then:
+   nothing is packaged, deployment is scripted (`tools/deploy-win.sh`) but the
+   script has never run on a real Windows box — it was transcribed from
+   `docs/windows.md` and CI will exercise it once the Qt gate opens — and
+   nothing is signed. Azure Trusted Signing at about $10/month is the only
    certificate option that works headless in CI — OV certificates have needed a
    hardware token since June 2023. The reason the port was argued for is still
    unmeasured: 4K, HEVC and HDR have not been judged. `hwdec` is no longer among
