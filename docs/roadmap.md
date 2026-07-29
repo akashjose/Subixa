@@ -114,53 +114,58 @@ were not touched.
 3.7% and worth stating as such: the value is that the most intricate logic in the
 product now has a compiler and 20 cases in `tst_mpvtracks`, not the line count.
 
+**The settings file has one owner, and per-file memory is a choice.**
+`src/SettingsService`: `meta/schemaVersion`, migration, and pruning of the
+per-file entries — a year unwatched or past the newest 500 per group, aged by
+a `lastUsed` stamp; entries predating the stamp are stamped rather than
+dropped, and a file written by a *newer* schema is left entirely alone.
+`GraphicsSetup` takes the store as a parameter; `PlaybackHistory` and
+`ShortcutRegistry` borrow it through `instance()` with an owned fallback. The
+two QML `Settings` blocks stay, deliberately: migration runs in `main()`
+before the QML engine exists, `QQmlSettings` self-syncs fine on Qt 6.12
+(measured in a standalone program, not assumed — the write-cadence trap this
+file once recorded here was not real), and converting ~44 properties to
+Q_PROPERTY boilerplate would buy compile-time names at the cost of recreating
+the trap-19 injection surface. On top of the service, resume and the
+remembered subtitle track became two independent toggles under Settings →
+Playback that gate only the *restore* — history keeps recording, so finishing
+a film still clears its position with resume off, and switching a toggle back
+on remembers everything. Both gates carry mutation-checked regression tests.
+
+**The release machinery exists, and none of it has run on another machine.**
+`.github/workflows/ci.yml` — metadata validation, an Ubuntu 24.04
+Debug/Release matrix with the media stack cached on a hash of
+`tools/build-deps.sh`, and an MSYS2 UCRT64 job gated on MSYS2 reaching the Qt
+6.12 floor (6.11.1 on 2026-07-29, so it skips with a notice until then).
+`com.akashjose.Subixa.metainfo.xml` validates and installs. `cmake --install`
+writes real rpaths, `tools/install-linux.sh` scripts the update — which is how
+the development machine now runs the player day to day — and
+`tools/deploy-win.sh` scripts the Windows staging.
+
 Ten suites pass, warning-free under `-Wall -Wextra` on every target.
 
 ## Next
 
-In rough order of value. Four of the six this file listed on 2026-07-29 have
-landed — the ASS styles table, the search proxy, the `Main.qml` drain and the
-settings service. What is left is mostly what needs a machine, a Windows box,
-or a decision rather than an afternoon.
+**Feature complete is the honest word for where this sits** — nothing below is
+a feature. What stands between 0.5.0 and something releasable is release
+engineering, in this order:
 
-1. **Push, so CI runs; then packaging.** The workflow exists as of 2026-07-29 —
-   `.github/workflows/ci.yml`: freedesktop metadata validation, an Ubuntu 24.04
-   Debug/Release matrix that builds the media stack from source with the prefix
-   cached on a hash of `tools/build-deps.sh`, and an MSYS2 UCRT64 job gated on
-   MSYS2 reaching the Qt 6.12 floor (6.11.1 on 2026-07-29, so it skips with a
-   notice until then). `metainfo.xml` exists, validates and installs. But the
-   workflow has never executed: nothing is pushed, so "ctest passes" is still a
-   sentence about one desk, and the first push will also be the workflow's first
-   real test — budget a debugging round for it. Packaging is the half that has
-   not started: no AppImage, Flatpak or `.deb`. The install-rpath half of it is
-   solved as of 2026-07-29 — `cmake --install` writes Qt and the media stack
-   into RUNPATH, verified by running an installed copy from outside the repo,
-   and `tools/install-linux.sh` scripts the update — so what packaging still
-   owes is relocatability, which the absolute rpaths deliberately do not
-   attempt.
+1. **Push.** The workflow has never executed: nothing is pushed, so "ctest
+   passes" is still a sentence about one desk, and the first push is also the
+   workflow's first real test — budget a debugging round for it. `master`
+   stays at `721ebb6` and merges at release time, not before. Only the
+   repository owner takes this step.
 
-2. **One settings service — done, 2026-07-29.** `src/SettingsService` owns the
-   file: `meta/schemaVersion`, migration, and pruning of the per-file entries
-   (a year unwatched or past the newest 500 per group, aged by a `lastUsed`
-   stamp; entries predating the stamp are stamped rather than dropped, and a
-   file written by a *newer* schema is left entirely alone). `GraphicsSetup`
-   takes the store as a parameter; `PlaybackHistory` and `ShortcutRegistry`
-   borrow it through `instance()` with an owned fallback. The two QML
-   `Settings` blocks stay, deliberately: `QQmlSettings` self-syncs fine on Qt
-   6.12 (measured, see below), migration runs in `main()` before the QML
-   engine exists so no stale copy can write pre-migration data back, and
-   converting ~44 properties to Q_PROPERTY boilerplate would buy compile-time
-   names at the cost of recreating the trap-19 injection surface. What full
-   consolidation would still buy is recorded here in case that trade ever
-   flips.
-
-   `PlaybackHistory`'s write-cadence half landed earlier, in `f800e8c`: the
-   position is held in memory and written only once it has moved
-   `PositionWriteStep`. **The trap this file used to record here was not
-   real** — it claimed that timer was the only mid-session flush the QML
-   `Settings` groups got. On Qt 6.12 `QQmlSettings` has its own write timer
-   and `QSettings` syncs itself from the event loop; measured against this Qt
-   in a standalone program, not assumed.
+2. **Packaging, AppImage first.** The stack argues the order: Subixa needs
+   FFmpeg 8, mpv 0.41 and libplacebo 7.3, and no distribution ships them — so
+   a `.deb` cannot declare its dependencies from any archive and would bundle
+   under `/opt` anyway, which throws away most of what a `.deb` is for. An
+   AppImage bundles the `ldd` tree by design, CI already has the stack built
+   and cached, and the result is verifiable on this machine by running it.
+   Flatpak is the cleanest long-term channel and belongs at release time, when
+   `master` merges and the metainfo's screenshot URLs come alive. What
+   packaging owes beyond the bundle is relocatability, which the absolute
+   install rpaths deliberately do not attempt.
 
 3. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then:
    nothing is packaged, deployment is scripted (`tools/deploy-win.sh`) but the
@@ -175,24 +180,8 @@ or a decision rather than an afternoon.
 
 ## Loose ends
 
-Worth folding into whatever touches them next.
-
-- **Resume is a choice now — done, 2026-07-29.** The two toggles sit under
-  Settings → Playback exactly as decided: *Resume where you left off* and
-  *Remember the subtitle track per file*, independent because finishing a film
-  clears the position and must not forget which track this household reads.
-  Off gates only the restore — the history keeps being written, so switching
-  back on remembers everything, chosen so that turning resume off never breaks
-  finish-clears-the-position bookkeeping. The subtitle gate empties the map
-  rather than skipping the assignment, so the tab still gets the
-  language-fallback-or-first default instead of inheriting the previous film's
-  index; the language fallback stays active in both states, because the
-  language carrying forward is a preference, not history. Both paths carry
-  qmlpanel regression tests, mutation-checked to fail without the gates.
-
-  Note the write cadence from `f800e8c` stands: a crash loses up to thirty
-  seconds of position (`PositionWriteStep`), named and commented if it wants
-  lowering.
+Release hardening, none of it features. Worth folding into whatever touches
+them next; the sizes are honest guesses.
 
 - **`canonicalFilePath` appears zero times in the tree.** Path identity is
   `absoluteFilePath`, which resolves neither symlinks nor `..`, across
@@ -224,13 +213,13 @@ Worth folding into whatever touches them next.
 - **The FBO cap's threshold is a guess.** `FboCap::SafeArea` is 2.0 MP, chosen
   below the observed boundary (2.86 MP clean, 2.99 MP corrupt) rather than at it.
   Nobody has mapped whether the real variable is area, height or render load.
-- **`docs/traps.md` now carries a scope line on all 25 entries** (pass of
-  2026-07-29): 20 and 22 are WSLg-only, 1 was found under WSLg but its rule
-  binds everywhere, 9 and 10 are software-rasterizer-only, 24 and 25 came off
-  an ordinary Ubuntu desktop, and the Qt/FFmpeg-semantics traps are marked
-  universal. What remains open is trap 10's question — llvmpipe
-  generally, or WSLg? — which still needs llvmpipe on a non-WSLg desktop to
-  settle.
+  The same experiment would settle trap 10's still-open scope question —
+  llvmpipe generally, or only under WSLg? — and it is newly possible here:
+  `LIBGL_ALWAYS_SOFTWARE=1` on this native host produces llvmpipe with no WSLg
+  in the picture, which nothing could do when the note was written.
+- **The write cadence knob.** A crash loses up to thirty seconds of position
+  (`PositionWriteStep`, from `f800e8c`), named and commented if it wants
+  lowering.
 - **No `qsTr()` anywhere, and no accessibility.** Zero files. Both get harder the
   longer they wait, and for a *reading* tool the second is more relevant than
   usual. Note `SubtitleManager.cpp` builds `"%1 track%2, %3 line%4%5"` by
@@ -239,6 +228,3 @@ Worth folding into whatever touches them next.
   produces a very wide menu instead of an overlapping one. Better, not right.
 - **Trap 22 has no upstream bug report.** Written off deliberately. The
   reproducer is twelve lines of QML against Qt's own `qml` binary.
-- **Nothing is pushed.** The branch of record is `feature/finish_all_milestones`;
-  `master` sits at `721ebb6` with none of the Windows work, the UTF-8 path fix or
-  anything above.
