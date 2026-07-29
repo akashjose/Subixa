@@ -58,4 +58,15 @@ for stale in "$PREFIX/share/applications/subixa.desktop" \
     fi
 done
 
+# The nudges a package's post-install would do. Without them GNOME keeps
+# serving its cached view: a renamed icon resolves to the fallback gear until
+# the theme directory's mtime moves, and the MIME associations in the desktop
+# entry stay invisible until the database is rebuilt. Both are cheap and safe
+# when nothing changed.
+[[ ! -d "$PREFIX/share/icons/hicolor" ]] || $SUDO touch "$PREFIX/share/icons/hicolor"
+if command -v update-desktop-database >/dev/null; then
+    $SUDO update-desktop-database "$PREFIX/share/applications"
+fi
+
 echo "== installed: $("$PREFIX/bin/subixa" --version) at $PREFIX/bin/subixa =="
+echo "   If the launcher icon looks stale, restart the shell (Alt+F2, r, on X11)."
