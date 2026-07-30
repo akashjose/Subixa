@@ -37,7 +37,13 @@ cp "$BUILD/subixa.exe" LICENSE "$DEST/"
 #
 # Comparing content rather than timestamps: a copy that silently did not happen
 # leaves an older file, and a copy that half-happened leaves a shorter one.
-if ! cmp -s "$BUILD/subixa.exe" "$DEST/subixa.exe"; then
+#
+# sha256sum rather than cmp, which is not installed here -- cmp ships in
+# diffutils and MSYS2's base does not include it, so `! cmp -s` was true on
+# every run for want of the binary and this guard failed the deploy it was
+# meant to protect. coreutils is guaranteed. Reading from stdin keeps the
+# filename out of the digest.
+if [[ "$(sha256sum < "$BUILD/subixa.exe")" != "$(sha256sum < "$DEST/subixa.exe")" ]]; then
     echo "error: $DEST/subixa.exe does not match $BUILD/subixa.exe after copying." >&2
     echo "       The staged bundle would ship a different binary than you built." >&2
     exit 1
