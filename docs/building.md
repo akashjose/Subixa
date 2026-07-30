@@ -37,8 +37,16 @@ sudo apt install -y build-essential cmake ninja-build pkg-config git curl \
   libdav1d-dev libxml2-dev libzimg-dev libass-dev libvulkan-dev \
   libpulse-dev libasound2-dev libpipewire-0.3-dev \
   libxrandr-dev libxpresent-dev libxss-dev libxkbcommon-dev libxinerama-dev \
-  libegl1-mesa-dev libgl-dev libgbm-dev
+  libegl1-mesa-dev libgl-dev libgbm-dev \
+  libwayland-dev wayland-protocols
 ```
+
+The wayland pair is not optional. `tools/build-deps.sh` configures mpv with
+`-Dwayland=enabled` rather than `auto`, so meson fails outright when it is
+absent instead of quietly producing an mpv without it — which is the point, but
+it means the packages have to be here. They were missing from this list until a
+clean CI runner became the first machine to build the stack without a desktop's
+worth of `-dev` packages already installed.
 
 `tools/build-deps.sh` checks for `meson`, `ninja`, `nasm`, `cmake`,
 `pkg-config`, `git`, `curl` and `glslangValidator` before it starts, and prints

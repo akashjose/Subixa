@@ -71,6 +71,7 @@ jobs:
             libpulse-dev libasound2-dev libpipewire-0.3-dev \
             libxrandr-dev libxpresent-dev libxss-dev libxkbcommon-dev libxinerama-dev \
             libegl1-mesa-dev libgl-dev libgbm-dev \
+            libwayland-dev wayland-protocols \
             ffmpeg
 
       - name: Cache Qt
