@@ -203,6 +203,10 @@ failure that looks like something else.
   `ColorSwatch`'s presets, which describe how subtitles are drawn over the film
   and must not follow the UI scheme.
 - Subtitle parsing must **not** block the GUI thread.
+- **No commit hashes in comments or docs.** Name the change — "when the search
+  proxy became hand-written" outlives a rebase or a history rewrite; a hash does
+  not. Every hash in the tree went dangling at once when the branch was
+  rewritten, and no sentence lost meaning when they were removed.
 
 ## Where things are
 

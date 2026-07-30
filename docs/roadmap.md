@@ -180,7 +180,8 @@ size, correct playback, and none of the work committed in between. Nothing
 about the bundle gave it away; what did was a missing `meta/schemaVersion` key
 in the registry. The floor is now split, Windows sits at 6.11, and the
 justification the 6.12 floor was written on had already expired: the
-`QSortFilterProxyModel` API it named left the tree with `a5e489f`.
+`QSortFilterProxyModel` API it named left the tree when the search proxy was
+replaced by a hand-written one.
 
 Rebuilding at HEAD then surfaced a real crash that nothing on Linux had seen.
 `SubtitleFilterModel` connected its source's `destroyed` signal to
@@ -208,7 +209,7 @@ engineering, in this order.
 
 Pushing was the first item here and is now done: the branch is on `origin`, CI
 is green on both platforms, and "ctest passes" has stopped being a sentence
-about one desk. `master` still stays at `721ebb6` and merges at release time,
+about one desk. `master` still stays where it is and merges at release time,
 not before.
 
 1. **Packaging, AppImage first.** The stack argues the order: Subixa needs
@@ -290,7 +291,7 @@ them next; the sizes are honest guesses.
   `LIBGL_ALWAYS_SOFTWARE=1` on this native host produces llvmpipe with no WSLg
   in the picture, which nothing could do when the note was written.
 - **The write cadence knob.** A crash loses up to thirty seconds of position
-  (`PositionWriteStep`, from `f800e8c`), named and commented if it wants
+  (`PositionWriteStep` in `PlaybackHistory`), named and commented if it wants
   lowering.
 - **No `qsTr()` anywhere, and no accessibility.** Zero files. Both get harder the
   longer they wait, and for a *reading* tool the second is more relevant than

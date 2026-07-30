@@ -74,6 +74,11 @@ does not test anything.
   colours in `Main.qml` and `ColorSwatch`'s presets describe how subtitles are
   drawn over the film, and must not follow the UI scheme.
 - **Subtitle parsing must not block the GUI thread.**
+- **No commit hashes in comments or documentation.** Name the change instead —
+  "when the search proxy became hand-written" survives a rebase, a rewrite or a
+  squash; `a5e489f` does not. Every hash cited in this tree went dangling at
+  once when the branch was rewritten to a single author identity, and the
+  sentences around them were still perfectly clear without the hash.
 
 ## Commit messages
 

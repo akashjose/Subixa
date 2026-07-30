@@ -34,10 +34,10 @@ endif()
 # two days behind the tree while a staged bundle still looked current.
 #
 # The code needs neither floor. The API that justified 6.12 -- QSortFilterProxy-
-# Model's begin/end FilterChange pair -- left the tree with a5e489f, when the
-# search proxy became hand-written on a measurement; it now survives only in the
-# comments explaining why it went. What the tree genuinely depends on is 6.9
-# behaviour (traps 15 and 20).
+# Model's begin/end FilterChange pair -- left the tree when the search proxy
+# became hand-written on a measurement, and now survives only in the comments
+# explaining why it went. What the tree genuinely depends on is 6.9 behaviour
+# (traps 15 and 20).
 #
 # Linux stays at 6.12 rather than dropping to a single shared 6.11 so the floor
 # cannot silently regress there: CI pins 6.12.0 through aqtinstall, and this
