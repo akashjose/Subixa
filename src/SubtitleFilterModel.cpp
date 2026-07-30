@@ -106,9 +106,26 @@ void SubtitleFilterModel::connectSource()
         connect(m_source, &QAbstractItemModel::layoutChanged, this,
                 [this] { rescan(true); }),
         // The manager parents its models to itself and empties them rather than
-        // deleting them, so this should never fire; it is here because the
-        // alternative to noticing is reading freed memory on the next tick.
-        connect(m_source, &QObject::destroyed, this, [this] { setSourceModel(nullptr); }),
+        // deleting them, so the only thing that destroys a source out from under
+        // this proxy is the whole object graph going away -- and there, a reset
+        // is fatal rather than defensive.
+        //
+        // Measured under gdb on Windows/Qt 6.11: ~SubtitleManager deletes its
+        // children, this fires, and setSourceModel's begin/endResetModel pair
+        // reaches a QQmlDelegateModel that is being destroyed in the same
+        // teardown. It takes the reset on a half-dead object and segfaults
+        // inside _q_modelAboutToBeReset. Linux/Qt 6.12 survives the same
+        // sequence, which is why nine suites and a desk run never showed it.
+        //
+        // So drop the state without announcing it. That keeps the reason this
+        // connection exists -- never read freed memory -- because data() and
+        // roleNames() both null-check m_source, and rowCount() follows
+        // m_accepted. Nothing that could still be looking outlives this point.
+        connect(m_source, &QObject::destroyed, this, [this] {
+            m_source = nullptr;
+            m_lines = nullptr;
+            m_accepted.clear();
+        }),
     };
 }
 

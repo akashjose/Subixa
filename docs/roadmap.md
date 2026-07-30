@@ -46,8 +46,9 @@ FFmpeg 8.1.2 and mpv 0.41.0 from pinned versions into a prefix, and
 Two consequences worth knowing. mpv 0.41 makes libplacebo's `gpu-next` the
 default renderer, so that bump changed the render path under the most delicate
 code in the project — the FBO handling trap 10 is about — and it has been
-exercised by hand but not by a test. And **the Windows build cannot configure
-until MSYS2 reaches Qt 6.12**, because the floor was raised deliberately.
+exercised by hand but not by a test. And the Qt floor is now **platform-split**
+— 6.12 on Linux, 6.11 on Windows — after a spell at 6.12 everywhere left the
+Windows build unable to configure at all. See below.
 
 **The test suite stopped lying.** Three suites — about 2,080 lines of assertions
 — called `QSKIP` when fixtures were absent, and `QSKIP` exits 0, so a checkout
@@ -142,6 +143,31 @@ writes real rpaths, `tools/install-linux.sh` scripts the update — which is how
 the development machine now runs the player day to day — and
 `tools/deploy-win.sh` scripts the Windows staging.
 
+**The Windows side is current again, and was not.** For three days the 6.12
+floor made `build-win/` impossible to reconfigure, so it went on staging a
+bundle from a build tree two days behind the checkout — right DLL count, right
+size, correct playback, and none of the work committed in between. Nothing
+about the bundle gave it away; what did was a missing `meta/schemaVersion` key
+in the registry. The floor is now split, Windows sits at 6.11, and the
+justification the 6.12 floor was written on had already expired: the
+`QSortFilterProxyModel` API it named left the tree with `a5e489f`.
+
+Rebuilding at HEAD then surfaced a real crash that nothing on Linux had seen.
+`SubtitleFilterModel` connected its source's `destroyed` signal to
+`setSourceModel(nullptr)` as a safety net, commented "this should never fire" —
+and at teardown it fires, running `begin/endResetModel` into a
+`QQmlDelegateModel` being destroyed in the same sequence. `qmlpanel` segfaulted;
+Qt 6.12 on Linux survives the identical sequence, which is why ten green suites
+on one desk had never shown it. The handler now drops its state without
+announcing a reset. **It is almost certainly latent on Linux too** — nothing
+about emitting a reset from a destructor chain is platform-specific — and it has
+no regression test.
+
+`tools/build-win.sh` exists so that sequence is reproducible: configure, build,
+fixtures, `ctest`, then `tools/deploy-win.sh`, with `set -e` making a staged
+bundle unreachable from a tree that does not pass. Both mistakes this recorded
+were staging mistakes, and neither is reachable through it.
+
 Ten suites pass, warning-free under `-Wall -Wextra` on every target.
 
 ## Next
@@ -167,11 +193,12 @@ engineering, in this order:
    packaging owes beyond the bundle is relocatability, which the absolute
    install rpaths deliberately do not attempt.
 
-3. **Finish the Windows build.** Blocked on MSYS2 reaching Qt 6.12, then:
-   nothing is packaged, deployment is scripted (`tools/deploy-win.sh`) but the
-   script has never run on a real Windows box — it was transcribed from
-   `docs/windows.md` and CI will exercise it once the Qt gate opens — and
-   nothing is signed. Azure Trusted Signing at about $10/month is the only
+3. **Finish the Windows build.** No longer blocked: the floor split to 6.11
+   there, and `tools/build-win.sh` runs configure, build, ten suites and
+   staging from a clean checkout (2026-07-31, 223 DLLs, 298 MB, verified
+   playing by capture). What remains is that nothing is *packaged* — a staged
+   folder is not an installer — and nothing is signed. Azure Trusted Signing at
+   about $10/month is the only
    certificate option that works headless in CI — OV certificates have needed a
    hardware token since June 2023. The reason the port was argued for is still
    unmeasured: 4K, HEVC and HDR have not been judged. `hwdec` is no longer among

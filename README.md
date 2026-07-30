@@ -118,7 +118,29 @@ list of `-dev` packages and a from-source build of libplacebo, FFmpeg and mpv
 via `tools/build-deps.sh`, and Windows builds under MSYS2 UCRT64 with gcc rather
 than MSVC. Neither fits honestly in a quickstart.
 
-The short version, once the dependencies exist:
+Once the dependencies exist, one script per platform does the rest:
+
+```bash
+tools/install-linux.sh      # Linux:   build a Release tree, then install it
+tools/build-win.sh          # Windows: build, run the suites, stage a bundle
+```
+
+`install-linux.sh` writes real rpaths, so the installed binary finds Qt and the
+media stack with no environment set, and it puts the binary, the desktop entry,
+the icon and the AppStream metainfo under the application id
+`com.akashjose.Subixa` where a distribution package expects them. It asks for
+sudo only when the prefix needs it. There is no CPack configuration and nothing
+is signed.
+
+Windows has no system location to install into, so the equivalent step is
+packing a folder that carries all 223 DLLs, Qt's plugins, the QML modules and a
+`qt.conf`. That is `tools/deploy-win.sh`, which `build-win.sh` calls last,
+producing `dist/subixa-win64/`. The suites sit between the build and the packing
+deliberately: a bundle that cannot be traced to a green build looks exactly like
+one that can.
+
+To work on the code rather than install it, configure a Debug tree by hand — on
+Linux:
 
 ```bash
 export CMAKE_PREFIX_PATH="$HOME/data/Qt/6.12.0/gcc_64"
@@ -127,14 +149,6 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 cmake --build build
 ./build/subixa /path/to/video.mkv
 ```
-
-On Linux, `tools/install-linux.sh` does the build and the install in one
-command — a Release tree, then `cmake --install`, asking for sudo only when
-the prefix needs it. The install writes real rpaths, so the installed binary
-finds Qt and the media stack with no environment set, and it puts the binary,
-the desktop entry, the icon and the AppStream metainfo under the application
-id `com.akashjose.Subixa` where a distribution package expects them. There is
-no CPack configuration and nothing is signed.
 
 ## Tests
 

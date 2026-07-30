@@ -35,10 +35,24 @@ jobs: freedesktop metadata validation, an Ubuntu 24.04 Debug/Release matrix that
 builds the media stack from source — the prefix cached on a hash of
 `tools/build-deps.sh`, because cold it costs twenty minutes — and runs every
 headless suite, and an MSYS2 UCRT64 job that checks the rolling Qt against the
-deliberate 6.12 floor and skips with a notice until MSYS2 ships it. The Windows
-deployment sequence became a script, `tools/deploy-win.sh`, with a guard for
-`windeployqt6`'s silent empty staging. And AppStream metadata exists and
-installs: `com.akashjose.Subixa.metainfo.xml`.
+Windows floor and skips with a notice below it. The Windows deployment sequence
+became a script, `tools/deploy-win.sh`, with a guard for `windeployqt6`'s silent
+empty staging; `tools/build-win.sh` then wrapped configure, build, fixtures,
+suites and staging into one command, so a bundle cannot come from a tree that
+did not pass. And AppStream metadata exists and installs:
+`com.akashjose.Subixa.metainfo.xml`.
+
+**The Qt floor split by platform, and a crash came out from behind it.** Linux
+requires 6.12, Windows 6.11: MSYS2 ships Qt and the media stack from one
+repository, so a floor its `qt6-base` cannot meet leaves the Windows build
+unconfigurable rather than merely older — which it was for three days, while
+still staging a bundle that looked entirely current. Rebuilding at HEAD then
+segfaulted `qmlpanel`. `SubtitleFilterModel` connected its source's `destroyed`
+signal to `setSourceModel(nullptr)` under a comment saying it should never fire;
+at teardown it fires, running `begin/endResetModel` into a `QQmlDelegateModel`
+being destroyed in the same sequence. Qt 6.12 on Linux survives the identical
+order, which is why ten green suites had never shown it. The handler now drops
+its state without announcing a reset.
 
 **The dependency stack moved to current releases and is built from source.**
 Linux was on Qt 6.9.3, FFmpeg 6.1.1 and mpv 0.37 while the Windows side was

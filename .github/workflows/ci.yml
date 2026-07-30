@@ -173,20 +173,22 @@ jobs:
             mingw-w64-ucrt-x86_64-mpv
             mingw-w64-ucrt-x86_64-ffmpeg
 
-      # The 6.12 floor is deliberate and a 6.11 prefix failing find_package is
-      # "intended behaviour and not a build error to work around"
-      # (docs/windows.md). MSYS2 rolls; when it ships 6.12 this gate opens on
-      # its own and the rest of the job runs unchanged.
-      - name: Check MSYS2 Qt against the 6.12 floor
+      # The floor is platform-split (CMakeLists.txt): Linux requires 6.12,
+      # Windows 6.11. MSYS2 supplies Qt *and* the media stack from one
+      # repository, so a floor its qt6-base cannot meet does not make the
+      # Windows build older, it makes it unconfigurable -- which is how a
+      # bundle came to be staged from a build tree two days behind the tree.
+      # This gate tracks the Windows half; raise it the day the floor rises.
+      - name: Check MSYS2 Qt against the 6.11 floor
         id: qt-gate
         run: |
           ver=$(pacman -Q mingw-w64-ucrt-x86_64-qt6-base | awk '{print $2}' | cut -d- -f1)
           echo "MSYS2 qt6-base is $ver"
-          if [ "$(printf '%s\n' 6.12.0 "$ver" | sort -V | head -n1)" = "6.12.0" ]; then
+          if [ "$(printf '%s\n' 6.11 "$ver" | sort -V | head -n1)" = "6.11" ]; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Windows build waiting on MSYS2::qt6-base is $ver, below the deliberate Qt 6.12 floor. The build half of this job is skipped until MSYS2 ships 6.12."
+            echo "::notice title=Windows build waiting on MSYS2::qt6-base is $ver, below the Windows Qt 6.11 floor. The build half of this job is skipped until MSYS2 ships it."
           fi
 
       - name: Configure and build

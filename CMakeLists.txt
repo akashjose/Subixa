@@ -25,9 +25,30 @@ endif()
 # The floor is the current release, not the oldest thing that happens to
 # compile. Nothing has shipped yet, so there is no installed base to carry, and
 # a floor that tracks the release lets the tree use the current spelling of an
-# API rather than the deprecated one -- QSortFilterProxyModel's begin/end
-# FilterChange pair being the first case. The MSYS2 side moves with it.
-find_package(Qt6 6.12 REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
+# API rather than the deprecated one.
+#
+# Windows floors one release lower, and the reason is the toolchain rather than
+# the code. MSYS2 supplies Qt *and* the whole media stack from one repository,
+# and its qt6-base is 6.11.1 -- so a 6.12 floor does not make the Windows build
+# older, it makes it unconfigurable, which is how build-win/ came to be frozen
+# two days behind the tree while a staged bundle still looked current.
+#
+# The code needs neither floor. The API that justified 6.12 -- QSortFilterProxy-
+# Model's begin/end FilterChange pair -- left the tree with a5e489f, when the
+# search proxy became hand-written on a measurement; it now survives only in the
+# comments explaining why it went. What the tree genuinely depends on is 6.9
+# behaviour (traps 15 and 20).
+#
+# Linux stays at 6.12 rather than dropping to a single shared 6.11 so the floor
+# cannot silently regress there: CI pins 6.12.0 through aqtinstall, and this
+# keeps a local build honest against it. Raise Windows to match the day MSYS2
+# ships 6.12.
+if(WIN32)
+    set(SUBIXA_QT_MIN 6.11)
+else()
+    set(SUBIXA_QT_MIN 6.12)
+endif()
+find_package(Qt6 ${SUBIXA_QT_MIN} REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
 
 # ---- libmpv and FFmpeg --------------------------------------------------
 # Subtitle text is demuxed and decoded directly rather than read from mpv: mpv
@@ -123,7 +144,7 @@ else()
     add_library(Subixa::ffmpeg ALIAS PkgConfig::FFMPEG)
 endif()
 
-qt_standard_project_setup(REQUIRES 6.12)
+qt_standard_project_setup(REQUIRES ${SUBIXA_QT_MIN})
 
 # An install rpath to everything the binary was built against, or `cmake
 # --install` produces a binary that quietly loads the distribution's older Qt

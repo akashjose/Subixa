@@ -16,9 +16,17 @@ native Windows binary — the MSYS2 shell is the build environment, not a runtim
 dependency of the player.
 
 MSYS2 rolls, so unlike Linux it reaches the required versions on its own. But it
-has to be brought up to date first. **Update before installing.** A prefix left
-at Qt 6.11 will fail `find_package` outright, which is the intended behaviour
-and not a build error to work around.
+has to be brought up to date first. **Update before installing.** A prefix below
+the Windows floor will fail `find_package` outright, which is the intended
+behaviour and not a build error to work around.
+
+That floor is **Qt 6.11**, one release below the Linux one, and the split is
+deliberate. MSYS2 supplies Qt *and* the media stack from a single repository, so
+a floor its `qt6-base` cannot meet does not make the Windows build older — it
+makes it unconfigurable, which is how a bundle once came to be staged from a
+build tree two days behind the checkout while looking entirely current.
+`CMakeLists.txt` carries the full reasoning. Raise this side the day MSYS2
+ships 6.12.
 
 ```bash
 pacman -Syu                              # then reopen the shell and run it again
@@ -40,6 +48,17 @@ CMake and Qt all have to come out of the same prefix, and MSYS2's own `cmake`
 package is a native Windows CMake that already searches `/ucrt64`, so no
 `CMAKE_PREFIX_PATH` is needed.
 
+**`tools/build-win.sh` is the command to run.** It configures, builds, generates
+the fixtures if they are absent, runs the ten suites and stages the bundle —
+and `set -e` puts `ctest` between the build and the deploy, so nothing can be
+staged from a tree that does not pass.
+
+```bash
+./tools/build-win.sh                  # build-win/ -> dist/subixa-win64/
+```
+
+By hand, which is what that script does:
+
 ```bash
 cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-win
@@ -60,23 +79,35 @@ ships no `.pc` files at all. The full reasoning is in the comment above
 
 ### Last recorded build
 
-**Historical, and now below the floor.** This records a build from 2026-07-28,
-before the Qt requirement moved to 6.12. It has not been rebuilt since, and Qt
-6.11.1 will no longer configure. Treat it as the last known-good rather than as
-current instructions.
+**2026-07-31**, from a clean checkout through `tools/build-win.sh`: 267 targets
+warning-free under `-Wall -Wextra`, ten suites green, bundle staged at 223 DLLs
+and 298 MB.
 
 | | |
 |---|---|
 | Toolchain | MSYS2 UCRT64, gcc 16.1.0, CMake 4.4.0, Ninja 1.13.2 |
-| Qt | 6.11.1 — **below the current 6.12 floor** |
+| Qt | 6.11.1 — the Windows floor |
 | libmpv | 0.41.0 |
 | FFmpeg | 8.1.2 |
+
+The run before this one was 2026-07-28, and the gap is worth recording rather
+than overwriting: for those three days the Qt floor sat at 6.12, which MSYS2
+could not satisfy, so `build-win/` could not be reconfigured at all. It went on
+producing a bundle that passed every check anyone thought to run — right DLL
+count, right size, correct playback — while containing none of the work
+committed in the meantime. What caught it was the *absence* of a
+`meta/schemaVersion` key in the registry, not anything about the bundle itself.
 
 ## Deploying
 
 Scripted as `tools/deploy-win.sh`, which runs the sequence below plus the
 guards a script needs — chiefly refusing to continue when `windeployqt6` stages
 nothing. The listing stays here because the *reasons* live in its comments.
+
+`tools/build-win.sh` calls it as its last step, and that is the normal way to
+reach it. Run it directly only to re-stage a build tree you already know is
+current — it stages whatever it is pointed at, which is the right behaviour for
+a packer and the reason a stale tree once shipped unnoticed.
 
 `windeployqt6` handles Qt and nothing else. libmpv's dependency tree is the
 larger half of the payload and has to be walked separately.
