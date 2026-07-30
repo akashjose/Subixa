@@ -133,15 +133,45 @@ Playback that gate only the *restore* — history keeps recording, so finishing
 a film still clears its position with resume off, and switching a toggle back
 on remembers everything. Both gates carry mutation-checked regression tests.
 
-**The release machinery exists, and none of it has run on another machine.**
-`.github/workflows/ci.yml` — metadata validation, an Ubuntu 24.04
-Debug/Release matrix with the media stack cached on a hash of
-`tools/build-deps.sh`, and an MSYS2 UCRT64 job gated on MSYS2 reaching the Qt
-6.12 floor (6.11.1 on 2026-07-29, so it skips with a notice until then).
+**The release machinery has now run on machines that are not this one, and it
+is green on all of them.** `.github/workflows/ci.yml` — metadata validation, an
+Ubuntu 24.04 Debug/Release matrix with the media stack cached on a hash of
+`tools/build-deps.sh`, and an MSYS2 UCRT64 job gated on the Windows Qt floor.
+As of 2026-07-31 all four legs pass: lint, Linux Debug, Linux Release, Windows.
+Ten suites in three independent configurations, on hardware nobody here owns.
 `com.akashjose.Subixa.metainfo.xml` validates and installs. `cmake --install`
 writes real rpaths, `tools/install-linux.sh` scripts the update — which is how
 the development machine now runs the player day to day — and
-`tools/deploy-win.sh` scripts the Windows staging.
+`tools/build-win.sh` runs the Windows sequence end to end.
+
+**It took four commits to get there, and what each one found is the point.**
+The workflow had never executed, so nothing in it had been tested by anything
+except reading:
+
+- **The executable bit.** `./tools/build-deps.sh: Permission denied`, before a
+  line was compiled. Five of the eight shell scripts were committed `100644`
+  and every caller invokes them as `./path`. git takes the bit from the
+  filesystem and a Windows checkout reports none, so the scripts added from
+  that side landed unexecutable. The Windows job never noticed, because MSYS2
+  does not enforce the bit — the platform most of this was written on could not
+  reproduce the failure.
+- **The wayland packages.** meson stopped at `Dependency "wayland-client" not
+  found`. `tools/build-deps.sh` asks for `-Dwayland=enabled` rather than
+  `auto`, deliberately, but neither `docs/building.md`'s apt line nor CI's copy
+  of it listed `libwayland-dev` or `wayland-protocols`. **The documented
+  dependency list could not build the stack it documented**, and had not been
+  able to since it was written. It worked on the development machine only
+  because an ordinary Ubuntu desktop already carries those headers. Same shape
+  as traps 24 and 25: an assumption that survives until something clean tries
+  to follow the instructions.
+- **The Qt gate**, which skipped the entire Windows build against a 6.12 floor
+  the tree no longer needs. Covered above.
+- **A cancelled run**, from two pushes minutes apart against
+  `cancel-in-progress: true`. Not a defect — the concurrency block doing its
+  job — but it reads as a failure in the log and cost a cycle to recognise.
+
+None of these are bugs in the product. All four are things only a second
+machine could tell us, which is the entire argument for having pushed.
 
 **The Windows side is current again, and was not.** For three days the 6.12
 floor made `build-win/` impossible to reconfigure, so it went on staging a
@@ -174,15 +204,14 @@ Ten suites pass, warning-free under `-Wall -Wextra` on every target.
 
 **Feature complete is the honest word for where this sits** — nothing below is
 a feature. What stands between 0.5.0 and something releasable is release
-engineering, in this order:
+engineering, in this order.
 
-1. **Push.** The workflow has never executed: nothing is pushed, so "ctest
-   passes" is still a sentence about one desk, and the first push is also the
-   workflow's first real test — budget a debugging round for it. `master`
-   stays at `721ebb6` and merges at release time, not before. Only the
-   repository owner takes this step.
+Pushing was the first item here and is now done: the branch is on `origin`, CI
+is green on both platforms, and "ctest passes" has stopped being a sentence
+about one desk. `master` still stays at `721ebb6` and merges at release time,
+not before.
 
-2. **Packaging, AppImage first.** The stack argues the order: Subixa needs
+1. **Packaging, AppImage first.** The stack argues the order: Subixa needs
    FFmpeg 8, mpv 0.41 and libplacebo 7.3, and no distribution ships them — so
    a `.deb` cannot declare its dependencies from any archive and would bundle
    under `/opt` anyway, which throws away most of what a `.deb` is for. An
@@ -193,11 +222,19 @@ engineering, in this order:
    packaging owes beyond the bundle is relocatability, which the absolute
    install rpaths deliberately do not attempt.
 
-3. **Finish the Windows build.** No longer blocked: the floor split to 6.11
-   there, and `tools/build-win.sh` runs configure, build, ten suites and
-   staging from a clean checkout (2026-07-31, 223 DLLs, 298 MB, verified
-   playing by capture). What remains is that nothing is *packaged* — a staged
-   folder is not an installer — and nothing is signed. Azure Trusted Signing at
+   The two CI artifacts make the gap concrete. Windows uploads ~70 MB zipped
+   and it runs when you download it; Linux uploads a few MB that will not run
+   anywhere, because its rpaths point at a runner's `~/data/subixa-stack` on a
+   VM that no longer exists. The Windows side reached a usable artifact first
+   only because `windeployqt6` does that packing for you. Nobody has written
+   the Linux equivalent, and an AppImage is what it would be.
+
+2. **Finish the Windows build.** No longer blocked: the floor split to 6.11
+   there, `tools/build-win.sh` runs configure, build, ten suites and staging
+   from a clean checkout (2026-07-31, 223 DLLs, 298 MB, verified playing by
+   capture), and CI now does the same on a runner and uploads the result. What
+   remains is that nothing is *packaged* — a staged folder is not an installer
+   — and nothing is signed. Azure Trusted Signing at
    about $10/month is the only
    certificate option that works headless in CI — OV certificates have needed a
    hardware token since June 2023. The reason the port was argued for is still
@@ -229,6 +266,14 @@ them next; the sizes are honest guesses.
   `powershell.exe` and `tools/wsl-screenshot.ps1`. On X11 its three checks —
   painting, moving, right clip — are a few lines with `import` and two captures a
   second apart. Nothing has been written.
+
+  `tools/wsl-screenshot.ps1` does not work on native Windows either, and the
+  reason is structural rather than incidental: it requires the window title to
+  end in `(<distro>)`, which is a WSLg-ism added deliberately to tell an app
+  window from a Windows-side one. On native Windows no title carries it, so the
+  enumeration matches nothing and it returns `NOWINDOW` every time. Matching on
+  the process id instead is a few lines and was done throwaway to verify the
+  2026-07-31 Windows bundle by capture; it has not been folded back in.
 - **The QML harness runs `offscreen`**, so delegate geometry, the FBO cap and
   whether the panel actually *scrolled* are outside it. Both cheap substitutes
   are ruled out in writing: Xvfb returns byte-identical captures a second apart,
