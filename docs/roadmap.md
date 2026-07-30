@@ -223,12 +223,40 @@ not before.
    packaging owes beyond the bundle is relocatability, which the absolute
    install rpaths deliberately do not attempt.
 
-   The two CI artifacts make the gap concrete. Windows uploads ~70 MB zipped
+   The two CI artifacts made the gap concrete. Windows uploads ~70 MB zipped
    and it runs when you download it; Linux uploads a few MB that will not run
    anywhere, because its rpaths point at a runner's `~/data/subixa-stack` on a
-   VM that no longer exists. The Windows side reached a usable artifact first
-   only because `windeployqt6` does that packing for you. Nobody has written
-   the Linux equivalent, and an AppImage is what it would be.
+   VM that no longer exists.
+
+   **`tools/make-appimage.sh` now closes that**, built and measured on
+   2026-07-31: 82 MB, `linuxdeploy` plus its Qt plugin, every rpath rewritten
+   to `$ORIGIN`. It runs with `~/data` moved aside — Qt and the media stack
+   unreachable — reaching `VO: [libmpv] 1280x720`. What is left is wiring it
+   into CI and uploading it, which is where the release job comes in.
+
+   **The glibc floor is 2.38, and it was measured rather than assumed.** An
+   AppImage bundles everything except glibc, so the build host sets the
+   minimum. Scanning every ELF file in the bundle, 34 of them want
+   `GLIBC_2.38` — `libmpv`, `libplacebo`, `libshaderc` among them — so this is
+   the stack's requirement, not one stray library's. That means **Ubuntu
+   23.10+, Debian 13+, Fedora 39+**, and it means Ubuntu 22.04 and Debian 12
+   are out. Lowering it would mean building on an older base, which collides
+   with the gcc 14 and C++23 requirement; 22.04 tops out at gcc 12.
+
+   Two things learned validating it, both worth keeping:
+
+   - **The AppImage excludelist omits libraries on the theory that the target
+     has them.** `libpipewire-0.3.so.0` is on it, so the bundle does not carry
+     it, and on Ubuntu 22.04 the AppImage dies on the missing library before
+     glibc is ever consulted. Within the supported range the assumption holds
+     — every distribution with glibc 2.38 ships pipewire — but the failure
+     mode is a missing `.so` on a machine nobody tested, which is the same
+     shape as the wayland packages.
+   - **Hiding `~/data` is not a clean room.** It removes Qt and the media
+     stack and nothing from `/usr/lib`, so it cannot catch an unbundled system
+     library. Only a machine that never had the build dependencies can. The
+     WSL Ubuntu 22.04 instance is that machine, and it is how the pipewire gap
+     was found.
 
 2. **Finish the Windows build.** No longer blocked: the floor split to 6.11
    there, `tools/build-win.sh` runs configure, build, ten suites and staging
@@ -293,6 +321,12 @@ them next; the sizes are honest guesses.
 - **The write cadence knob.** A crash loses up to thirty seconds of position
   (`PositionWriteStep` in `PlaybackHistory`), named and commented if it wants
   lowering.
+- **`qtwayland` is not installed, here or in CI.** The `aqtinstall` line asks
+  for `qtshadertools` and `qtimageformats` only, so there is no `wayland`
+  platform plugin and Qt logs `Could not find the Qt platform plugin "wayland"`
+  before falling back. On a Wayland desktop that means running through
+  XWayland. One more module in the `aqtinstall` line, and one more entry in the
+  AppImage, would fix it.
 - **No `qsTr()` anywhere, and no accessibility.** Zero files. Both get harder the
   longer they wait, and for a *reading* tool the second is more relevant than
   usual. Note `SubtitleManager.cpp` builds `"%1 track%2, %3 line%4%5"` by
