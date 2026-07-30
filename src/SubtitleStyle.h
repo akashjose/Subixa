@@ -6,6 +6,9 @@
 #include <QtGui/QColor>
 
 #include <QtCore/QString>
+#include <QtCore/QStringView>
+
+#include "SubtitleTypes.h"
 
 // Turning a decoder's ASS payload into markup the browser can show.
 //
@@ -23,7 +26,25 @@ namespace SubtitleStyle {
 // `background` is the colour the row will be drawn on. Subtitle colours are
 // chosen to sit over a picture, so a light theme would otherwise render white
 // dialogue invisible -- see readableOn().
-QString toStyledText(const QString &assPayload, const QColor &background);
+//
+// `base` is the cue's [V4+ Styles] row, which is where most professionally
+// authored ASS says everything: a track styled entirely through named styles
+// carries no override tags at all, and read without its table it comes out plain
+// in the browser while libass draws it italic and coloured over the picture --
+// the two halves of the reader's screen disagreeing on the one thing this
+// product is for. Override tags are applied *on top* of it, and \r drops back to
+// it, which is the precedence ASS itself has.
+QString toStyledText(const QString &assPayload, const QColor &background,
+                     const AssStyle &base = AssStyle());
+
+// The [V4+ Styles] section of an ASS header, as libavcodec publishes it in
+// `AVCodecContext::subtitle_header`, parsed into a name -> style map.
+//
+// The section's own `Format:` line declares which column is which and files do
+// differ, so it is read rather than assumed -- guessing the canonical order would
+// silently read Bold out of ScaleX on the files that reorder, and produce
+// plausible nonsense instead of an error.
+AssStyleTable parseStyleTable(const QString &header);
 
 // A colour close enough to `colour` to still read as that speaker's colour, but
 // far enough from `background` to be legible on it. Returns `colour` unchanged

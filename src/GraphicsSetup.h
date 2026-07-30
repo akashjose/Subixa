@@ -5,6 +5,8 @@
 
 #include <QtCore/QString>
 
+class QSettings;
+
 // Picks a GL driver before Qt creates its first context, so the player is not
 // silently stuck on a software rasterizer when the machine has a usable GPU.
 //
@@ -29,7 +31,9 @@ struct Choice
 
 // Runs before QGuiApplication. May set GALLIUM_DRIVER in this process's
 // environment. Honours an existing GALLIUM_DRIVER and SUBIXA_NO_GPU=1.
-Choice configure(int argc, char *argv[]);
+// `settings` is where the probe result is cached -- handed in rather than
+// opened here, so the file keeps a single owner (SettingsService).
+Choice configure(int argc, char *argv[], QSettings &settings);
 
 // True when argv asks for probe mode -- the child process spawned by configure()
 // to find out whether the hardware driver actually works. It creates a context,

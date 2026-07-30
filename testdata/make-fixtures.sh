@@ -21,15 +21,25 @@ set -euo pipefail
 cd "$(dirname "$0")"
 CLIP=../testclip.mp4
 
-if [[ ! -f $CLIP ]]; then
-    echo "missing $CLIP -- generate it first:" >&2
-    echo "  ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=30:duration=15 \\" >&2
-    echo "         -f lavfi -i sine=frequency=440:duration=15 \\" >&2
-    echo "         -c:v libx264 -c:a aac testclip.mp4" >&2
+command -v ffmpeg >/dev/null || {
+    echo "ffmpeg is not on PATH -- no fixture can be built without it" >&2
     exit 1
-fi
+}
 
 q=(-y -loglevel error)
+
+# The base clip every other fixture is muxed from. Generated rather than checked
+# in because it is 6 MB, and generated *here* rather than printed as an
+# instruction because a fixture step that tells you what to run is a fixture step
+# that leaves three suites skipping to green. -bitexact drops the encoder version
+# strings, so the same ffmpeg produces the same bytes twice.
+if [[ ! -f $CLIP ]]; then
+    echo "testclip.mp4"
+    ffmpeg "${q[@]}" -fflags +bitexact \
+        -f lavfi -i testsrc2=size=1280x720:rate=30:duration=15 \
+        -f lavfi -i sine=frequency=440:duration=15 \
+        -c:v libx264 -c:a aac -flags +bitexact "$CLIP"
+fi
 
 echo "subs.mkv"
 ffmpeg "${q[@]}" -i "$CLIP" -i en.srt -i styled.ass -i fr.srt \

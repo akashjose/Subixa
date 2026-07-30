@@ -33,12 +33,21 @@ public:
         TextRole,       // display text: override tags stripped, entities decoded
         RawTextRole,    // decoder payload, exactly as the decoder gave it
         StyledTextRole, // that payload as markup: italics, bold, speaker colours
+        StyleNameRole,  // the [V4+ Styles] row the cue names, "" when it names none
+        ActorRole,      // the ASS Name field: who speaks, when the file says
     };
     Q_ENUM(Role)
 
     explicit SubtitleLineModel(QObject *parent = nullptr);
 
     void setLines(const QVector<SubtitleLine> &lines);
+
+    // The track's [V4+ Styles] table, which is what a cue's style name resolves
+    // against. Most professionally authored ASS says italic, bold and colour
+    // here and puts no override tags in the cues at all, so without it those
+    // tracks render plain in the browser while libass draws them styled over the
+    // picture. Set alongside setLines(); tiny, so it is held by value.
+    void setStyles(const AssStyleTable &styles);
 
     // The colour rows are drawn on, so a cue's own colour can be kept legible
     // against it -- subtitle colours are chosen to sit over a picture, and white
@@ -63,5 +72,6 @@ signals:
 
 private:
     QVector<SubtitleLine> m_lines;
+    AssStyleTable m_styles;
     QColor m_background;
 };

@@ -5,13 +5,23 @@
 
 ## Tests
 
+Most media fixtures are generated rather than committed, so a fresh clone has to
+build them first. Three suites **fail** rather than skip without them, which is
+deliberate: a `QSKIP` exits 0, and a checkout that had never run this script used
+to report every suite green having asserted almost nothing.
+
 ```bash
+./testdata/make-fixtures.sh          # embedded, sidecar and shifted-timeline cases
+./testdata/make-fixtures.sh --big    # plus huge.mp4 and a 200k-cue ASS sidecar
 cd build && ctest --output-on-failure     # or run ./build/tst_subtitles directly
 ```
 
-Six headless suites, none needing a compositor or a rendered frame —
-deliberately, because a screenshot is the least reliable evidence available here
-(see the degraded-state note below). Run these before reaching for the UI.
+Ten headless suites, none needing a compositor or a rendered frame —
+deliberately, because on the WSL leg a screenshot is the least reliable evidence
+available (see the degraded-state note below), and a suite that needs no window
+runs the same on every platform. An eleventh ctest entry, `rendercanary`, is
+registered `DISABLED` under the `manual` label so it has a name without ever
+running in a headless batch. Run these before reaching for the UI.
 
 - **`tst_subtitles`** — the extractor against the fixtures (the 8-comma ASS field
   layout, entity decoding, both halves of the rebase rule) plus
@@ -24,6 +34,16 @@ deliberately, because a screenshot is the least reliable evidence available here
   Sources are compiled into the test target rather than shared via a static
   library: `qt_add_qml_module` registers the QML-exposed types from the sources
   listed in `qt_add_executable`, and moving them out breaks that registration.
+- **`tst_searchproxy`** — what the rebuilt search model *emits*, rather than
+  what it answers. The answers — the seven characterization invokables — stay
+  pinned in `tst_subtitles` and were the specification the rewrite was held to;
+  this suite pins the traffic, which is the half a caller cannot see by asking
+  questions: one `modelReset` per filter change, never a row-level insert or
+  remove, and nothing at all when the accepted rows do not move. Also the edge
+  that would fail silently: a pattern gaining or losing its space flips the
+  hard-space-folding path, and both directions rescan from the source rather
+  than from the survivors. It needs no fixtures and no window — the tracks are
+  built in memory, because what is under test is signal shape, not parsing.
 - **`tst_mpvtracks`** — libmpv directly, `vo=null`. Verifies that selecting a
   track changes what mpv *would* burn over the video, read back as text from
   `sub-text` rather than looked at. `track-list/N/ff-index` is confirmed present,
@@ -31,13 +51,46 @@ deliberately, because a screenshot is the least reliable evidence available here
   strings. Note `vo=null` rather than `QT_QPA_PLATFORM=offscreen`: offscreen never
   creates a render context, so the queued `loadfile` never flushes and mpv loads
   nothing at all (trap 2).
+- **`tst_conformance`** — the only suite whose inputs are bytes in git rather
+  than media muxed at test time, which is the whole reason it exists separately.
+  `testdata/conformance/` is 33 KB of containers (47 KB tracked with the golden
+  and sources) built from a 32x32 token video stream, and `golden.tsv` records
+  what the extractor made of every cue in them.
+  Every other fixture is muxed by whatever ffmpeg is installed, so a Linux run
+  and a Windows run each decode inputs they produced themselves and their
+  agreement proves nothing; this one decodes identical bytes everywhere. A
+  decoder change or an FFmpeg major bump then arrives as a named line rather than
+  as a pass. It asserts the *application's* view — startMs, endMs and the text
+  after tag stripping and entity decoding — rather than the raw `rect->ass`
+  string, because the raw contract belongs to the decoder and will not survive
+  the eventual AVSubtitle-to-AVFrame port.
+  The corpus is exempted from line-ending normalisation in `.gitattributes`: one
+  source file carries CRLF deliberately, and `*.srt text eol=lf` would have
+  converted it on commit, leaving a case that still passed while testing nothing.
+  Updating the golden requires `SUBIXA_REGOLD=1 ./tools/regold.sh --reason "..."`,
+  and the reason is recorded in the file. A golden that rewrites itself on failure
+  does not test anything: the first person to see a red re-runs with the flag, the
+  diff scrolls past, and the regression becomes the expected output.
+- **`tst_assstyles`** — the ASS `[V4+ Styles]` table, from the header to the
+  browser: the `Format:` line deciding which column is which, `&HAABBGGRR`
+  colours read as ABGR rather than RGB, `-1` as true, override tags beating the
+  base style, and a cue naming a style the table lacks reading plain rather
+  than taking another row's. The cases are the ones where a plausible
+  implementation is wrong rather than broken — a swapped colour or an inverted
+  flag produces output that looks fine. One case runs end to end through the
+  committed `styletable.mkv`, and another corrupts a cache entry's version byte
+  to assert a version-2 entry is *refused* rather than read with the version-3
+  layout (trap 14).
 - **`tst_qmlpanel`** — the QML layer, which until now had no harness at all. It
   loads the real `Main.qml` (not a mock) under `QT_QPA_PLATFORM=offscreen` and
   drives it through the object tree: a tab click swaps the model, the search box
   reaches the proxy after its debounce, `currentRow` scrolls the view and stops
   when follow is off, a remembered track is restored on the next open, detaching
   keeps search text and tab, and the theme singleton reaches a panel in either
-  window. Nothing in it asserts a pixel. It needs `offscreen` rather than
+  window. Two newer cases, `resumeToggleOffIgnoresAStoredPosition` and
+  `subtitleToggleOffOpensOnTheDefaultTrack`, pin that switching either restore
+  off gates only the restore — the memory survives the off period and is back
+  the moment the toggle is. Nothing in it asserts a pixel. It needs `offscreen` rather than
   `minimal` — `minimal` has no scene graph, so Loaders never instantiate and the
   panel never exists. It writes into a temporary `XDG_CONFIG_HOME`/`XDG_CACHE_HOME`,
   since the player now remembers things and a test that quietly wrote into the
@@ -76,6 +129,17 @@ deliberately, because a screenshot is the least reliable evidence available here
   separate groups: finishing a film clears the position and must *not* forget that
   this household reads the Latin American Spanish track.
 
+- **`tst_settingsservice`** — the settings file's owner, where construction *is*
+  the operation under test: the service migrates and prunes in its constructor,
+  so every case writes a raw ini, constructs a service over it, and asserts on
+  what is left. Mostly the version key (a fresh file gets it, a file written by
+  a *newer* schema is left entirely alone) and the prune's complements — a
+  prune that deletes too much looks identical to one that works until a year of
+  positions disappears, so the assertions are about what must survive it: a
+  legacy entry is stamped rather than dropped, a recent entry keeps its stamp,
+  the preferred language outlives its group's prune, and the preference groups
+  are never touched at all.
+
 `tst_subtitles` also now covers two things that were bugs rather than
 hypotheticals: that a poisoned count in a cache entry reads back as a miss with
 the real cues still returned (see the note in the test about what that does and
@@ -94,8 +158,12 @@ keep the optimised `QString::contains()` path.
 
 ## The render canary
 
-The one thing the suites above cannot see is whether a picture appeared. That is
-also the thing this environment lies about most, so it has its own tool:
+The one thing the suites above cannot see is whether a picture appeared. Under
+WSLg that is also the thing the environment lies about most, so the WSL leg has
+its own tool — and it is WSL tooling through and through: it grabs its frames
+via `wsl-screenshot.ps1`, and on any other host it exits at once with *cannot
+reach the Windows side*. The X11 equivalent — `import`, two captures a second
+apart — is a few lines nobody has written yet; the roadmap carries it.
 
 ```bash
 ./tools/render-canary.sh                 # testclip.mp4, the right clip for it
@@ -161,6 +229,11 @@ pixel test that runs under Xvfb will report failures that are not there, which a
 rules Xvfb out for the QQuickTest harness idea below as far as video pixels go.
 
 ## Seeing the UI from WSL
+
+Everything from here down is the WSL leg's operating manual — on the native host
+a plain `import -window` capture is trustworthy and none of it applies. It stays
+because WSL is a supported target, and because every paragraph in it was paid
+for.
 
 WSLg windows are Wayland surfaces and do **not** show up in an XWayland root grab
 (`ffmpeg -f x11grab -i :0.0` comes back black, with or without `QT_QPA_PLATFORM=xcb`).
@@ -230,23 +303,24 @@ is the likely mechanism, which is consistent with fills, shapes and video all be
 
 Neither `QQuickWindow::setTextRenderType(QtTextRendering)` nor
 `QFont::NoSubpixelAntialias` fixes it; both are set anyway because both are right
-independently. **The only known workaround is to avoid the driver: `SUBIXA_NO_GPU=1` renders
-the UI correctly.**
-
-That leaves a genuine trade, unresolved at the time of writing, and it should be settled
-before release because it decides whether the product's central feature is legible:
+independently. When this was found, the only workaround was to avoid the driver
+(`SUBIXA_NO_GPU=1`), which was a genuine trade, because it decided whether the product's
+central feature was legible:
 
 | | UI text | video |
 |---|---|---|
 | D3D12 | destroyed | 10-bit native, any window size |
 | llvmpipe | correct | capped to 1280x720 by `FboCap`, ~800% CPU on 720p |
 
-The shape of the fix is to extend `GraphicsSetup`'s existing child-process probe — it
-already re-runs the binary to check `GL_RENDERER` — so it also samples a single-channel
-texture and rejects a driver that gets it wrong, with an override in Settings.
+That trade has since been dissolved rather than taken: `PaintedText` draws glyphs through
+QPainter into an ordinary texture, which the driver colours correctly, and `AppText`
+switches to it at runtime when the real `GL_RENDERER` is the one that lies — with an
+override in Settings — so D3D12 keeps its video and the text survives it. The
+single-channel-texture probe this file once sketched was never needed.
 
-Consequence for screenshots meanwhile: **verify colours on rectangles, never on glyphs**,
-and check which driver the run used before reading anything into text colour.
+Consequence for screenshots on this driver: **verify colours on rectangles, never on bare
+`Text` glyphs**, and check which driver the run used before reading anything into text
+colour.
 
 Two things to know before believing a black window:
 

@@ -3,6 +3,7 @@
 
 #include "GraphicsSetup.h"
 #include "MpvEngine.h"
+#include "SettingsService.h"
 
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QDebug>
@@ -15,8 +16,74 @@
 #include <QtQuick/QSGRendererInterface>
 #include <QtQuickControls2/QQuickStyle>
 
+#ifdef Q_OS_WIN
+// After the Qt headers, and with both guards: windows.h defines min and max as
+// macros, which breaks anything including <algorithm> behind it.
+// Guarded: Qt's own Windows build already defines both, and redefining them is a
+// warning in a tree that is otherwise clean under -Wall -Wextra.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <cstdio>
+#endif
+
+namespace {
+
+#ifdef Q_OS_WIN
+// The player is linked as a GUI binary -- see WIN32_EXECUTABLE in CMakeLists.txt
+// -- so Windows gives it no console and Qt sends qInfo() to the debugger, where
+// nobody launching from a terminal will find it. That is the right default for a
+// double-click, but it also hides the two lines most worth reading when a
+// Windows install misbehaves: the GL_RENDERER the driver reported and which
+// hardware decoder mpv settled on.
+//
+// So borrow the console of whatever started us, if there is one. Launched from
+// Explorer there is no parent console, AttachConsole fails, and nothing changes
+// -- which is the point. No black window on a double-click.
+void attachParentConsole()
+{
+    if (!AttachConsole(ATTACH_PARENT_PROCESS))
+        return;
+
+    // Only the streams that are not already pointed somewhere. `subixa.exe >
+    // log.txt` leaves a perfectly good file handle here, and reopening that onto
+    // the console would quietly discard the redirection the user asked for.
+    const auto adopt = [](DWORD stdHandle, FILE *stream, const char *mode) {
+        const HANDLE existing = GetStdHandle(stdHandle);
+        if (existing && existing != INVALID_HANDLE_VALUE)
+            return;
+
+        // Qt chooses between stderr and the debugger by looking at the standard
+        // *handle*, while fprintf goes through the CRT's own stream, so both
+        // have to be repointed or the attach only half works.
+        const HANDLE console =
+            CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr,
+                        OPEN_EXISTING, 0, nullptr);
+        if (console == INVALID_HANDLE_VALUE)
+            return;
+        SetStdHandle(stdHandle, console);
+        std::freopen("CONOUT$", mode, stream);
+    };
+
+    adopt(STD_OUTPUT_HANDLE, stdout, "w");
+    adopt(STD_ERROR_HANDLE, stderr, "w");
+}
+#endif  // Q_OS_WIN
+
+}  // namespace
+
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_WIN
+    // Before anything logs, which means before the graphics probe below.
+    attachParentConsole();
+#endif
+
     // The mpv render API here is the OpenGL one, so the scene graph must also be
     // OpenGL. Qt 6 can otherwise pick a different RHI backend and the FBO handle
     // we hand mpv would be meaningless. Must run before QGuiApplication.
@@ -53,9 +120,19 @@ int main(int argc, char *argv[])
         return GraphicsSetup::runProbe();
     }
 
+    // The owner of the settings file, and its place in this sequence is
+    // load-bearing three ways: after the names above (QSettings resolves its
+    // path from them), after the probe early-exit (the throwaway child must
+    // not touch the file), and before anything reads it -- the graphics cache
+    // next, then everything the QML engine creates. Declared before MpvEngine
+    // and the engine, so it is destroyed last, after ~PlaybackHistory and
+    // ~ShortcutRegistry have flushed the store they borrow from it.
+    SettingsService settings;
+
     // Mesa reads GALLIUM_DRIVER when it loads the driver, which happens on the
     // first context -- so this has to run before QGuiApplication.
-    const GraphicsSetup::Choice graphics = GraphicsSetup::configure(argc, argv);
+    const GraphicsSetup::Choice graphics =
+        GraphicsSetup::configure(argc, argv, settings.store());
 
     // Pinned rather than left to Qt's per-platform default. Every control in the
     // app is drawn by components under qml/ui/ against the theme, and those need
@@ -70,6 +147,22 @@ int main(int argc, char *argv[])
     // looks like an installed one. The desktop entry names the installed copy
     // separately; this is what the window and the task switcher use.
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/subixa.svg")));
+
+    // Ties the window to com.akashjose.Subixa.desktop. The only mechanism under
+    // Wayland, which has no WM_CLASS for a shell to match on. Name goes without
+    // the suffix, and is the application id rather than the binary's name.
+    //
+    // This does NOT set WM_CLASS. Under X11 Qt takes that from applicationName
+    // instead -- a running window measures as `WM_CLASS(STRING) = "subixa",
+    // "subixa"` under xprop -- which is why the desktop entry's StartupWMClass
+    // says "subixa" and not this. The two are different identifiers for
+    // different display servers, and making them agree would break X11.
+    //
+    // The application and organisation names above stay "subixa" for the same
+    // reason plus one more: they are what QSettings, the cue cache and the
+    // resume store build their paths from, and they are not the freedesktop
+    // identity.
+    app.setDesktopFileName(QStringLiteral("com.akashjose.Subixa"));
 
     // Grayscale glyphs, belt and braces with the render type above.
     //
@@ -123,6 +216,14 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("mpvEngine"), &mpvEngine);
     engine.rootContext()->setContextProperty(QStringLiteral("initialFiles"),
                                              parser.positionalArguments());
+    // The Qt actually loaded, for the About card. QML's own
+    // Qt.application.version is *this application's* version -- the About card
+    // once printed it after the words "Built on Qt", which read plausibly and
+    // was wrong. qVersion() is the runtime answer, which is the one an About
+    // box owes: it names the Qt the user is running, not the one compiled
+    // against.
+    engine.rootContext()->setContextProperty(QStringLiteral("qtRuntimeVersion"),
+                                             QString::fromLatin1(qVersion()));
 
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,

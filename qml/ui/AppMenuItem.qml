@@ -18,8 +18,41 @@ T.MenuItem {
     property string shortcutText: ""
     property bool danger: false
 
-    implicitWidth: Math.max(220, row.implicitWidth + shortcutLabel.implicitWidth
-                                 + 3 * Theme.space.lg)
+    // Measured from the fonts rather than from the labels themselves.
+    //
+    // AppText reports the size of whatever its Loader has produced, and that is
+    // zero until the loaded item exists. Summing the two labels' implicitWidth
+    // therefore measured a row of empty text, fell back to the 220 floor, and
+    // left the longest entry -- "Open subtitle file…" against Ctrl+Shift+O --
+    // with its shortcut printed on top of its label. Only the long ones showed
+    // it, which is why it read as a rendering fault rather than a sizing one.
+    //
+    // TextMetrics answers synchronously and from the same font the label draws
+    // with, so the width is right on the first frame and on both text paths.
+    TextMetrics {
+        id: labelMetrics
+        text: item.text
+        font.family: Theme.type.sans
+        font.pixelSize: Theme.type.bodySize
+    }
+
+    TextMetrics {
+        id: shortcutMetrics
+        text: item.shortcutText
+        font.family: Theme.type.mono
+        font.pixelSize: Theme.type.captionSize
+    }
+
+    // The left margin, the fixed icon slot and its gap, the label, then -- only
+    // when there is one -- a gap wide enough to read as a column break, the
+    // shortcut, and the right margin. These mirror the anchors below; a change
+    // there is a change here.
+    implicitWidth: Math.max(220,
+                            Theme.space.lg + 16 + Theme.space.md
+                            + labelMetrics.width
+                            + (item.shortcutText === ""
+                               ? 0 : Theme.space.xl + shortcutMetrics.width)
+                            + Theme.space.lg)
     implicitHeight: 30
     padding: 0
     hoverEnabled: true

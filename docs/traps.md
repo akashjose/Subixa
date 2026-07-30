@@ -9,17 +9,44 @@
    (`wlshm` under WSLg), creates **its own Wayland surface**, and never touches the FBO.
    Video appears *outside* the app window and steals input. Looks like a compositing bug;
    it is not.
+
+   *Scope: found under WSLg, which supplies the symptom's shape — `wlshm`, the stray Wayland
+   surface. The ordering rule itself is mpv's render-API contract: left unset, mpv picks
+   whichever native VO the platform has, so it binds on every platform.*
+
 2. **The render context does not exist until the item first renders.** It is created in
    `createFramebufferObject()`, which runs *after* QML's `Component.onCompleted`. Calling
    `loadFile()` earlier gives `No render context set` → `Video: no video`, with no picture
    and no obvious error. Early loads are queued and flushed in `onRenderContextReady()`.
    **Any new mpv command that must run before first paint needs the same treatment.**
+
+   *Scope: universal — Qt Quick's FBO-item lifecycle, the same on every platform.*
+
 3. **`target_include_directories(... PRIVATE src)` is mandatory.** qmltyperegistrar emits
    `#if __has_include(<MpvEngine.h>)`; without `src/` on the include path that guard is
    silently false and the build fails with `QQuickItem was not declared` — nowhere near
    the real cause.
+
+   *Scope: universal — CMake and qmltyperegistrar semantics, not anything a platform does.*
+
 4. **`QOpenGLFramebufferObject` is in QtOpenGL, not QtGui** (Qt 6 moved it;
    `QOpenGLContext` stayed in QtGui).
+
+   *Scope: universal — Qt 6 module layout; API placement, not driver behaviour.*
+
+24. **`mpv_create` returns null under any `LC_NUMERIC` but `C`.** Development ran in a
+   `C.UTF-8` session, which satisfies that by accident, so it survived both platforms
+   until the player met an `en_IN` desktop and came up with no engine at all. mpv's
+   `Non-C locale detected` goes to a terminal a double-clicked player does not have, so
+   nothing in the log names the locale.
+
+   *Scope: found on a native Ubuntu desktop — the `en_IN` login above. The check is mpv's own,
+   not platform code, so any OS whose session sets `LC_NUMERIC` can trip it; the `C.UTF-8`
+   development sessions are what hid it, on every platform worked on.*
+
+   `setlocale` goes immediately before `mpv_create`, not in `main()`: the Qt application
+   object resets the locale from the environment as it is constructed. `tst_mpvtracks`
+   builds its own handle and needs its own call.
 
 ## Subtitle extraction
 
@@ -29,20 +56,35 @@
    after the **8th** comma, and the first field is a read order counter, *not* a
    timestamp. Timings come from the packet, not the payload. Splitting as if it were a
    file's `Dialogue:` line silently eats the first words of every cue.
+
+   *Scope: platform-independent but stack-dependent — the layout is libavcodec's decoder
+   contract, so it travels with the pinned FFmpeg version, not with the OS. Re-verify it on
+   a stack bump, not on a platform move.*
+
 6. **Rebase against the container start time per track, not wholesale.** mpv shifts
    playback to start at zero (`--rebase-start-time`, on by default), so an MPEG-TS that
    starts an hour in needs the same shift or every seek lands 3600 s out. But muxers do
    produce files whose video starts at 1 h while the subtitle stream still starts at 0
    (`testdata/shifted.mp4`); subtracting there flattens every cue onto `00:00:00`. Only
    shift a track whose own first cue is at or past the offset.
+
+   *Scope: universal — mpv option semantics plus what muxers write; nothing platform-shaped
+   in it.*
+
 7. **ffmpeg does not decode character entities.** Its SRT/WebVTT decoders convert `<i>`
    into ASS override tags but leave `&amp;`, `&#39;` and friends literal — they would show
    up raw in the browser *and* break search. Decoding is on our side.
+
+   *Scope: platform-independent but stack-dependent, like trap 5 — FFmpeg decoder behaviour,
+   tied to the pinned version rather than to the OS.*
+
 8. **Bitmap vs text is a codec property, not a name list.** `avcodec_descriptor_get()`
    exposes `AV_CODEC_PROP_TEXT_SUB` / `AV_CODEC_PROP_BITMAP_SUB`; use those rather than
    matching codec names, and the classification stays right as codecs are added.
    (ffmpeg cannot transcode text to bitmap, so there is no way to *generate* a PGS/VOBSUB
    fixture locally — that path is verified against the codec table, not a file.)
+
+   *Scope: universal — libavcodec API semantics, the same wherever the stack builds.*
 
 ## Rendering — both are software-rasterizer bugs, both fixed conditionally
 
@@ -56,6 +98,9 @@
    applies `vf=format=yuv420p` — a no-op for 8-bit content, a CPU conversion for 10-bit.
    It is deliberately conditional so a real GPU keeps the native path.
 
+   *Scope: software rasterizer only, on any OS — keyed off `GL_RENDERER`, not the platform,
+   so it follows llvmpipe wherever llvmpipe goes; a real GPU keeps the native path.*
+
    The workaround must be applied **before** the queued file starts playing, which is why
    it is queued ahead of `onRenderContextReady()` — see trap 2.
 
@@ -68,6 +113,10 @@
     streaked, or shows a fine mesh of unwritten pixels. Below it, everything looks fine.
     A conformant driver tracks the render-to-texture dependency itself; llvmpipe does not,
     so the scene graph composites a partially rasterised surface.
+
+    *Scope: software rasterizer only — and beyond that honestly open: whether it is llvmpipe
+    generally or llvmpipe under WSLg is the unresolved question near the end of this entry,
+    and it has never been reproduced outside WSLg, so treat "any llvmpipe" as unconfirmed.*
 
     How that was established, because every cheaper explanation was wrong:
 
@@ -158,9 +207,14 @@
 11. **A delegate cannot take `required property string text`.** `ItemDelegate` already has
     a `text` property, and the role of the same name collides with it. Take
     `required property var model` and read `model.text` instead.
+
+    *Scope: universal — QML name-resolution semantics, the same on every platform.*
+
 12. **Only the browser decodes entities, so mpv's own overlay disagrees with the panel.**
     libass renders `&amp;` literally over the video while the same cue reads `&` in the
     list. Both are behaving as designed (trap 7) — it is not a parsing regression.
+
+    *Scope: universal — a design consequence of trap 7, present wherever the app runs.*
 
 13. **A `TabBar` writes its own resets back into whatever you sync it with.** The panel's
     tab index lives in the caller's `ui` object because the panel is destroyed and rebuilt
@@ -172,6 +226,8 @@
       adopts index 0 the moment it receives its first item — which the `onCurrentIndexChanged`
       handler dutifully stored, losing the reader's tab on a 66-tab film.
     - A bar being torn down drops its tabs first, resetting `currentIndex` on the way out.
+
+    *Scope: universal — `Container` and `TabBar` semantics, nothing platform-shaped in it.*
 
     Fixed by gating **both directions** on the bar being finished:
     `count > 0 && count === manager.tracks.length`. A bar still filling up, or emptying,
@@ -191,6 +247,8 @@
     and it is searchable, so a track full of signs fills the list with coordinates. Both
     the plain and the styled paths drop drawing mode now.
 
+    *Scope: universal — ASS format semantics and our extractor's handling; no platform in it.*
+
     This is also the case the cue cache's version bump exists for: the fix changed the
     *extractor's output*, so every entry written before it holds coordinates as dialogue and
     would have gone on serving them. `SubtitleCache::kFormatVersion` went to 2 in the same
@@ -204,11 +262,15 @@
     rather than at the missing feature. `Theme.pickFont()` walks a preference list against
     `Qt.fontFamilies()` once instead, and every call site uses `font.family: Theme.type.sans`.
 
+    *Scope: universal — Qt QML API surface; a Qt-version fact, not a platform one.*
+
 16. **`AbstractButton.icon` is FINAL, so a control cannot declare its own `icon`.** Anything
     built on `Button`, `MenuItem` or `ItemDelegate` fails with `Cannot override FINAL
     property`. The components here take `iconName`. The rename is worth doing carefully: a
     blanket `s/icon/iconName/` also rewrites `iconSize` into `iconNameSize`, which then
     fails one layer further down.
+
+    *Scope: universal — Qt API semantics; FINAL is FINAL on every platform.*
 
 17. **A `default property alias` swallows the component's own children.** Declaring
     `default property alias content: inner.data` means *anything written as an ordinary
@@ -218,12 +280,16 @@
     `SectionCard` and `FormRow` assign their internal structure through `children: [ ... ]`
     for exactly this reason.
 
+    *Scope: universal — QML language semantics.*
+
 18. **`Layout.fillWidth` on a *nested layout* does not stretch it.** A
     `ColumnLayout { Layout.fillWidth: true }` inside a `RowLayout` stays at its implicit
     width, so everything after it tracks the length of its own content instead of forming a
     column. Measured, not assumed: the same structure with an explicit
     `Item { Layout.fillWidth: true }` spacer aligns to the pixel. The hotkey table in
     Settings is the case that exposed it — the key caps and buttons drifted per row.
+
+    *Scope: universal — Qt Quick Layouts semantics, not driver behaviour.*
 
 19. **`prefs: prefs` binds to itself, and says nothing.** This is trap 13's shadowing rule
     generalised: a child declaring `required property var prefs` and given `prefs: prefs`
@@ -234,6 +300,8 @@
     (`root.prefsStore`, `root.linesModel`, `root.queue`, …) and every binding that hands one
     to a child is qualified. That makes the trap unrepresentable rather than something to
     remember — which matters, because it had already been paid for once with `linesModel`.
+
+    *Scope: universal — QML scope-resolution semantics, the same everywhere.*
 
 20. **A Qt 6.9 `Menu` defaults to a *native* popup, and there is none under WSLg.**
     `popupType` arrived in 6.8, and a `Menu` defaults to `Popup.Native`: Qt asks the
@@ -246,9 +314,15 @@
     invisible to `tst_qmlpanel` (it asserts model state, not that a popup appeared) *and*
     to a screenshot, because a native popup would be a separate window anyway.
 
+    *Scope: WSLg only for the silent nothing — a platform with a real native menu would at
+    least show one (while still ignoring the styling); WSLg claims the popup and draws
+    nothing. The `AppMenu` override is wanted everywhere anyway.*
+
 21. **`ScrollBar` and `ScrollIndicator` are different types.** `T.ScrollIndicator.vertical:
     AppScrollBar {}` fails with a type mismatch that names both, which is clear enough, but
     the attached property to use inside a `ListView` in a popup is `T.ScrollBar.vertical`.
+
+    *Scope: universal — Qt type system; the mismatch is the same on every platform.*
 
 Known-harmless: Qt's fallback `FileDialog` will not prefill the name field for a
 `SaveFile`, whatever `selectedFile`/`currentFile` are set to and whenever they are set —
@@ -270,6 +344,10 @@ all; it is mpv ruling out a backend, not a failure.
     everything else in the same frame is exact: `#aab2c2` renders as pure green,
     `#e8eaf0` as yellow, and the browser's 11px `#7e93b5` timestamp loses so much
     luminance it reads as black and disappears entirely.
+
+    *Scope: WSLg only — Mesa's D3D12 driver exists nowhere else; native Linux and Windows
+    never load it. Selection is by `GL_RENDERER` at runtime, so elsewhere `AppText` resolves
+    to the native path and the workaround costs nothing.*
 
     It is not ours, and it is not the capture path. Established by elimination,
     all of it measured rather than eyeballed:
@@ -310,3 +388,26 @@ all; it is mpv ruling out a backend, not a failure.
     not fail loudly: ImageMagick rendered the entire tile black and reported
     nothing until asked directly, which sent the first diagnosis after a
     gradient that was working fine.
+
+    *Scope: universal — the XML grammar itself; every conformant consumer on every platform
+    rejects the comment, ImageMagick merely did so silently.*
+
+25. **The `<svg` tag must appear in the first kilobyte of the file.** gdk-pixbuf sniffs
+    the head of a file for a signature rather than parsing XML for the root element.
+    `icons/subixa.svg` carried 1184 bytes of header, putting `<svg` at byte 1188, and the
+    loader answered `Couldn't recognize the image file format` — what it says for a
+    corrupt file. The icon was blank everywhere GNOME draws one.
+
+    *Scope: found on a native Ubuntu desktop, and owned by gdk-pixbuf — it bites wherever a
+    Linux desktop draws icons through it (GNOME here); consumers that parse the XML — Qt,
+    browsers, ImageMagick — never meet it.*
+
+    Anything that goes by the *filename* was unaffected, which is what hid it: Qt drew
+    the window icon correctly, ImageMagick and a browser rendered it, and GTK's
+    `lookup_icon` returned the right path — a lookup resolves a name to a file and never
+    opens it. Only the draw goes through gdk-pixbuf. Loading every other SVG on the
+    system, and finding only this one failed, is what located it.
+
+    The comments live inside the `svg` element now. **A header added back above the tag
+    reintroduces it, silently.** One line checks it:
+    `python3 -c "from gi.repository import GdkPixbuf; GdkPixbuf.Pixbuf.new_from_file_at_size('icons/subixa.svg',48,48)"`.

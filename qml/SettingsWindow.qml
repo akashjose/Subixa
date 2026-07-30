@@ -27,6 +27,10 @@ Window {
     required property var prefs
     required property var subStyle
     required property var shortcuts
+    // qVersion() from C++, because QML cannot ask: Qt.application.version is
+    // this application's version, which is how the About card once printed
+    // "Built on Qt 0.5.0" without anyone noticing it was wrong.
+    property string qtVersion: ""
 
     signal subtitleStyleChanged()
     signal textRenderingChanged()
@@ -176,6 +180,55 @@ Window {
                         AppSwitch {
                             checked: win.prefs.playNextAutomatically
                             onToggled: win.prefs.playNextAutomatically = checked
+                        }
+                    }
+
+                    FormRow {
+                        label: "Resume where you left off"
+                        help: "Reopening a film returns you to where you "
+                              + "stopped. Positions are still kept while this "
+                              + "is off — the player just stops jumping to them."
+                        AppSwitch {
+                            checked: win.prefs.resumeWhereLeftOff
+                            onToggled: win.prefs.resumeWhereLeftOff = checked
+                        }
+                    }
+
+                    // Deliberately its own switch, not folded into the one
+                    // above: someone who does not want the player deciding
+                    // where a film starts usually still wants it to stop
+                    // asking which of sixty-five tracks they read.
+                    FormRow {
+                        label: "Remember the subtitle track per file"
+                        help: "Reopen a film on the track you were reading. "
+                              + "Your reading language still carries over to "
+                              + "new files either way."
+                        AppSwitch {
+                            checked: win.prefs.rememberSubtitleTrack
+                            onToggled: win.prefs.rememberSubtitleTrack = checked
+                        }
+                    }
+
+                    FormRow {
+                        label: "Pause when the window is minimised"
+                        help: "Only films. Music keeps playing, since minimising "
+                              + "is how an album is put on in the background."
+                        AppSwitch {
+                            checked: win.prefs.pauseOnMinimize
+                            onToggled: win.prefs.pauseOnMinimize = checked
+                        }
+                    }
+
+                    FormRow {
+                        label: "Resume when the window comes back"
+                        help: "Off by default: restoring a window is often how "
+                              + "someone goes looking for something, not a "
+                              + "decision to watch."
+                        // Nothing to resume when nothing was paused.
+                        enabled: win.prefs.pauseOnMinimize
+                        AppSwitch {
+                            checked: win.prefs.resumeOnRestore
+                            onToggled: win.prefs.resumeOnRestore = checked
                         }
                     }
 
@@ -487,6 +540,17 @@ Window {
                         AppSwitch {
                             checked: Theme.showStyling
                             onToggled: Theme.showStyling = checked
+                        }
+                    }
+
+                    FormRow {
+                        label: "Show speaker names"
+                        help: "ASS tracks can name who speaks each line. "
+                              + "Shown above the line, only when the track "
+                              + "carries names."
+                        AppSwitch {
+                            checked: win.prefs.showActors
+                            onToggled: win.prefs.showActors = checked
                         }
                     }
 
@@ -828,7 +892,7 @@ Window {
                         }
                         AppText {
                             Layout.fillWidth: true
-                            text: "Built on Qt " + Qt.application.version
+                            text: "Built on Qt " + win.qtVersion
                                   + " and libmpv. Graphics: "
                                   + (win.mpv.softwareRendering
                                      ? "software rasterizer" : "hardware GL") + "."

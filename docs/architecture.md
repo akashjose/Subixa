@@ -3,13 +3,42 @@
 > What the modules are, and the decisions behind the ones that are not obvious.
 > Split out of `CLAUDE.md`, which is the entry point and links here.
 
+## The three decisions everything else follows from
+
+**Built from scratch, not forked.** VLC, Haruna and SMPlayer all carry
+architecture shaped around their own UI goals, and the feature this project
+exists for — a docked, searchable subtitle list that the video composites
+underneath — is not something any of them is arranged to grow. libmpv is a
+dependency here, not a base.
+
+**The mpv render API, not `--wid`.** The video surface is a
+`QQuickFramebufferObject`: mpv renders into an FBO the application owns, so it is
+an ordinary scene-graph node and QML composites freely on top of it. With `--wid`
+mpv draws into a separate native surface *above* the scene graph, which makes
+overlays and docked panels unreliable. Since the entire premise is QML chrome
+over video, `--wid` is not an option. The consequences of that choice are what
+traps 1, 2 and 10 are about, and it is also why `src/main.cpp` pins the scene
+graph to OpenGL.
+
+**Subtitle text is parsed independently of mpv.** This is the least obvious of
+the three and the one most likely to be undone by someone tidying up, so: mpv
+exposes only the *currently displayed* subtitle line, through the `sub-text`
+property. There is no API for "give me every cue in this track", and there could
+not usefully be one, since mpv's model is a renderer's. A browsable list needs
+every cue up front, so subtitle streams are demuxed and decoded separately with
+libavformat and libavcodec, on a worker thread, and cached on disk. That is why
+the project links FFmpeg directly as well as libmpv, and why a change to either
+library can move what the browser shows.
+
 ## Modules
 
 ```
 src/MpvEngine.{h,cpp}         playback: owns mpv_handle, every property and command
 src/MpvVideoItem.{h,cpp}      the video surface: owns only the render context and the FBO
+src/PaintedText.{h,cpp}       text via QPainter, for drivers that miscolour glyphs
 src/main.cpp                  OpenGL RHI, the Basic style, the engine, and argv parsing
 src/GraphicsSetup.{h,cpp}     picks a GL driver before Qt makes a context, probing first
+src/SettingsService.{h,cpp}   the settings file's owner: schema version, migration, pruning
 src/ShortcutRegistry.{h,cpp}  every keyboard action, its default, and any rebinding
 src/SubtitleTypes.h           SubtitleLine / SubtitleTrack plain structs
 src/SubtitleExtractor.{h,cpp} libavformat/libavcodec parsing, runs on a worker thread
@@ -19,7 +48,7 @@ src/SubtitleManager.{h,cpp}   QML-facing owner of the worker and the parsed trac
 src/SubtitleLineModel.{h,cpp} QAbstractListModel over one track's cues
 src/SubtitleStyle.{h,cpp}     ASS override tags -> markup the browser can show
 src/SubtitleFilterModel.{h,cpp} search proxy, the row mapping auto-follow needs, the delay
-src/PlaybackHistory.{h,cpp}   per-file resume positions in QSettings, and their policy
+src/PlaybackHistory.{h,cpp}   per-file resume positions and remembered tracks, on SettingsService's store
 src/Playlist.{h,cpp}          what plays next: the folder as a queue, in natural order
 src/FboCap.h                  how large a framebuffer to give mpv on a software rasterizer
 src/MpvTrackList.h            maps browser tracks onto mpv's, header-only so it is testable
@@ -118,7 +147,7 @@ subtitle row delegate does exactly that.
 No files, no icon font, no decode, and tinting is one colour property rather than a colorize
 pass — which matters because this app runs on a software rasterizer often enough that an
 extra pass per icon is real. Note that `QtQuick.Shapes` has **no public CMake package** in
-Qt 6.9 (only `Qt6QuickShapesPrivate`); a dynamically linked build resolves the QML plugin at
+Qt 6.9 (only `Qt6QuickShapesPrivate`; unverified against 6.12); a dynamically linked build resolves the QML plugin at
 runtime with no link-time dependency, and a future static build will need the private module
 plus `qt_import_qml_plugins`.
 
@@ -159,7 +188,16 @@ being bound. The tab index is the awkward one, and trap 13 explains why it is re
 `populated` rather than in `Component.onCompleted`.
 
 **What is remembered, and where.** Two stores, one file
-(`~/.config/subixa/subixa.conf`):
+(`~/.config/subixa/subixa.conf`), and since 2026-07-29 the file has one owner:
+`SettingsService`, constructed on `main()`'s stack before anything reads it. It
+holds the schema version (`meta/schemaVersion`), migrates on upgrade, and
+prunes the per-file entries — a year unwatched, or past the newest 500 per
+group, aged by a `lastUsed` stamp. `GraphicsSetup` takes its store as a
+parameter; `PlaybackHistory` and `ShortcutRegistry` borrow it through
+`instance()`, falling back to owning one when no service exists (which is how
+their test suites run them). The QML `Settings` blocks stay declarative on
+purpose — migration has finished before the QML engine exists, which is what
+makes that safe.
 
 - *Per application*, through the QML `Settings` type (`import QtCore`) in the `[ui]` group:
   window geometry and maximised state, panel width, visible, detached, the detached
@@ -179,6 +217,12 @@ A new file with no entry of its own falls back to the language last chosen anywh
 to the first browsable track. Only an explicit choice is remembered — a tab click or the
 transport's Subs menu — never what the sync handlers do, or mpv's default would overwrite
 the reader's track on every open.
+
+Both restores are optional: *Resume where you left off* and *Remember the subtitle track
+per file*, under Settings → Playback, independent because finishing a film clears its
+position and must not forget the track. Off gates only the restore — recording continues,
+so nothing is lost to the period a toggle was off, and finish-clears-the-position keeps
+working either way.
 
 **The browser shows the subtitler's own styling** (`SubtitleStyle`). `rawText` was kept per
 cue from the start for this: italics, bold and speaker colours carry meaning, and the list

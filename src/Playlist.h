@@ -51,6 +51,17 @@ public:
     // drops three files in a particular order meant that order.
     Q_INVOKABLE void setFiles(const QStringList &paths);
 
+    // Turn what was dropped into things that can be played. A file passes
+    // through untouched; a folder becomes the media inside it, sorted the way a
+    // person sorts episodes. Folders keep the order they were given -- two
+    // seasons dropped together play season one first -- but a folder's own
+    // contents are sorted rather than left in whatever order the filesystem
+    // hands them back, because nobody chose that order.
+    //
+    // Separate from setFiles so a single dropped folder can be recognised as
+    // several files before the caller decides it is one file to open.
+    Q_INVOKABLE static QStringList expand(const QStringList &paths);
+
     // Point at a file already in the queue. Does nothing if it is not there, so
     // callers can use contains() to decide whether a new queue is needed.
     Q_INVOKABLE void setCurrentPath(const QString &path);

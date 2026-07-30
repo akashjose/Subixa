@@ -46,7 +46,15 @@ Rectangle {
     readonly property bool showVolumeSlider: width >= 720
     readonly property bool showSpeed: width >= 560
     readonly property bool showTrackButtons: width >= 420
-    readonly property bool showQueue: width >= 420 && playlist.count > 1
+    // Skip is a playback control, not a queue readout: it belongs beside play at
+    // any queue length and greys itself out when there is nowhere to go. Gated
+    // on the queue as well, a folder holding one film lost both buttons, which
+    // reads as a player with pieces missing rather than as a queue of one.
+    readonly property bool showSkip: width >= 420
+    // The chip is the other half of what used to be one predicate, and it does
+    // earn its space only once there is a queue to be somewhere in: "1/1" is a
+    // permanent readout of a fact nobody was asking about.
+    readonly property bool showQueue: showSkip && playlist.count > 1
     readonly property bool showDuration: width >= 380
 
     function key(id) { return bar.shortcuts.sequenceFor(id) }
@@ -96,9 +104,10 @@ Rectangle {
                 spacing: Theme.space.md
 
                 IconButton {
+                    objectName: "skipBack"
                     iconName: "skip-back"
                     enabled: bar.playlist.hasPrevious
-                    visible: bar.showQueue
+                    visible: bar.showSkip
                     tooltip: "Previous file"
                     shortcutHint: bar.key("previous-file")
                     onClicked: bar.action("previous-file")
@@ -118,9 +127,10 @@ Rectangle {
                 }
 
                 IconButton {
+                    objectName: "skipForward"
                     iconName: "skip-forward"
                     enabled: bar.playlist.hasNext
-                    visible: bar.showQueue
+                    visible: bar.showSkip
                     tooltip: "Next file"
                     shortcutHint: bar.key("next-file")
                     onClicked: bar.action("next-file")
@@ -163,6 +173,7 @@ Rectangle {
             // on its own. Clickable, which is where the queue lives -- there is
             // deliberately no playlist panel competing with the browser.
             Chip {
+                objectName: "queueChip"
                 visible: bar.showQueue
                 interactive: true
                 iconName: "list-video"
@@ -300,6 +311,17 @@ Rectangle {
         var h = Math.floor(t / 3600)
         var two = function (n) { return (n < 10 ? "0" : "") + n }
         return (h > 0 ? two(h) + ":" + two(m) : m) + ":" + two(s)
+    }
+
+    // The overflow menu, opened at a point in `item`'s coordinates instead of
+    // against the button that normally summons it.
+    //
+    // The window calls this for a right-click on the picture. Deliberately the
+    // same menu object rather than a second one built from the same actions: two
+    // lists would agree on the day they were written and drift apart on the
+    // first one that gains an entry.
+    function popupOverflowAt(item, x, y) {
+        overflowMenu.popupAtPoint(item, x, y)
     }
 
     // ---- menus -----------------------------------------------------------

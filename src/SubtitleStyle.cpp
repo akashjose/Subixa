@@ -6,6 +6,7 @@
 #include "SubtitleText.h"
 
 #include <QtCore/QHash>
+#include <QtCore/QList>
 #include <QtCore/QPair>
 #include <QtCore/QStringView>
 
@@ -58,12 +59,13 @@ struct Style
     bool italic = false;
     bool bold = false;
     bool underline = false;
+    bool strikeOut = false;
     QColor colour;  // invalid means "whatever the row's own colour is"
 
     bool operator==(const Style &o) const
     {
         return italic == o.italic && bold == o.bold && underline == o.underline
-               && colour == o.colour;
+               && strikeOut == o.strikeOut && colour == o.colour;
     }
     bool operator!=(const Style &o) const { return !(*this == o); }
 };
@@ -81,10 +83,14 @@ void openTags(QString &out, const Style &style)
         out += QLatin1String("<i>");
     if (style.underline)
         out += QLatin1String("<u>");
+    if (style.strikeOut)
+        out += QLatin1String("<s>");
 }
 
 void closeTags(QString &out, const Style &style)
 {
+    if (style.strikeOut)
+        out += QLatin1String("</s>");
     if (style.underline)
         out += QLatin1String("</u>");
     if (style.italic)
@@ -93,6 +99,28 @@ void closeTags(QString &out, const Style &style)
         out += QLatin1String("</b>");
     if (style.colour.isValid())
         out += QLatin1String("</font>");
+}
+
+// ASS's own default primary colour, which is also what every ffmpeg text decoder
+// synthesises for a format that has no styles table -- SRT, WebVTT and mov_text
+// all arrive with a Default style of exactly this. Taking it literally would put
+// an explicit <font color="#ffffff"> on every row of every SRT track, in a colour
+// nobody chose; and "no colour" is already what the browser reads as the row's
+// own. A style that genuinely wants white therefore looks the same as one that
+// said nothing, which is the right answer in a list that is not the picture.
+constexpr QRgb kAssDefaultPrimary = 0xFFFFFFFFu;
+
+// The starting state for a cue, taken from the [V4+ Styles] row it names.
+Style fromAssStyle(const AssStyle &base, const QColor &background)
+{
+    Style style;
+    style.bold = base.bold;
+    style.italic = base.italic;
+    style.underline = base.underline;
+    style.strikeOut = base.strikeOut;
+    if (base.primaryColour.isValid() && base.primaryColour.rgb() != kAssDefaultPrimary)
+        style.colour = SubtitleStyle::readableOn(base.primaryColour, background);
+    return style;
 }
 
 // One {\...} override block. Only the tags that change how a line *reads* are
@@ -131,6 +159,11 @@ void applyOverrides(QStringView block, const Style &base, Style &style,
         } else if (rest.startsWith(QLatin1String("u")) && rest.size() > 1
                    && rest.at(1).isDigit()) {
             style.underline = number(1, 0) != 0;
+        } else if (rest.startsWith(QLatin1String("s")) && rest.size() > 1
+                   && rest.at(1).isDigit()) {
+            // \s1 is strike-out. The digit test is what keeps \shad4 -- a shadow
+            // depth, and far commoner -- out of this branch.
+            style.strikeOut = number(1, 0) != 0;
         } else if (rest.startsWith(QLatin1String("p")) && rest.size() > 1
                    && rest.at(1).isDigit()) {
             // \p1 and up start a vector drawing: what follows is coordinates,
@@ -150,13 +183,141 @@ void applyOverrides(QStringView block, const Style &base, Style &style,
                 if (parsed.isValid())
                     style.colour = SubtitleStyle::readableOn(parsed, background);
             }
+        } else if ((rest.size() == 1 && rest.at(0) == u'c')
+                   || (rest.size() > 1 && rest.at(0) == u'c' && rest.at(1) == u'\\')
+                   || (rest.size() == 2 && rest.startsWith(QLatin1String("1c")))
+                   || (rest.size() > 2 && rest.startsWith(QLatin1String("1c"))
+                       && rest.at(2) == u'\\')) {
+            // A bare \c or \1c puts the primary colour back to the line's style,
+            // the way \r puts everything back. Only meaningful now that a line
+            // *has* a style; before the table was read there was nothing to
+            // return to and the tag was ignored, which left the rest of the cue
+            // in whatever colour the last override had said.
+            //
+            // The end-of-tag test is what keeps \clip(...) -- far commoner than
+            // either -- out of this branch.
+            style.colour = base.colour;
         }
     }
+}
+
+// ASS writes its booleans as 0 and **-1**, not 0 and 1 -- it inherited the
+// convention from VB, where True is -1. Files written by hand do use 1, so
+// anything non-zero is true and only a literal 0 (or a field that is not a
+// number at all) is false.
+bool assFlag(QStringView field)
+{
+    bool ok = false;
+    const int value = field.trimmed().toInt(&ok);
+    return ok && value != 0;
+}
+
+// A colour out of a Style: row. SSA v4 wrote these as a plain decimal BGR
+// integer and ASS's &H form came later, so both are accepted -- told apart by
+// the prefix rather than by trying hex first, because "16777215" is also valid
+// hex and would decode to a plausible-looking wrong colour instead of failing.
+QColor parseStyleColour(QStringView field)
+{
+    field = field.trimmed();
+    if (field.isEmpty())
+        return {};
+    if (field.startsWith(u'&'))
+        return SubtitleStyle::parseAssColour(field);
+
+    bool ok = false;
+    const uint value = field.toUInt(&ok);
+    if (!ok)
+        return {};
+    // Blue first, same as the &H form, and the alpha byte is dropped for the
+    // same reason: a half-transparent cue is still a cue in a list.
+    return QColor(int(value & 0xFF), int((value >> 8) & 0xFF),
+                  int((value >> 16) & 0xFF));
 }
 
 }  // namespace
 
 namespace SubtitleStyle {
+
+AssStyleTable parseStyleTable(const QString &header)
+{
+    AssStyleTable table;
+
+    bool inStyles = false;
+    QList<QStringView> fieldOrder;
+
+    for (const QStringView rawLine : QStringView(header).split(u'\n')) {
+        const QStringView line = rawLine.trimmed();  // also drops a CR
+        if (line.isEmpty())
+            continue;
+
+        if (line.startsWith(u'[')) {
+            // "[V4+ Styles]" in ASS, "[V4 Styles]" in SSA, and Aegisub's
+            // "[V4++ Styles]" in the odd file. Matching the suffix takes all
+            // three without a version list that the next revision breaks.
+            inStyles = line.endsWith(QLatin1String("Styles]"), Qt::CaseInsensitive);
+            fieldOrder.clear();
+            continue;
+        }
+        if (!inStyles)
+            continue;
+
+        const qsizetype colon = line.indexOf(u':');
+        if (colon < 0)
+            continue;
+        const QStringView keyword = line.first(colon).trimmed();
+        const QStringView value = line.sliced(colon + 1);
+
+        if (keyword.compare(QLatin1String("Format"), Qt::CaseInsensitive) == 0) {
+            fieldOrder = value.split(u',');
+            continue;
+        }
+        if (keyword.compare(QLatin1String("Style"), Qt::CaseInsensitive) != 0)
+            continue;
+        if (fieldOrder.isEmpty()) {
+            // A Style: row ahead of any Format: line has no declared column
+            // order, and the canonical one is a guess -- a wrong one reads Bold
+            // out of ScaleX and italicises a track at random. A style nobody can
+            // read leaves the cue plain, which is what it was before this
+            // existed.
+            continue;
+        }
+
+        const QList<QStringView> fields = value.split(u',');
+        QString name;
+        AssStyle style;
+        for (qsizetype i = 0; i < fieldOrder.size() && i < fields.size(); ++i) {
+            const QStringView key = fieldOrder.at(i).trimmed();
+            const QStringView field = fields.at(i).trimmed();
+
+            if (key.compare(QLatin1String("Name"), Qt::CaseInsensitive) == 0)
+                name = field.toString();
+            else if (key.compare(QLatin1String("Fontname"), Qt::CaseInsensitive) == 0)
+                style.fontName = field.toString();
+            else if (key.compare(QLatin1String("Fontsize"), Qt::CaseInsensitive) == 0)
+                // Fractional sizes are legal and are rounded: this is metadata
+                // about the track, not something laid out to the sub-pixel.
+                style.fontSize = qRound(field.toDouble());
+            else if (key.compare(QLatin1String("PrimaryColour"), Qt::CaseInsensitive) == 0
+                     || key.compare(QLatin1String("PrimaryColor"), Qt::CaseInsensitive) == 0)
+                style.primaryColour = parseStyleColour(field);
+            else if (key.compare(QLatin1String("Bold"), Qt::CaseInsensitive) == 0)
+                style.bold = assFlag(field);
+            else if (key.compare(QLatin1String("Italic"), Qt::CaseInsensitive) == 0)
+                style.italic = assFlag(field);
+            else if (key.compare(QLatin1String("Underline"), Qt::CaseInsensitive) == 0)
+                style.underline = assFlag(field);
+            else if (key.compare(QLatin1String("StrikeOut"), Qt::CaseInsensitive) == 0)
+                style.strikeOut = assFlag(field);
+        }
+
+        // An unnamed style cannot be referred to by a Dialogue line, so there is
+        // nothing it could ever apply to.
+        if (!name.isEmpty())
+            table.insert(name, style);
+    }
+
+    return table;
+}
 
 double contrastRatio(const QColor &a, const QColor &b)
 {
@@ -251,13 +412,18 @@ QColor readableOnUncached(const QColor &colour, const QColor &background)
     return relativeLuminance(background) > 0.18 ? QColor(Qt::black) : QColor(Qt::white);
 }
 
-QString toStyledText(const QString &assPayload, const QColor &background)
+QString toStyledText(const QString &assPayload, const QColor &background,
+                     const AssStyle &baseStyle)
 {
     QString out;
     out.reserve(assPayload.size() + 16);
 
-    const Style base;
-    Style style;
+    // The cue's own style is where it starts, so a track that says everything
+    // through its table and carries no override tags still reads the way libass
+    // draws it. Overrides are applied to `style` from here, so they win; \r puts
+    // it back to exactly this.
+    const Style base = fromAssStyle(baseStyle, background);
+    Style style = base;
     Style open;  // what is currently emitted
     bool anyOpen = false;
     int drawingScale = 0;

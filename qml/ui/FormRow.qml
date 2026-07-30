@@ -31,7 +31,12 @@ RowLayout {
                 Layout.fillWidth: true
                 text: formRow.label
                 textFormat: Text.PlainText
-                color: Theme.color.textPrimary
+                // A row can be switched off by a setting above it, and the
+                // control already greys itself out when that happens. Without
+                // this the label stayed at full strength beside a dead switch,
+                // which reads as a broken control rather than an inactive one.
+                color: formRow.enabled ? Theme.color.textPrimary
+                                       : Theme.color.textDisabled
                 font.family: Theme.type.sans
                 font.pixelSize: Theme.type.bodySize
                 wrapMode: Text.WordWrap
@@ -42,7 +47,8 @@ RowLayout {
                 visible: formRow.help !== ""
                 text: formRow.help
                 textFormat: Text.PlainText
-                color: Theme.color.textTertiary
+                color: formRow.enabled ? Theme.color.textTertiary
+                                       : Theme.color.textDisabled
                 font.family: Theme.type.sans
                 font.pixelSize: Theme.type.captionSize
                 wrapMode: Text.WordWrap

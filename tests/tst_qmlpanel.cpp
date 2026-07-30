@@ -16,21 +16,26 @@
 // but the object tree, the bindings and the signal wiring are all real. Nothing
 // here asserts a pixel.
 //
-// It writes into a temporary XDG_CONFIG_HOME and XDG_CACHE_HOME, because a test
-// that quietly remembered a subtitle track in the developer's own settings would
-// be a bug of exactly the kind these tests exist to catch.
+// It writes into a temporary settings and cache location, because a test that
+// quietly remembered a subtitle track in the developer's own settings would be a
+// bug of exactly the kind these tests exist to catch.
 
 #include <QtTest>
 
 #include <QtCore/QDir>
+#include <QtCore/QSettings>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QGuiApplication>
 #include "MpvEngine.h"
+#include "SettingsService.h"
 
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
+
+#include <functional>
 
 namespace {
 
@@ -57,12 +62,17 @@ private slots:
 
     void panelShowsTheParsedTrack();
     void tabSwitchSwapsTheModel();
+    void aMenuPickReachesTheBrowser();
+    void skipStaysForASingleFile();
     void searchReachesTheProxy();
     void followMovesTheView();
     void followOffLeavesTheViewAlone();
     void openingAFileQueuesItsFolder();
     void aDroppedSetBecomesTheQueue();
     void remembersTheTrackPerFile();
+    void resumeToggleOffIgnoresAStoredPosition();
+    void subtitleToggleOffOpensOnTheDefaultTrack();
+    void speakerNamesShowWhenTheTrackCarriesThem();
     void detachingKeepsTheViewState();
     void themeReachesBothWindows();
 
@@ -79,6 +89,7 @@ private:
     QString queueFolderFile(const QString &name);
 
     QTemporaryDir m_home;
+    std::unique_ptr<SettingsService> m_service;
     std::unique_ptr<MpvEngine> m_mpv;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QObject *m_root = nullptr;
@@ -87,8 +98,10 @@ private:
 void TstQmlPanel::initTestCase()
 {
     QVERIFY(m_home.isValid());
-    if (!QFileInfo::exists(fixture(QStringLiteral("subs.mkv"))))
-        QSKIP("fixtures missing -- run ./testdata/make-fixtures.sh");
+    // Hard failure, not QSKIP: a skip exits 0 and would report this suite
+    // green having asserted nothing. See tst_subtitles::initTestCase.
+    QVERIFY2(QFileInfo::exists(fixture(QStringLiteral("subs.mkv"))),
+             "subs.mkv missing -- run ./testdata/make-fixtures.sh");
 
     // Before any QSettings exists. PlaybackHistory, the QML Settings type and
     // the cue cache all resolve their paths from these.
@@ -97,6 +110,32 @@ void TstQmlPanel::initTestCase()
 
     QCoreApplication::setApplicationName(QStringLiteral("subixa"));
     QCoreApplication::setOrganizationName(QStringLiteral("subixa"));
+
+    // The two lines above are Unix-only, and on their own they made this suite
+    // pass on Windows for the wrong reason. Qt there resolves the standard paths
+    // from %APPDATA%/%LOCALAPPDATA% and ignores XDG entirely, and a
+    // default-constructed QSettings -- which is what PlaybackHistory and
+    // ShortcutRegistry use -- is the *registry*, which no directory redirection
+    // can reach. So the suite read and wrote the developer's real profile,
+    // init()'s cleanup below removed an empty temporary directory, and the
+    // subtitle track remembered by the previous run reopened
+    // panelShowsTheParsedTrack on tab 1 instead of tab 0. It passed once, on a
+    // machine that had never run it before, and failed every time after.
+    //
+    // A file-backed QSettings under m_home says the same thing portably: the
+    // default constructor now lands in the directory init() clears.
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                       m_home.filePath(QStringLiteral("config")));
+
+    // And the cue cache, which reads QStandardPaths rather than QSettings. Test
+    // mode keeps it out of the real profile on every platform; clearing it once
+    // here -- not per test -- leaves the within-a-run cache hits the suite
+    // already relied on intact, while matching the fresh-per-run behaviour the
+    // XDG redirect gave on Linux.
+    QStandardPaths::setTestModeEnabled(true);
+    QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+        .removeRecursively();
 }
 
 void TstQmlPanel::init()
@@ -111,13 +150,21 @@ void TstQmlPanel::init()
 void TstQmlPanel::cleanup()
 {
     m_root = nullptr;
-    // Reverse of construction, for the same reason main() relies on.
+    // Reverse of construction, for the same reason main() relies on. The
+    // service goes last: PlaybackHistory and ShortcutRegistry, destroyed with
+    // the engine, flush into the store they borrow from it.
     m_engine.reset();
     m_mpv.reset();
+    m_service.reset();
 }
 
 bool TstQmlPanel::startApp()
 {
+    // First, exactly as main() constructs it first: the QML-created
+    // PlaybackHistory and ShortcutRegistry borrow this store, and its default
+    // QSettings honours the IniFormat redirect in initTestCase.
+    m_service = std::make_unique<SettingsService>();
+
     // Declared before the engine, and destroyed after it, exactly as main.cpp
     // does -- see MpvEngine on why that order is load-bearing. Under `offscreen`
     // no render context is ever created, so this half of it is not exercised
@@ -131,6 +178,10 @@ bool TstQmlPanel::startApp()
     // main.cpp passes the positional arguments this way; empty is "no file yet".
     m_engine->rootContext()->setContextProperty(QStringLiteral("initialFiles"),
                                                 QStringList());
+    // And the Qt version for the About card, so a test that opens the
+    // settings window never meets an undefined name main() would have set.
+    m_engine->rootContext()->setContextProperty(QStringLiteral("qtRuntimeVersion"),
+                                                QString::fromLatin1(qVersion()));
     m_engine->loadFromModule("Subixa", "Main");
 
     if (m_engine->rootObjects().isEmpty()) {
@@ -189,6 +240,85 @@ void TstQmlPanel::tabSwitchSwapsTheModel()
     tabs->setProperty("currentIndex", 1);
     QTRY_COMPARE(list->property("count").toInt(), 4);  // the Japanese ASS track
     QCOMPARE(m_root->property("currentTrack").toInt(), 1);
+}
+
+void TstQmlPanel::aMenuPickReachesTheBrowser()
+{
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+
+    QObject *ui = named(m_root, "panelUi");
+    QObject *tabs = named(m_root, "trackTabs");
+    QObject *list = named(m_root, "lineList");
+    QVERIFY(ui && tabs && list);
+    QCOMPARE(m_root->property("currentTrack").toInt(), 0);
+
+    // The other direction into the browser: a track picked from the transport's
+    // subtitle menu, which ends at syncPanelToSubtitleTrack() and whose only
+    // write is the tab. The mpv half of that round trip cannot run here --
+    // offscreen never creates a render context, so mpv loads no file and has no
+    // track list to match a selection against -- so this makes the same write.
+    //
+    // Deliberately not through the tab bar: a tab click carries the selection
+    // with it and that path always worked. This one did not, and the browser
+    // went on listing the previous track's cues.
+    ui->setProperty("tabIndex", 2);
+
+    QCOMPARE(m_root->property("currentTrack").toInt(), 2);
+    QTRY_COMPARE(list->property("count").toInt(), 3);       // the French track
+    QTRY_COMPARE(tabs->property("currentIndex").toInt(), 2);
+
+    ui->setProperty("tabIndex", 1);
+    QCOMPARE(m_root->property("currentTrack").toInt(), 1);
+    QTRY_COMPARE(list->property("count").toInt(), 4);       // the Japanese ASS track
+
+    // -1 says nothing is being read, and it is what a file whose tracks are all
+    // bitmap now opens on: no tab lit, rather than the previous film's tab still
+    // lit over another film's cues. Export reads the same -1 and does nothing.
+    ui->setProperty("tabIndex", -1);
+    QCOMPARE(m_root->property("currentTrack").toInt(), -1);
+    QTRY_COMPARE(list->property("count").toInt(), 0);
+}
+
+void TstQmlPanel::skipStaysForASingleFile()
+{
+    // A folder of exactly one playable file, so there is nowhere to skip to.
+    // Its own folder for the same reason the queue tests have theirs.
+    const QString dir = m_home.filePath(QStringLiteral("solo"));
+    QDir().mkpath(dir);
+    const QString only = dir + QStringLiteral("/only.mkv");
+    if (!QFileInfo::exists(only))
+        QFile::copy(fixture(QStringLiteral("subs.mkv")), only);
+
+    QSignalSpy parsed(named(m_root, "subtitleManager"), SIGNAL(loaded()));
+    QMetaObject::invokeMethod(m_root, "openFile", Q_ARG(QVariant, only));
+    QVERIFY(parsed.wait(20000));
+    QCOMPARE(named(m_root, "playlist")->property("count").toInt(), 1);
+
+    QObject *back = named(m_root, "skipBack");
+    QObject *forward = named(m_root, "skipForward");
+    QObject *chip = named(m_root, "queueChip");
+    QVERIFY(back && forward && chip);
+
+    // Skip is a playback control and stays where it is at any queue length:
+    // disabled says "nowhere to go", where absent says "this player is broken".
+    QVERIFY(back->property("visible").toBool());
+    QVERIFY(forward->property("visible").toBool());
+    QVERIFY(!back->property("enabled").toBool());
+    QVERIFY(!forward->property("enabled").toBool());
+    // The chip is the other half of what used to be one predicate, and it must
+    // not come back with it -- "1/1" is a permanent readout of nothing.
+    QVERIFY(!chip->property("visible").toBool());
+
+    // And with a queue both halves appear, which is what says the two are still
+    // wired to the playlist rather than pinned on.
+    const QString first = queueFolderFile(QStringLiteral("ep1.mkv"));
+    queueFolderFile(QStringLiteral("ep2.mkv"));  // before the open, or it is not in the queue
+    parsed.clear();
+    QMetaObject::invokeMethod(m_root, "openFile", Q_ARG(QVariant, first));
+    QVERIFY(parsed.wait(20000));
+    QTRY_VERIFY(chip->property("visible").toBool());
+    QTRY_VERIFY(forward->property("enabled").toBool());
+    QVERIFY(!back->property("enabled").toBool());
 }
 
 void TstQmlPanel::searchReachesTheProxy()
@@ -372,6 +502,128 @@ void TstQmlPanel::remembersTheTrackPerFile()
     QTRY_COMPARE(named(m_root, "trackTabs")->property("currentIndex").toInt(), 2);
 }
 
+void TstQmlPanel::resumeToggleOffIgnoresAStoredPosition()
+{
+    QObject *history = named(m_root, "playbackHistory");
+    QVERIFY(history);
+
+    // An hour into a feature-length film: a position the policy keeps.
+    const QString path = QFileInfo(fixture(QStringLiteral("subs.mkv")))
+                             .absoluteFilePath();
+    QVERIFY(QMetaObject::invokeMethod(history, "remember", Q_ARG(QString, path),
+                                      Q_ARG(double, 3600.0),
+                                      Q_ARG(double, 8634.0)));
+    QVERIFY(QMetaObject::invokeMethod(history, "flush"));
+
+    // Second launch, with resuming switched off.
+    cleanup();
+    QVERIFY(startApp());
+    QObject *prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("resumeWhereLeftOff", false));
+
+    // pendingResume is set in openFile() and, under offscreen, never consumed
+    // -- no render context means mpv loads nothing (trap 2) -- which is
+    // exactly what leaves it observable here.
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QCOMPARE(m_root->property("pendingResume").toDouble(), -1.0);
+
+    // Third launch, switched back on: the position was kept the whole time.
+    // The toggle gates the restore, not the memory.
+    cleanup();
+    QVERIFY(startApp());
+    prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("resumeWhereLeftOff", true));
+
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QCOMPARE(m_root->property("pendingResume").toDouble(), 3600.0);
+}
+
+void TstQmlPanel::subtitleToggleOffOpensOnTheDefaultTrack()
+{
+    QObject *history = named(m_root, "playbackHistory");
+    QVERIFY(history);
+
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    const QString path = QFileInfo(fixture(QStringLiteral("subs.mkv")))
+                             .absoluteFilePath();
+    // The French track, stream index 4 -- but with no language recorded, so
+    // the preferred-language fallback stays empty and cannot answer for the
+    // per-file entry. That separation is what makes the toggle observable:
+    // with a language stored, the fallback would reopen the same track and
+    // off would look identical to on.
+    QVERIFY(QMetaObject::invokeMethod(history, "rememberSubtitle",
+                                      Q_ARG(QString, path), Q_ARG(int, 4),
+                                      Q_ARG(QString, QString()),
+                                      Q_ARG(QString, QString())));
+
+    // Second launch, with the per-file memory switched off: the panel opens on
+    // the first browsable track, exactly as it would for a file never seen.
+    cleanup();
+    QVERIFY(startApp());
+    QObject *prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("rememberSubtitleTrack", false));
+
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QCOMPARE(m_root->property("currentTrack").toInt(), 0);
+    QTRY_COMPARE(named(m_root, "trackTabs")->property("currentIndex").toInt(), 0);
+
+    // Third launch, switched back on: the entry survived the off period.
+    cleanup();
+    QVERIFY(startApp());
+    prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("rememberSubtitleTrack", true));
+
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QCOMPARE(m_root->property("currentTrack").toInt(), 2);
+    QTRY_COMPARE(named(m_root, "trackTabs")->property("currentIndex").toInt(), 2);
+}
+
+void TstQmlPanel::speakerNamesShowWhenTheTrackCarriesThem()
+{
+    // The conformance fixture styled entirely through its tables is also the
+    // one whose Dialogue lines carry the ASS Name field -- "Narrator" on the
+    // first cue. Committed bytes, so this cannot drift with the local ffmpeg.
+    QVERIFY(openFixture(QStringLiteral("conformance/styletable.mkv")));
+
+    // The label is an overline above the cue text, uppercased, and only on
+    // rows whose cue names a speaker. Collected by walking the *item* tree:
+    // delegates are incubated without a QObject parent, so findChildren from
+    // the root never reaches them -- measured, not assumed.
+    std::function<void(QQuickItem *, QStringList &)> collect =
+        [&collect](QQuickItem *item, QStringList &out) {
+            for (QQuickItem *child : item->childItems()) {
+                if (child->objectName() == QLatin1String("actorLabel")
+                    && child->isVisible()) {
+                    out << child->property("text").toString();
+                }
+                collect(child, out);
+            }
+        };
+    auto visibleActorTexts = [this, &collect]() {
+        QStringList texts;
+        if (auto *list = qobject_cast<QQuickItem *>(named(m_root, "lineList")))
+            collect(list, texts);
+        return texts;
+    };
+
+    QTRY_VERIFY(visibleActorTexts().contains(QStringLiteral("NARRATOR")));
+
+    // The toggle removes them without touching the rows.
+    QObject *prefs = m_root->property("prefsStore").value<QObject *>();
+    QVERIFY(prefs);
+    QVERIFY(prefs->setProperty("showActors", false));
+    QTRY_VERIFY(visibleActorTexts().isEmpty());
+
+    // And a track that never names a speaker shows no labels with it back on.
+    QVERIFY(prefs->setProperty("showActors", true));
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+    QTRY_VERIFY(visibleActorTexts().isEmpty());
+}
+
 void TstQmlPanel::detachingKeepsTheViewState()
 {
     QVERIFY(openFixture(QStringLiteral("subs.mkv")));
@@ -395,6 +647,10 @@ void TstQmlPanel::detachingKeepsTheViewState()
     QCOMPARE(rebuiltTabs->property("currentIndex").toInt(), 1);
     QCOMPARE(rebuiltField->property("text").toString(), QStringLiteral("albatross"));
     QTRY_COMPARE(named(m_root, "lineList")->property("count").toInt(), 1);
+    // The selected track rides on the tab now, so a bar that wrote one of its
+    // own resets back on the way through would move the track being read as well
+    // as the tab lit -- trap 13 with a larger blast radius than it had.
+    QCOMPARE(m_root->property("currentTrack").toInt(), 1);
 
     // And back again.
     m_root->setProperty("panelDetached", false);

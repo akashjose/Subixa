@@ -14,6 +14,8 @@
 #include <QtCore/QVarLengthArray>
 
 #include <algorithm>
+#include <clocale>
+#include <utility>
 
 namespace {
 
@@ -90,6 +92,11 @@ const QSet<QString> &allowedVideoAdjustments()
 
 MpvEngine::MpvEngine(QObject *parent) : QObject(parent)
 {
+    // mpv_create returns null under any LC_NUMERIC but "C". Not in main(): the
+    // Qt application object resets the locale from the environment as it is
+    // constructed. Trap 24.
+    std::setlocale(LC_NUMERIC, "C");
+
     m_mpv = mpv_create();
     if (!m_mpv) {
         m_initError = QStringLiteral("could not create an mpv context");
@@ -450,10 +457,41 @@ void MpvEngine::refreshTracks()
             in.value(QStringLiteral("external"), false).toBool();
         out[QStringLiteral("externalFilename")] =
             in.value(QStringLiteral("external-filename"));
+        // mpv's own flag for a still it decoded out of a tag rather than a
+        // stream to play. Carried through rather than inferred from the codec,
+        // which cannot tell a cover jpeg from a one-frame video.
+        out[QStringLiteral("albumart")] =
+            in.value(QStringLiteral("albumart"), false).toBool();
         m_tracks.append(out);
     }
 
+    const bool hadVideo = m_hasVideo;
+    m_hasVideo = false;
+    for (const QVariant &entry : std::as_const(m_tracks)) {
+        const QVariantMap track = entry.toMap();
+        if (track.value(QStringLiteral("type")).toString() == QLatin1String("video")
+            && !track.value(QStringLiteral("albumart")).toBool()) {
+            m_hasVideo = true;
+            break;
+        }
+    }
+
     emit tracksChanged();
+    if (hadVideo != m_hasVideo)
+        emit hasVideoChanged();
+}
+
+// Filtered on read rather than kept as two more members: the list has a handful
+// of entries, and the menus read it when they open or when tracksChanged says
+// it moved -- which is on load, on sub-add, and on a selection change.
+QVariantList MpvEngine::audioTracks() const
+{
+    return MpvTrackList::tracksOfType(m_tracks, "audio");
+}
+
+QVariantList MpvEngine::subtitleTracks() const
+{
+    return MpvTrackList::tracksOfType(m_tracks, "sub");
 }
 
 void MpvEngine::refreshChapters()
@@ -738,12 +776,19 @@ void MpvEngine::addSubtitleFile(const QString &path)
     command({QStringLiteral("sub-add"), path, QStringLiteral("select")});
 }
 
-bool MpvEngine::subtitleTrackMatches(int id, int ffIndex,
-                                     const QString &sidecarPath) const
+int MpvEngine::browserTrackForSubtitle(const QVariantList &browserTracks) const
 {
-    if (sidecarPath.isEmpty())
-        return MpvTrackList::subtitleIdForStream(m_tracks, ffIndex) == id;
-    return MpvTrackList::subtitleIdForFile(m_tracks, sidecarPath) == id;
+    return MpvTrackList::browserIndexForSubtitleId(browserTracks, m_tracks,
+                                                   m_subtitleTrack);
+}
+
+QVariantMap MpvEngine::subtitleHistoryEntry(const QVariantMap &track) const
+{
+    // Nothing here reads mpv's state: the caller has the track in hand, and
+    // between picking it and storing it mpv may not yet have applied the
+    // selection. Kept on this object anyway because the shape being translated
+    // *from* is this object's.
+    return MpvTrackList::historyEntryForTrack(track);
 }
 
 // ---- timing ------------------------------------------------------------

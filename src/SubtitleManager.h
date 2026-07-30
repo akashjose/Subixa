@@ -64,6 +64,18 @@ public:
     // parses sees an empty model rather than a dangling pointer.
     Q_INVOKABLE SubtitleLineModel *model(int trackId) const;
 
+    // Which track a newly parsed file should open on, as an index into tracks():
+    // the one last read in this very file, else the language last chosen
+    // anywhere, else the first browsable track, else -1.
+    //
+    // `remembered` is PlaybackHistory::subtitleFor() for this file and
+    // `preferredLanguage` its cross-file fallback, passed in as plain data so
+    // the store and the track list stay unaware of each other. The rule itself
+    // is MpvTrackList::preferredTrackIndex(), beside the mpv-side mapping it has
+    // to agree with about how a sidecar is named.
+    Q_INVOKABLE int preferredTrackIndex(const QVariantMap &remembered,
+                                        const QString &preferredLanguage) const;
+
     Q_INVOKABLE static QString formatTimestamp(qint64 ms);
 
     // Writes one track out as SubRip. Returns an empty string on success and the

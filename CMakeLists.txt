@@ -4,15 +4,15 @@
 cmake_minimum_required(VERSION 3.21)
 project(subixa VERSION 0.5.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# No compiler extensions: -std=c++23 rather than -std=gnu++23, so what builds
+# under gcc here builds under the MSYS2 UCRT64 toolchain too.
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(SUBIXA_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
 
-# 6.5 rather than 6.9. Nothing here needs 6.9, and requiring a 2025 release put
-# the project out of reach of every current LTS distribution -- which is the
-# difference between "packageable" and "build Qt yourself first".
 # QtQuick.Shapes -- which draws every icon in the app -- deliberately absent.
 # Qt 6.9 ships it as a private module (only Qt6QuickShapesPrivate has a CMake
 # config), and a dynamically linked build resolves the QML plugin through the
@@ -22,21 +22,147 @@ set(SUBIXA_QT_COMPONENTS Core Gui Quick Qml QuickControls2 OpenGL Svg)
 if(SUBIXA_BUILD_TESTS)
     list(APPEND SUBIXA_QT_COMPONENTS Test)
 endif()
-find_package(Qt6 6.5 REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
+# The floor is the current release, not the oldest thing that happens to
+# compile. Nothing has shipped yet, so there is no installed base to carry, and
+# a floor that tracks the release lets the tree use the current spelling of an
+# API rather than the deprecated one.
+#
+# Windows floors one release lower, and the reason is the toolchain rather than
+# the code. MSYS2 supplies Qt *and* the whole media stack from one repository,
+# and its qt6-base is 6.11.1 -- so a 6.12 floor does not make the Windows build
+# older, it makes it unconfigurable, which is how build-win/ came to be frozen
+# two days behind the tree while a staged bundle still looked current.
+#
+# The code needs neither floor. The API that justified 6.12 -- QSortFilterProxy-
+# Model's begin/end FilterChange pair -- left the tree when the search proxy
+# became hand-written on a measurement, and now survives only in the comments
+# explaining why it went. What the tree genuinely depends on is 6.9 behaviour
+# (traps 15 and 20).
+#
+# Linux stays at 6.12 rather than dropping to a single shared 6.11 so the floor
+# cannot silently regress there: CI pins 6.12.0 through aqtinstall, and this
+# keeps a local build honest against it. Raise Windows to match the day MSYS2
+# ships 6.12.
+if(WIN32)
+    set(SUBIXA_QT_MIN 6.11)
+else()
+    set(SUBIXA_QT_MIN 6.12)
+endif()
+find_package(Qt6 ${SUBIXA_QT_MIN} REQUIRED COMPONENTS ${SUBIXA_QT_COMPONENTS})
 
-# libmpv comes from apt (0.37 on 24.04). pkg-config keeps us off a hardcoded path.
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
-
+# ---- libmpv and FFmpeg --------------------------------------------------
 # Subtitle text is demuxed and decoded directly rather than read from mpv: mpv
 # only exposes the line currently on screen, which cannot build a browsable list.
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
-    libavformat
-    libavcodec
-    libavutil
-)
+# So both libraries are needed, and both are found the same way.
+#
+# Found two different ways, because pkg-config is only the right answer on Unix:
+#
+#   Unix     pkg-config is authoritative. It knows the multiarch library
+#            directories and the transitive private dependencies, and every
+#            distribution ships the .pc files. libmpv comes from apt (0.37 on
+#            24.04); this keeps us off a hardcoded path.
+#
+#   Windows  pkg-config is either absent or actively wrong. Under MSYS2 the .pc
+#            files hardcode `prefix=/ucrt64`, so a *native* CMake is handed
+#            `-I/ucrt64/include` -- an MSYS path with no drive letter -- and the
+#            generate step fails with "includes non-existent path". Neither
+#            PKG_CONFIG_SYSTEM_INCLUDE_PATH nor --define-prefix suppresses it
+#            (checked against pkgconf 3.0.4). Looking the libraries up directly
+#            sidesteps the path translation, and has the larger benefit that a
+#            Windows build works against a plain libmpv SDK, which ships headers
+#            and an import library but no .pc files at all.
+#
+# Both paths end at the same two targets, so nothing downstream has to care.
+function(subixa_import_library name header)
+    string(TOUPPER ${name} prefix)
 
-qt_standard_project_setup(REQUIRES 6.5)
+    find_path(${prefix}_INCLUDE_DIR NAMES ${header})
+    if(NOT ${prefix}_INCLUDE_DIR)
+        message(FATAL_ERROR
+            "Could not find ${header}. Point CMAKE_PREFIX_PATH at the ${name} SDK.")
+    endif()
+
+    add_library(Subixa::${name} INTERFACE IMPORTED)
+    target_include_directories(Subixa::${name} INTERFACE ${${prefix}_INCLUDE_DIR})
+
+    foreach(lib IN LISTS ARGN)
+        find_library(${prefix}_${lib}_LIBRARY NAMES ${lib})
+        if(NOT ${prefix}_${lib}_LIBRARY)
+            message(FATAL_ERROR
+                "Found ${header} but not the ${lib} library that goes with it.")
+        endif()
+        target_link_libraries(Subixa::${name} INTERFACE ${${prefix}_${lib}_LIBRARY})
+    endforeach()
+endfunction()
+
+# Where tools/build-deps.sh put the media stack, if it was used.
+#
+# The distribution's packages cannot reach the versions this targets -- Ubuntu
+# 24.04 is on FFmpeg 6.1.1 with no upgrade in apt, against a target of 8.1.x --
+# so on Linux the stack is normally built from source into a prefix of its own.
+# Pointing CMake at it here rather than exporting PKG_CONFIG_PATH by hand means
+# one flag configures a build, and means the six suites find those libraries
+# under ctest, which does not inherit an LD_LIBRARY_PATH from the shell.
+#
+# Left empty, everything below behaves exactly as it did: system pkg-config on
+# Unix, find_path/find_library on Windows, where MSYS2 packages the stack
+# against itself and no prefix is wanted.
+set(SUBIXA_DEPS_PREFIX "" CACHE PATH
+    "Prefix containing libmpv/FFmpeg built by tools/build-deps.sh (Linux only)")
+
+if(SUBIXA_DEPS_PREFIX AND NOT WIN32)
+    if(NOT IS_DIRECTORY "${SUBIXA_DEPS_PREFIX}")
+        message(FATAL_ERROR
+            "SUBIXA_DEPS_PREFIX=${SUBIXA_DEPS_PREFIX} is not a directory. "
+            "Run tools/build-deps.sh first, or leave it unset to use system packages.")
+    endif()
+    # Both spellings: meson installs to lib/<triplet> and autotools to lib/.
+    set(ENV{PKG_CONFIG_PATH}
+        "${SUBIXA_DEPS_PREFIX}/lib/pkgconfig:${SUBIXA_DEPS_PREFIX}/lib/${CMAKE_LIBRARY_ARCHITECTURE}/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+    # An rpath rather than an LD_LIBRARY_PATH, so the binary and every test
+    # target find the stack with no environment set. Without this a suite links
+    # against the prefix and then loads the distribution's older libraries at
+    # run time, which is worse than failing to link at all.
+    list(APPEND CMAKE_BUILD_RPATH
+        "${SUBIXA_DEPS_PREFIX}/lib"
+        "${SUBIXA_DEPS_PREFIX}/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+    message(STATUS "Using media stack from ${SUBIXA_DEPS_PREFIX}")
+endif()
+
+if(WIN32)
+    subixa_import_library(mpv mpv/client.h mpv)
+    subixa_import_library(ffmpeg libavformat/avformat.h avformat avcodec avutil)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
+    pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
+        libavformat
+        libavcodec
+        libavutil
+    )
+    add_library(Subixa::mpv ALIAS PkgConfig::MPV)
+    add_library(Subixa::ffmpeg ALIAS PkgConfig::FFMPEG)
+endif()
+
+qt_standard_project_setup(REQUIRES ${SUBIXA_QT_MIN})
+
+# An install rpath to everything the binary was built against, or `cmake
+# --install` produces a binary that quietly loads the distribution's older Qt
+# and FFmpeg -- the exact drift the pinned stack exists to prevent, surviving
+# into the installed copy after the build tree's rpath is stripped. Measured,
+# not assumed: without these an installed binary resolved libQt6Core from
+# /lib/x86_64-linux-gnu and died on `Qt_6.12 not found`. Qt's own dir must be
+# spelled out too -- qt_standard_project_setup writes only $ORIGIN entries
+# here. Absolute paths are correct: this serves an install on the machine that
+# built it, and packaging tools rewrite rpaths to $ORIGIN when they bundle.
+if(NOT WIN32)
+    list(APPEND CMAKE_INSTALL_RPATH "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_LIBS}")
+    if(SUBIXA_DEPS_PREFIX)
+        list(APPEND CMAKE_INSTALL_RPATH
+            "${SUBIXA_DEPS_PREFIX}/lib"
+            "${SUBIXA_DEPS_PREFIX}/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+    endif()
+endif()
 
 # Everything but main.cpp, shared verbatim between the app and the QML harness.
 # Listed once because a source that reaches only one of the two produces a link
@@ -67,6 +193,8 @@ set(SUBIXA_APP_SOURCES
     src/PlaybackHistory.h
     src/Playlist.cpp
     src/Playlist.h
+    src/SettingsService.cpp
+    src/SettingsService.h
     src/ShortcutRegistry.cpp
     src/ShortcutRegistry.h
     src/PaintedText.cpp
@@ -120,6 +248,18 @@ qt_add_executable(subixa
 target_compile_definitions(subixa PRIVATE
     SUBIXA_VERSION="${PROJECT_VERSION}")
 
+# Link as a GUI binary on Windows. qt_add_executable does not set this, so the
+# default is the console subsystem and every launch -- including a double-click
+# from Explorer -- pops a black console window alongside the player. The property
+# is ignored on other platforms, so it needs no guard.
+#
+# The cost is that qInfo() output no longer has a console to land on: Qt's
+# default handler sends it to the debugger instead. `QT_FORCE_STDERR_LOGGING=1`
+# puts it back on stderr, which is how to read the GL_RENDERER and hwdec lines
+# when diagnosing a Windows install. The test targets are deliberately left as
+# console programs -- ctest reads their stdout.
+set_target_properties(subixa PROPERTIES WIN32_EXECUTABLE TRUE)
+
 # The window icon, compiled in. The desktop entry points at the installed copy
 # below, but that only covers a launcher: a window needs the icon at runtime,
 # and a player run straight from a build tree has no installed files at all.
@@ -155,8 +295,8 @@ target_link_libraries(subixa PRIVATE
     Qt6::OpenGL
     # For QIcon to rasterise the SVG application icon.
     Qt6::Svg
-    PkgConfig::MPV
-    PkgConfig::FFMPEG
+    Subixa::mpv
+    Subixa::ffmpeg
 )
 
 # Warnings on. The tree is clean at this level and staying that way is cheaper
@@ -172,12 +312,21 @@ include(GNUInstallDirs)
 install(TARGETS subixa
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-install(FILES subixa.desktop
+# The desktop entry, the icon and metainfo all install under the application id
+# rather than the binary's name, which is what AppStream and every freedesktop
+# consumer key on. The binary itself stays `subixa`, and so do the QSettings
+# paths -- the id is the freedesktop identity, not the program's name.
+install(FILES com.akashjose.Subixa.desktop
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
 )
-# hicolor/scalable is what the desktop entry's `Icon=subixa` resolves against.
+install(FILES com.akashjose.Subixa.metainfo.xml
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo
+)
+# hicolor/scalable is what the entry's `Icon=com.akashjose.Subixa` resolves
+# against. The source keeps the short name; only the installed copy is renamed.
 install(FILES icons/subixa.svg
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
+    RENAME com.akashjose.Subixa.svg
 )
 install(FILES LICENSE
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
@@ -208,7 +357,8 @@ set(SUBIXA_MODEL_SOURCES
 
 # Resume-position store. Its policy is what the tests are really about, so it is
 # built as its own target rather than folded into the subtitle suite.
-qt_add_executable(tst_playbackhistory tests/tst_playbackhistory.cpp src/PlaybackHistory.cpp)
+qt_add_executable(tst_playbackhistory tests/tst_playbackhistory.cpp
+    src/PlaybackHistory.cpp src/SettingsService.cpp)
 target_include_directories(tst_playbackhistory PRIVATE src)
 target_link_libraries(tst_playbackhistory PRIVATE Qt6::Core Qt6::Qml Qt6::Test)
 
@@ -220,9 +370,18 @@ target_include_directories(tst_playlist PRIVATE src)
 target_link_libraries(tst_playlist PRIVATE Qt6::Core Qt6::Qml Qt6::Test)
 
 # The hotkey table and its overrides. Pure policy over a temporary ini file.
-qt_add_executable(tst_shortcuts tests/tst_shortcuts.cpp src/ShortcutRegistry.cpp)
+qt_add_executable(tst_shortcuts tests/tst_shortcuts.cpp
+    src/ShortcutRegistry.cpp src/SettingsService.cpp)
 target_include_directories(tst_shortcuts PRIVATE src)
 target_link_libraries(tst_shortcuts PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test)
+
+# The settings file's owner: the version key, migration, and pruning. Mostly
+# what must *survive* a prune -- one that deletes too much looks identical to
+# one that works until somebody's year of positions disappears.
+qt_add_executable(tst_settingsservice tests/tst_settingsservice.cpp
+    src/SettingsService.cpp)
+target_include_directories(tst_settingsservice PRIVATE src)
+target_link_libraries(tst_settingsservice PRIVATE Qt6::Core Qt6::Test)
 
 qt_add_executable(tst_subtitles tests/tst_subtitles.cpp ${SUBIXA_MODEL_SOURCES})
 target_include_directories(tst_subtitles PRIVATE src)
@@ -233,7 +392,46 @@ target_link_libraries(tst_subtitles PRIVATE
     Qt6::Gui
     Qt6::Qml
     Qt6::Test
-    PkgConfig::FFMPEG
+    Subixa::ffmpeg
+)
+
+# The ASS [V4+ Styles] table: parsing it, and threading a base style through to
+# the markup the browser renders. Its own target because tst_subtitles is the
+# single-writer file this wave was arranged to keep out of.
+qt_add_executable(tst_assstyles tests/tst_assstyles.cpp ${SUBIXA_MODEL_SOURCES})
+target_include_directories(tst_assstyles PRIVATE src)
+target_compile_definitions(tst_assstyles PRIVATE
+    SUBIXA_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+target_link_libraries(tst_assstyles PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test Subixa::ffmpeg)
+
+# The search proxy on its own. Split out of tst_subtitles rather than appended to
+# it: that file is 1165 lines and is the single-writer bottleneck the audit
+# named, and the proxy is now a class in its own right rather than a
+# QSortFilterProxyModel subclass.
+qt_add_executable(tst_searchproxy tests/tst_searchproxy.cpp ${SUBIXA_MODEL_SOURCES})
+target_include_directories(tst_searchproxy PRIVATE src)
+target_compile_definitions(tst_searchproxy PRIVATE
+    SUBIXA_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+target_link_libraries(tst_searchproxy PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test Subixa::ffmpeg)
+
+# The golden-file check over the committed corpus. Separate from tst_subtitles
+# because it is the only suite whose inputs are bytes in git rather than media
+# muxed at test time -- which is what lets a Linux result and a Windows result be
+# compared at all. Links mpv purely to print its client API version in the
+# banner, so a red after a dependency bump names which library moved.
+qt_add_executable(tst_conformance tests/tst_conformance.cpp ${SUBIXA_MODEL_SOURCES})
+target_include_directories(tst_conformance PRIVATE src)
+target_compile_definitions(tst_conformance PRIVATE
+    SUBIXA_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
+target_link_libraries(tst_conformance PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Test
+    Subixa::ffmpeg
+    Subixa::mpv
 )
 
 # Talks to libmpv directly with vo=null: verifies that selecting a track changes
@@ -245,7 +443,7 @@ target_compile_definitions(tst_mpvtracks PRIVATE
 target_link_libraries(tst_mpvtracks PRIVATE
     Qt6::Core
     Qt6::Test
-    PkgConfig::MPV
+    Subixa::mpv
 )
 
 # The QML layer, loaded for real and driven headlessly. It needs the whole app:
@@ -278,9 +476,18 @@ target_link_libraries(tst_qmlpanel PRIVATE
     Qt6::QuickControls2
     Qt6::OpenGL
     Qt6::Test
-    PkgConfig::MPV
-    PkgConfig::FFMPEG
+    Subixa::mpv
+    Subixa::ffmpeg
 )
+
+# The same warnings the app target gets. tst_qmlpanel recompiles the entire app
+# source list, so without this more than half of what compiles here was built
+# with warnings off while the tree was described as clean under -Wall -Wextra.
+foreach(t tst_playbackhistory tst_playlist tst_shortcuts tst_subtitles
+          tst_mpvtracks tst_qmlpanel tst_conformance tst_searchproxy tst_assstyles
+          tst_settingsservice)
+    target_compile_options(${t} PRIVATE -Wall -Wextra)
+endforeach()
 
 add_test(NAME subtitles COMMAND tst_subtitles)
 add_test(NAME mpvtracks COMMAND tst_mpvtracks)
@@ -288,9 +495,13 @@ add_test(NAME playbackhistory COMMAND tst_playbackhistory)
 add_test(NAME playlist COMMAND tst_playlist)
 add_test(NAME shortcuts COMMAND tst_shortcuts)
 add_test(NAME qmlpanel COMMAND tst_qmlpanel)
+add_test(NAME conformance COMMAND tst_conformance)
+add_test(NAME searchproxy COMMAND tst_searchproxy)
+add_test(NAME assstyles COMMAND tst_assstyles)
+add_test(NAME settingsservice COMMAND tst_settingsservice)
 
 # None of these needs a display; make sure they never try to open one.
-set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts PROPERTIES
+set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts conformance searchproxy assstyles settingsservice PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=minimal"
     TIMEOUT 120
 )
@@ -301,6 +512,59 @@ set_tests_properties(subtitles mpvtracks playbackhistory playlist shortcuts PROP
 set_tests_properties(qmlpanel PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 180
+)
+
+# ---- fixtures are not optional ------------------------------------------
+# Three suites -- ~2080 lines of assertions -- open a fixture in initTestCase and
+# QSKIP when it is absent. QSKIP exits 0, so a checkout that has never run
+# make-fixtures.sh reported six green having asserted almost nothing, and every
+# "verified by ctest" claim in this repository was unfalsifiable.
+#
+# REQUIRED_FILES is the fix: ctest marks a test NOT RUN and *fails* it when a
+# listed file is missing, so the absence is loud and the exit code is non-zero.
+# The lists are the fixtures each suite actually opens -- for `subtitles` that
+# includes the three sidecars, which are discovered beside sidecar.mp4 rather
+# than named in the source.
+set(SUBIXA_TESTDATA ${CMAKE_CURRENT_SOURCE_DIR}/testdata)
+
+set_tests_properties(subtitles PROPERTIES REQUIRED_FILES
+    "${SUBIXA_TESTDATA}/subs.mkv;${SUBIXA_TESTDATA}/movtext.mp4;${SUBIXA_TESTDATA}/shifted.mkv;${SUBIXA_TESTDATA}/shifted.mp4;${SUBIXA_TESTDATA}/sidecar.mp4;${SUBIXA_TESTDATA}/sidecar.srt;${SUBIXA_TESTDATA}/sidecar.ass;${SUBIXA_TESTDATA}/sidecar.fr.srt")
+
+set_tests_properties(mpvtracks PROPERTIES REQUIRED_FILES
+    "${SUBIXA_TESTDATA}/subs.mkv;${SUBIXA_TESTDATA}/en.srt;${SUBIXA_TESTDATA}/sidecar.srt")
+
+set_tests_properties(qmlpanel PROPERTIES REQUIRED_FILES
+    "${SUBIXA_TESTDATA}/subs.mkv")
+
+# The conformance corpus is committed, so these are present in any complete
+# checkout. Listing them anyway turns "somebody deleted a fixture" into a named
+# missing file rather than a decode error thirty lines into a golden diff.
+set_tests_properties(conformance PROPERTIES REQUIRED_FILES
+    "${SUBIXA_TESTDATA}/conformance/basic.mkv;${SUBIXA_TESTDATA}/conformance/entities.mkv;${SUBIXA_TESTDATA}/conformance/drawing.mkv;${SUBIXA_TESTDATA}/conformance/shifted.mkv;${SUBIXA_TESTDATA}/conformance/noshift.mp4;${SUBIXA_TESTDATA}/conformance/manytracks.mkv;${SUBIXA_TESTDATA}/conformance/sidecar.mp4;${SUBIXA_TESTDATA}/conformance/golden.tsv")
+
+# There is deliberately no SKIP_REGULAR_EXPRESSION here, and it must not come
+# back. It reads like a safety net and is the opposite of one: the expression is
+# matched against the whole output, so a run that prints the phrase AND fails an
+# assertion AND exits 1 is reported ***Skipped, is not counted in "tests failed",
+# and ctest exits 0. Measured, not assumed -- a one-test project whose command is
+# `echo 'fixtures missing'; echo FAIL; exit 1` reports "100% tests passed" under
+# it. That is the exact defect the REQUIRED_FILES lists above exist to close, so
+# adding this alongside them reopened it by another route.
+#
+# A missing fixture is caught by REQUIRED_FILES before the binary runs, and by a
+# hard QVERIFY2 inside the suite if it disappears after that.
+
+# The render canary needs a window, a compositor and a capture path, so it is a
+# tool rather than a test. Registering it DISABLED gives it a name in `ctest -N`
+# and a way to be run deliberately -- `ctest -L manual --test-dir build
+# --force-new-ctest-process -R rendercanary` -- without ever running in a
+# headless batch, where it would fail for the wrong reason.
+add_test(NAME rendercanary COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/render-canary.sh)
+set_tests_properties(rendercanary PROPERTIES
+    DISABLED TRUE
+    RUN_SERIAL TRUE
+    LABELS manual
+    TIMEOUT 300
 )
 
 endif()  # SUBIXA_BUILD_TESTS

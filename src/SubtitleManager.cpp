@@ -3,6 +3,7 @@
 
 #include "SubtitleManager.h"
 
+#include "MpvTrackList.h"
 #include "SubtitleExtractor.h"
 #include "SubtitleLineModel.h"
 
@@ -246,8 +247,11 @@ void SubtitleManager::rebuildModels()
     // deleted -- a QML binding may still hold one for an instant after the
     // track list changes.
     for (int i = 0; i < m_models.size(); ++i) {
-        m_models[i]->setLines(i < m_tracks.size() ? m_tracks.at(i).lines
-                                                  : QVector<SubtitleLine>());
+        const bool live = i < m_tracks.size();
+        // Before the lines: setStyles() on a populated model emits dataChanged
+        // for every row, which the reset from setLines() would only repeat.
+        m_models[i]->setStyles(live ? m_tracks.at(i).styles : AssStyleTable());
+        m_models[i]->setLines(live ? m_tracks.at(i).lines : QVector<SubtitleLine>());
     }
 }
 
@@ -261,6 +265,13 @@ SubtitleLineModel *SubtitleManager::model(int trackId) const
     // from an invokable and can collect it out from under us.
     QQmlEngine::setObjectOwnership(model, QQmlEngine::CppOwnership);
     return model;
+}
+
+int SubtitleManager::preferredTrackIndex(const QVariantMap &remembered,
+                                         const QString &preferredLanguage) const
+{
+    return MpvTrackList::preferredTrackIndex(m_tracksView, remembered,
+                                             preferredLanguage);
 }
 
 QString SubtitleManager::formatTimestamp(qint64 ms)
@@ -283,8 +294,13 @@ QString SubtitleManager::exportTrack(int trackId, const QUrl &target) const
 
     // QSaveFile: an export interrupted halfway would otherwise leave a
     // half-written .srt sitting next to the film, where it looks like a real one.
+    // Deliberately *not* QIODevice::Text. That flag translates every "\n" below
+    // into "\r\n" on Windows and leaves it alone everywhere else, so the same
+    // track exported on two machines would come out byte-different -- the same
+    // objection as the explicit encoding below. It was a no-op on Linux, which
+    // is why it survived this long. Every SubRip reader accepts LF.
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    if (!file.open(QIODevice::WriteOnly))
         return QStringLiteral("cannot write %1: %2")
             .arg(QFileInfo(path).fileName(), file.errorString());
 

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The AppStream identity. The id here, the desktop entry's basename, the
+     icon's installed name and setDesktopFileName in src/main.cpp must all say
+     com.akashjose.Subixa; they move together or not at all.
+     Screenshot URLs point at master, which is merged at release time. They 404
+     until then, which is fine: software centers only read this file from a
+     released package. -->
+<component type="desktop-application">
+  <id>com.akashjose.Subixa</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Subixa Player</name>
+  <summary>Watch films with a docked, searchable subtitle browser</summary>
+
+  <description>
+    <p>
+      Subixa is a desktop video player with a docked, searchable subtitle list.
+      Every line of every subtitle track is shown timestamped beside the video:
+      click a line to jump to it, search the whole track, and the line currently
+      playing highlights and scrolls itself into view.
+    </p>
+    <p>
+      It is built for people who read subtitles — language learners, subtitle
+      editors, anyone doing a QC pass — rather than for people who happen to
+      have them switched on. Tracks can be browsed per tab, exported, shifted
+      against the picture, and styled independently of the player's own theme.
+    </p>
+    <p>
+      Playback is libmpv underneath: the usual formats, hardware decoding,
+      folder queues, per-file resume and remembered subtitle tracks.
+    </p>
+  </description>
+
+  <developer id="com.akashjose">
+    <name>Akash Jose</name>
+  </developer>
+
+  <launchable type="desktop-id">com.akashjose.Subixa.desktop</launchable>
+  <provides>
+    <binary>subixa</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/akashjose/Subixa</url>
+  <url type="vcs-browser">https://github.com/akashjose/Subixa</url>
+  <url type="bugtracker">https://github.com/akashjose/Subixa/issues</url>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+    <category>Player</category>
+  </categories>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>The subtitle browser docked beside the video</caption>
+      <image>https://raw.githubusercontent.com/akashjose/Subixa/master/docs/images/browser.jpg</image>
+    </screenshot>
+    <screenshot>
+      <caption>Playback with the browser hidden</caption>
+      <image>https://raw.githubusercontent.com/akashjose/Subixa/master/docs/images/player.jpg</image>
+    </screenshot>
+    <screenshot>
+      <caption>Settings, applied live beside the player</caption>
+      <image>https://raw.githubusercontent.com/akashjose/Subixa/master/docs/images/settings.png</image>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="0.5.0" type="development" date="2026-07-29"/>
+  </releases>
+
+  <content_rating type="oars-1.1"/>
+</component>

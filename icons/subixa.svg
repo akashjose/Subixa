@@ -2,35 +2,21 @@
 <!--
   SPDX-License-Identifier: GPL-3.0-or-later
   Copyright (C) 2026 Akash Jose
-
-  Subixa's application icon.
-
-  A play triangle over two subtitle lines. Not a bare play button: every player
-  has one of those, and the thing worth saying about this one is the subtitle
-  browser underneath. Both bars are centred, the way subtitles sit on a frame,
-  and the second is short so the pair reads as text rather than as two rules.
-
-  Flat fills, no gradient. A gradient must be declared in defs and referenced by
-  url(#id), which simpler rasterisers fail to resolve, and an icon that depends
-  on the renderer being good is an icon that will be a black square in
-  somebody's launcher. Flat also matches the application, whose whole design
-  language is flat.
-
-  Note the punctuation here: XML forbids a double hyphen inside a comment, so
-  this file cannot use the em dash the rest of the tree writes as two hyphens.
-  Breaking that rule does not fail loudly. ImageMagick rendered the whole tile
-  black and reported nothing until asked directly.
-
-  Drawn to survive 16px: three shapes, no outlines, nothing thinner than 34
-  units on a 512 grid.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- The tile, in the theme's accent. 22% corner radius is the desktop
-       convention and reads as an application rather than a document. -->
+  <!--
+    A play triangle over two subtitle lines. Flat fills, no gradients, drawn to
+    survive 16px.
+
+    Comments belong here rather than above the tag, and the header stays short:
+    gdk-pixbuf only sniffs the first kilobyte for `<svg`. No em dashes either,
+    since XML forbids a double hyphen in a comment.
+  -->
+
+  <!-- The tile, in the theme's accent. 22% radius reads as an app, not a document. -->
   <rect x="0" y="0" width="512" height="512" rx="114" ry="114" fill="#4d8df7"/>
 
-  <!-- Play. Nudged right of centre so it looks centred: a triangle's visual
-       weight sits about a third of the way from its base, not halfway. -->
+  <!-- Nudged right of centre: a triangle's visual weight sits a third from its base. -->
   <path d="M206 132 L206 300 L352 216 Z" fill="#ffffff"/>
 
   <!-- Subtitle lines, centred as subtitles are on a frame. -->

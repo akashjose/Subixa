@@ -7,6 +7,7 @@
 #include <QtCore/QFileInfo>
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 
@@ -76,6 +77,48 @@ bool lessThanNaturally(const QString &a, const QString &b)
     return a < b;
 }
 
+// How deep a dropped folder is walked. A season folder keeps Extras/ and
+// sometimes a directory per episode, so one level is not enough; the bound
+// exists at all because dropping "/" should not walk the whole disk.
+constexpr int kMaxFolderDepth = 8;
+
+bool lessThanByName(const QString &a, const QString &b)
+{
+    return lessThanNaturally(QFileInfo(a).fileName(), QFileInfo(b).fileName());
+}
+
+// Media in `dir`, then media in each subdirectory, appended to `out`.
+//
+// Files before subfolders at every level, so a season's episodes come before
+// whatever is in its Extras/ folder rather than being interleaved by name.
+void collectMediaIn(const QDir &dir, int depth, QStringList &out)
+{
+    QStringList files;
+    QStringList subdirs;
+    const QFileInfoList entries = dir.entryInfoList(
+        QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Readable, QDir::NoSort);
+    for (const QFileInfo &entry : entries) {
+        if (entry.isDir()) {
+            // Symlinked directories are skipped rather than followed: a link
+            // back to an ancestor is a loop, and the depth bound would turn one
+            // into thousands of duplicate entries instead of a hang.
+            if (!entry.isSymLink())
+                subdirs << entry.absoluteFilePath();
+        } else if (Playlist::isMediaFile(entry.fileName())) {
+            files << entry.absoluteFilePath();
+        }
+    }
+
+    std::sort(files.begin(), files.end(), lessThanByName);
+    out += files;
+
+    if (depth >= kMaxFolderDepth)
+        return;
+    std::sort(subdirs.begin(), subdirs.end(), lessThanByName);
+    for (const QString &subdir : std::as_const(subdirs))
+        collectMediaIn(QDir(subdir), depth + 1, out);
+}
+
 }  // namespace
 
 Playlist::Playlist(QObject *parent) : QObject(parent) {}
@@ -126,9 +169,7 @@ void Playlist::openFolderOf(const QString &path)
             found << entry.absoluteFilePath();
     }
 
-    std::sort(found.begin(), found.end(), [](const QString &a, const QString &b) {
-        return lessThanNaturally(QFileInfo(a).fileName(), QFileInfo(b).fileName());
-    });
+    std::sort(found.begin(), found.end(), lessThanByName);
 
     // The file being opened is always in the queue, even when the folder scan
     // did not turn it up -- an extension nobody listed, or something mpv can
@@ -138,6 +179,25 @@ void Playlist::openFolderOf(const QString &path)
         found.prepend(absolute);
 
     replaceFiles(found, found.indexOf(absolute));
+}
+
+QStringList Playlist::expand(const QStringList &paths)
+{
+    QStringList out;
+    for (const QString &path : paths) {
+        if (path.isEmpty())
+            continue;
+        const QFileInfo info(path);
+        if (info.isDir())
+            collectMediaIn(QDir(info.absoluteFilePath()), 0, out);
+        else
+            out << path;
+    }
+    // Deliberately not filtered here: a plain file that is not media still has
+    // to reach the caller, so that dropping one thing mpv cannot open says so
+    // rather than looking like a drop that missed the window. setFiles is where
+    // a queue is filtered.
+    return out;
 }
 
 void Playlist::setFiles(const QStringList &paths)

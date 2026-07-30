@@ -9,6 +9,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 #include <QtCore/QVariantList>
+#include <QtCore/QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
 struct mpv_handle;
@@ -50,6 +51,16 @@ class MpvEngine : public QObject
     // contains the other (mpv sees bitmap subtitle tracks the browser cannot
     // list; the browser sees sidecars mpv may not have loaded).
     Q_PROPERTY(QVariantList tracks READ tracks NOTIFY tracksChanged)
+    // The same list split by type, for the transport's two track menus. Split
+    // here rather than in a QML loop: the menus want mpv's tracks in mpv's
+    // order, which is a filter over a property this object already holds, and
+    // doing it in JavaScript converted the whole list once per evaluation.
+    Q_PROPERTY(QVariantList audioTracks READ audioTracks NOTIFY tracksChanged)
+    Q_PROPERTY(QVariantList subtitleTracks READ subtitleTracks NOTIFY tracksChanged)
+    // Whether there is a moving picture, as opposed to a file that merely has a
+    // video *track*: cover art in a music file is one, and treating it as video
+    // would mean an album pauses itself the moment the window is minimised.
+    Q_PROPERTY(bool hasVideo READ hasVideo NOTIFY hasVideoChanged)
     // Selected sid/aid, or -1 for off. -1 rather than mpv's "no" so QML can
     // compare with an integer.
     Q_PROPERTY(int subtitleTrack READ subtitleTrack NOTIFY subtitleTrackChanged)
@@ -107,6 +118,9 @@ public:
     bool paused() const { return m_paused; }
     bool idle() const { return m_idle; }
     QVariantList tracks() const { return m_tracks; }
+    QVariantList audioTracks() const;
+    QVariantList subtitleTracks() const;
+    bool hasVideo() const { return m_hasVideo; }
     int subtitleTrack() const { return m_subtitleTrack; }
     int audioTrack() const { return m_audioTrack; }
     double volume() const { return m_volume; }
@@ -165,12 +179,18 @@ public:
     // Loads a subtitle file the user picked, and selects it.
     Q_INVOKABLE void addSubtitleFile(const QString &path);
 
-    // True when mpv's subtitle track `id` is the same stream as a browser track
-    // described by (ffIndex, sidecarPath); an empty sidecarPath means embedded.
-    // Lets QML answer "which tab is mpv showing" without comparing paths itself,
-    // where a relative and an absolute spelling of one file would not match.
-    Q_INVOKABLE bool subtitleTrackMatches(int id, int ffIndex,
-                                          const QString &sidecarPath) const;
+    // Which of `browserTracks` -- SubtitleManager::tracks -- is the one mpv is
+    // showing, or -1 when none of them is. The whole scan, not one comparison at
+    // a time from a QML loop: the two numberings meet in exactly one place, and
+    // a relative and an absolute spelling of one sidecar have to compare equal
+    // when they do.
+    Q_INVOKABLE int browserTrackForSubtitle(const QVariantList &browserTracks) const;
+
+    // { streamIndex, sidecarPath, language } for a track described the way mpv
+    // describes it, which is how the transport's subtitle menu has it. The menu
+    // reaches tracks the browser cannot list, so a choice made there is stored
+    // from mpv's side of the bridge -- ff-index, or the filename mpv loaded.
+    Q_INVOKABLE QVariantMap subtitleHistoryEntry(const QVariantMap &track) const;
 
     // ---- timing -------------------------------------------------------
     Q_INVOKABLE void setSubtitleDelay(double seconds);
@@ -230,6 +250,7 @@ signals:
     void pausedChanged();
     void idleChanged();
     void tracksChanged();
+    void hasVideoChanged();
     void subtitleTrackChanged();
     void audioTrackChanged();
     void volumeChanged();
@@ -287,6 +308,7 @@ private:
     bool m_paused = true;
     bool m_idle = true;
     QVariantList m_tracks;
+    bool m_hasVideo = false;
     QVariantList m_chapters;
     int m_subtitleTrack = -1;
     int m_audioTrack = -1;

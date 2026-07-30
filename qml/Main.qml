@@ -99,6 +99,25 @@ ApplicationWindow {
 
         // Playback behaviour
         property bool playNextAutomatically: true
+        // Minimising a film should not go on playing into a window nobody can
+        // see. Music should: minimising is how an album gets out of the way.
+        // The rule is the same either way -- stop what cannot be watched -- and
+        // hasVideo is what tells the two apart.
+        property bool pauseOnMinimize: true
+        // Off, so coming back does not start playing on its own. Restoring a
+        // window is often how someone goes looking for something rather than a
+        // decision to watch, and a player that begins the moment it reappears is
+        // the more startling of the two defaults. Pressing play is one key.
+        property bool resumeOnRestore: false
+        // The two halves of per-file memory, independent on purpose: finishing
+        // a film clears its position and must not also forget which of
+        // sixty-five tracks this household reads -- PlaybackHistory keeps them
+        // in separate groups for exactly this reason. Off gates only the
+        // restore; the history keeps being written, so switching one back on
+        // remembers everything, including the period it was off. Both default
+        // on, which is the behaviour the player has always had.
+        property bool resumeWhereLeftOff: true
+        property bool rememberSubtitleTrack: true
         property int seekStep: 5
         property int seekStepLarge: 10
         property int volumeStep: 5
@@ -109,6 +128,10 @@ ApplicationWindow {
         // Browser behaviour
         property bool showEndTime: false
         property bool showCueDuration: false
+        // On by default, unlike the QC readouts above: who is speaking is
+        // reading material, not tooling, and it costs nothing on the tracks
+        // (most of them) that carry no names.
+        property bool showActors: true
         property bool followOffOnScroll: true
     }
 
@@ -262,14 +285,26 @@ ApplicationWindow {
         // half of them would be invisible. The models adjust for this, and this
         // is how they learn what they are being drawn on.
         rowBackground: Theme.color.bgSurface
-        onLoaded: {
-            root.currentTrack = -1
-            var index = root.preferredTrackIndex()
-            if (index >= 0) {
-                root.currentTrack = subs.tracks[index].id
-                panelUi.tabIndex = index
-            }
-        }
+        // The tab is the whole selection -- currentTrack is derived from it --
+        // so there is nothing else to set here. -1 when the file has no
+        // browsable track, which reads back as "nothing to list".
+        //
+        // Which tab that is comes from C++: the track last read in this very
+        // file, else the language last chosen anywhere, else the first browsable
+        // one. What the store knows is passed in rather than looked up there, so
+        // neither of these two objects has to know about the other.
+        //
+        // The per-file toggle empties the map rather than skipping the
+        // assignment: preferredTrackIndex must still run so the tab gets the
+        // language-fallback-or-first default instead of inheriting the
+        // previous film's index. The language fallback stays active in both
+        // states -- the toggle says "per file", and the language carrying
+        // forward is a preference, not history.
+        onLoaded: panelUi.tabIndex =
+            subs.preferredTrackIndex(prefs.rememberSubtitleTrack
+                                         ? history.subtitleFor(root.currentFile)
+                                         : ({}),
+                                     history.preferredLanguage())
     }
 
     PlaybackHistory {
@@ -290,12 +325,51 @@ ApplicationWindow {
         objectName: "shortcuts"
     }
 
-    property int currentTrack: -1
+    // The track being browsed, in the browser's own numbering -- an index into
+    // the manager's track list, which is not mpv's track ids and never was.
+    //
+    // Derived rather than assigned. Three paths choose a track (a tab, the
+    // transport's subtitle menu, and the one remembered for this file) and each
+    // used to write this *and* the tab; the menu path only ever wrote the tab,
+    // so picking a track there left the browser listing the previous track's
+    // cues and export writing them. One selection, panelUi.tabIndex, and this
+    // is how the rest of the window reads it.
+    readonly property int currentTrack: {
+        var track = subs.tracks[panelUi.tabIndex]
+        return track !== undefined && track.browsable ? track.id : -1
+    }
     // View row of the cue playing right now, or -1 when playback is before the
     // first cue or that cue is filtered out.
     property int currentRow: -1
 
     readonly property bool fullscreen: visibility === Window.FullScreen
+
+    // ---- minimising -------------------------------------------------------
+    // A film playing into a taskbar button is nobody watching it, so minimising
+    // stops it. Music is the opposite: minimising is *how* an album is put on in
+    // the background, and pausing it there would be the player second-guessing
+    // the obvious. mpv.hasVideo is what separates them, and it discounts cover
+    // art so a tagged mp3 does not read as a film.
+    readonly property bool minimized: visibility === Window.Minimized
+    // Whether the pause was ours to undo. Restoring must not start something
+    // that was already paused when it was minimised.
+    property bool pausedByMinimize: false
+    onMinimizedChanged: {
+        if (root.minimized) {
+            if (prefs.pauseOnMinimize && mpv.hasVideo && !mpv.paused) {
+                mpv.setPaused(true)
+                root.pausedByMinimize = true
+            }
+        } else if (root.pausedByMinimize) {
+            // Cleared either way: the pause stops being ours the moment the
+            // window is back, so a later manual pause is never undone by a
+            // minimise that happened before it.
+            root.pausedByMinimize = false
+            if (prefs.resumeOnRestore)
+                mpv.setPaused(false)
+        }
+    }
+
     property bool panelVisible: true
     // What the panel was doing before fullscreen hid it, so leaving fullscreen
     // restores that rather than unconditionally showing it.
@@ -335,7 +409,11 @@ ApplicationWindow {
         // Save where the outgoing file got to before its position is gone.
         root.rememberPosition()
         root.currentFile = path
-        root.pendingResume = history.resumeFor(path)
+        // The stored position is looked up only when resuming is wanted; the
+        // store itself keeps recording either way, so the toggle is a choice
+        // about behaviour rather than about what is remembered.
+        root.pendingResume =
+            prefs.resumeWhereLeftOff ? history.resumeFor(path) : -1
 
         // A file already in the queue keeps it -- that is a playlist advance, or
         // someone reopening a file they dropped. Anything else starts a new
@@ -361,6 +439,17 @@ ApplicationWindow {
         // and a shrug. The order is kept rather than sorted: someone who names
         // three files in a particular order meant that order.
         playlist.setFiles(paths)
+        // setFiles is where a queue is filtered, so several files that are none
+        // of them media leave nothing behind and openFile would return without a
+        // word. Saying so here, because opening something and having nothing
+        // happen at all looks like the window missed it. Worded for all three
+        // callers -- a drop, the file dialog and the command line -- rather than
+        // for the drop alone. One bad file needs no guard: it goes to mpv, which
+        // reports what it could not open.
+        if (playlist.currentPath === "") {
+            root.notify("Nothing playable in those files", "error")
+            return
+        }
         root.openFile(playlist.currentPath)
     }
 
@@ -495,7 +584,10 @@ ApplicationWindow {
         var track = tracks[index]
         if (track === undefined || !track.browsable)
             return
-        root.currentTrack = track.id
+        // The panel has already moved its own tab by the time it says this, but
+        // setting it here as well is what makes the tab the selection rather
+        // than a thing that happens to agree with one.
+        panelUi.tabIndex = index
         root.applySubtitleSelection()
         // A tab click is a statement about this film, so it is worth keeping.
         // Only explicit choices are remembered -- storing what the sync handlers
@@ -505,62 +597,16 @@ ApplicationWindow {
                                  track.language)
     }
 
-    // Which tab a newly parsed file should open on: the track last read in this
-    // very file, else the language last chosen anywhere, else the first
-    // browsable track. Before this, every open reset to mpv's default -- on a
-    // film with 65 tracks that means hunting for the right one every time.
-    function preferredTrackIndex() {
-        // Hoisted. Every read of subs.tracks converts a QVariantList of
-        // QVariantMaps into a fresh JS array of JS objects, and this used to do
-        // it once per loop iteration -- about 4 200 conversions on the 65-track
-        // film, for one answer.
-        var tracks = subs.tracks
-        var i, t
-        var stored = history.subtitleFor(root.currentFile)
-
-        if (stored.streamIndex !== undefined) {
-            for (i = 0; i < tracks.length; ++i) {
-                t = tracks[i]
-                if (!t.browsable)
-                    continue
-                // Sidecars are matched by path and embedded tracks by ffmpeg
-                // stream index, the same split MpvEngine uses: neither numbering
-                // follows from the other.
-                var match = stored.sidecarPath !== ""
-                          ? (t.sidecar && t.sourcePath === stored.sidecarPath)
-                          : (!t.sidecar && t.streamIndex === stored.streamIndex)
-                if (match)
-                    return i
-            }
-        }
-
-        var lang = history.preferredLanguage()
-        if (lang !== "") {
-            for (i = 0; i < tracks.length; ++i) {
-                t = tracks[i]
-                if (t.browsable && t.language === lang)
-                    return i
-            }
-        }
-
-        for (i = 0; i < tracks.length; ++i) {
-            if (tracks[i].browsable)
-                return i
-        }
-        return -1
-    }
-
     // The transport's subtitle menu reaches tracks the panel cannot list, so a
-    // choice made there has to be remembered too. mpv describes a track by
-    // ff-index and, for a sidecar, by the filename it loaded.
+    // choice made there has to be remembered too. Which file it names is decided
+    // here; how mpv's description of a track becomes what the store keeps is
+    // decided in C++, because it is mpv's numbering being translated.
     function rememberMpvSubtitle(track) {
         if (root.currentFile === "" || track.id === undefined)
             return
-        var sidecar = track.external && track.externalFilename !== undefined
-                    ? track.externalFilename : ""
-        history.rememberSubtitle(root.currentFile,
-                                 sidecar === "" ? track.ffIndex : -1, sidecar,
-                                 track.language !== undefined ? track.language : "")
+        var entry = mpv.subtitleHistoryEntry(track)
+        history.rememberSubtitle(root.currentFile, entry.streamIndex,
+                                 entry.sidecarPath, entry.language)
     }
 
     // Tells mpv to burn the track the panel is showing over the video. Until this
@@ -578,22 +624,17 @@ ApplicationWindow {
 
     // The other direction: picking a subtitle track from the transport menu moves
     // the panel to the matching tab, so the two agree no matter which was used.
-    // Path comparison happens in C++ -- one file can be named relatively in the
-    // extractor and absolutely by mpv.
+    // Moving the tab is the whole of it -- currentTrack derives from it, so the
+    // list and the export target follow without a second write to keep in step.
+    //
+    // The whole search happens in C++, where the two numberings meet: one file
+    // can be named relatively in the extractor and absolutely by mpv. -1 means
+    // mpv is showing something the browser cannot list, or has not caught up
+    // with the file yet, and both mean leave the tab alone.
     function syncPanelToSubtitleTrack() {
-        if (mpv.subtitleTrack < 0)
-            return
-        var tracks = subs.tracks
-        for (var i = 0; i < tracks.length; ++i) {
-            var t = tracks[i]
-            if (!t.browsable)
-                continue
-            if (mpv.subtitleTrackMatches(mpv.subtitleTrack, t.streamIndex,
-                                         t.sidecar ? t.sourcePath : "")) {
-                panelUi.tabIndex = i
-                return
-            }
-        }
+        var index = mpv.browserTrackForSubtitle(subs.tracks)
+        if (index >= 0)
+            panelUi.tabIndex = index
     }
 
     Connections {
@@ -604,16 +645,6 @@ ApplicationWindow {
         // sub-add lands.
         function onTracksChanged() { root.applySubtitleSelection() }
         function onSubtitleTrackChanged() { root.syncPanelToSubtitleTrack() }
-    }
-
-    function tracksOfType(type) {
-        var all = mpv.tracks
-        var out = []
-        for (var i = 0; i < all.length; ++i) {
-            if (all[i].type === type)
-                out.push(all[i])
-        }
-        return out
     }
 
     function trackLabel(t) {
@@ -789,8 +820,14 @@ ApplicationWindow {
 
         case "fullscreen": case "fullscreen-alt": root.toggleFullscreen(); break
         case "leave-fullscreen":
+            // Esc means "get this out of the way", and what is in the way
+            // depends on where it is: fullscreen comes down to a window, and a
+            // window goes to the taskbar. Minimised rather than closed, because
+            // one key must never be able to end a viewing.
             if (root.fullscreen)
                 root.visibility = Window.Windowed
+            else
+                root.showMinimized()
             break
 
         case "open-file": openDialog.open(); break
@@ -816,11 +853,12 @@ ApplicationWindow {
 
             Shortcut {
                 sequence: modelData.sequence
+                // Escape needs no gate of its own any more: it does something in
+                // either window state now, and the search box is already covered
+                // because leave-fullscreen does not work while typing, so the
+                // field keeps the key and clears its own text.
                 enabled: modelData.sequence !== ""
                          && (!root.typing || modelData.worksWhileTyping)
-                         // Escape only leaves fullscreen; in the search box it
-                         // clears the text, which the field handles itself.
-                         && (modelData.id !== "leave-fullscreen" || root.fullscreen)
                 onActivated: root.dispatch(modelData.id)
             }
         }
@@ -1017,6 +1055,7 @@ ApplicationWindow {
             prefs: root.prefsStore
             subStyle: root.subStyleStore
             shortcuts: root.shortcutStore
+            qtVersion: qtRuntimeVersion
             onClosing: settingsLoader.active = false
             onSubtitleStyleChanged: root.applySubtitleStyle()
             onTextRenderingChanged: root.applyTextRendering()
@@ -1039,6 +1078,7 @@ ApplicationWindow {
             subtitleDelay: root.mpv.subtitleDelay
             showEndTime: root.prefsStore.showEndTime
             showCueDuration: root.prefsStore.showCueDuration
+            showActors: root.prefsStore.showActors
             followOffOnScroll: root.prefsStore.followOffOnScroll
             onSeekRequested: (seconds) => root.mpv.seek(seconds)
             onTrackActivated: (index) => root.selectTrack(index)
@@ -1118,7 +1158,19 @@ ApplicationWindow {
             var paths = []
             for (var i = 0; i < drop.urls.length; ++i)
                 paths.push(mpv.localFile(drop.urls[i]))
-            root.openFiles(paths)
+            // A dropped folder is the media inside it. Expanded here rather than
+            // inside openFiles, so a folder holding a single film still arrives
+            // as one file to open rather than a queue of one.
+            var expanded = playlist.expand(paths)
+            if (expanded.length === 0) {
+                // Saying so, because the alternative is a drop that looks like
+                // it missed the window. A folder of subtitles and nothing else
+                // is the case that gets here.
+                root.notify("Nothing playable in what was dropped", "error")
+                drop.acceptProposedAction()
+                return
+            }
+            root.openFiles(expanded)
             drop.acceptProposedAction()
         }
     }
@@ -1207,11 +1259,59 @@ ApplicationWindow {
                 // window has to be clicked to focus it under WSLg, and pausing
                 // on that is infuriating.
                 MouseArea {
+                    id: videoMouse
                     anchors.fill: parent
                     hoverEnabled: true
+                    // Right-click as well, for the context menu. Left is still
+                    // listed explicitly because naming acceptedButtons at all
+                    // replaces the default rather than adding to it, and
+                    // dropping LeftButton would take the double-click with it.
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onPositionChanged: chromeTimer.restart()
                     onDoubleClicked: root.toggleFullscreen()
+                    // The same list the transport's overflow button opens, at
+                    // the cursor. Every other player puts it here, and reaching
+                    // for a button at the bottom of the window to find it is the
+                    // step that was worth removing.
+                    onClicked: (mouse) => {
+                        if (mouse.button === Qt.RightButton)
+                            transportBar.popupOverflowAt(videoMouse, mouse.x, mouse.y)
+                    }
                     cursorShape: root.showChrome ? Qt.ArrowCursor : Qt.BlankCursor
+
+                    // The wheel over the picture is volume, in the step the
+                    // arrow keys use and with the same readout, so the two are
+                    // one control reached two ways. Inside the MouseArea rather
+                    // than beside it, so there is no question of which of the
+                    // two sees the event first. The panel scrolls as it did:
+                    // this is bounded by the picture.
+                    WheelHandler {
+                        id: volumeWheel
+
+                        // A mouse notch is 120 units, but a trackpad and a
+                        // high-resolution mouse send a stream of much smaller
+                        // deltas instead. Stepping once per event would turn a
+                        // single flick into forty steps and slam the volume to
+                        // one end, so the deltas are accumulated and spent a
+                        // notch at a time.
+                        property real pending: 0
+
+                        onWheel: (event) => {
+                            volumeWheel.pending += event.angleDelta.y
+                            // Truncated toward zero, so a half-notch of scroll
+                            // is held rather than rounded into a step nobody
+                            // asked for. This is also what makes a sideways
+                            // scroll harmless: it contributes no vertical
+                            // movement, so it can never reach a whole notch on
+                            // its own and be read as a turn downwards.
+                            var notches = Math.trunc(volumeWheel.pending / 120)
+                            if (notches === 0)
+                                return
+                            volumeWheel.pending -= notches * 120
+                            mpv.setVolume(mpv.volume + notches * prefs.volumeStep)
+                            root.osd(Math.round(mpv.volume) + "%")
+                        }
+                    }
                 }
 
                 // Nothing loaded. The first thing a new user sees, so it says
@@ -1222,8 +1322,8 @@ ApplicationWindow {
                     visible: root.currentFile === "" && root.noticeText === ""
                     iconName: "film"
                     title: "Nothing playing"
-                    body: "Open a file, or drop one anywhere in this window. "
-                          + "Drop several to build a queue."
+                    body: "Open a file, or drop files and folders anywhere in "
+                          + "this window. Drop several to build a queue."
                     actionText: "Open file…"
                     actionShortcut: keys.sequenceFor("open-file")
                     onActionTriggered: openDialog.open()
@@ -1243,7 +1343,8 @@ ApplicationWindow {
                         compact: true
                         iconName: "folder-open"
                         title: "Drop to play"
-                        body: "Several files become a queue, in the order dropped."
+                        body: "Files or folders. Several become a queue, in the "
+                              + "order dropped."
                     }
                 }
 
@@ -1379,8 +1480,8 @@ ApplicationWindow {
             playlist.setCurrentPath(playlist.files[index])
             root.openFile(playlist.currentPath)
         }
-        audioTracks: root.tracksOfType("audio")
-        subtitleTracks: root.tracksOfType("sub")
+        audioTracks: root.mpv.audioTracks
+        subtitleTracks: root.mpv.subtitleTracks
         trackLabeller: root.trackLabel
     }
 }
