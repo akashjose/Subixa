@@ -72,6 +72,7 @@ jobs:
             libxrandr-dev libxpresent-dev libxss-dev libxkbcommon-dev libxinerama-dev \
             libegl1-mesa-dev libgl-dev libgbm-dev \
             libwayland-dev wayland-protocols \
+            patchelf file desktop-file-utils \
             ffmpeg
 
       - name: Cache Qt
@@ -145,6 +146,28 @@ jobs:
           path: stage/
           if-no-files-found: error
 
+      # TEMPORARILY UNCONDITIONAL. Packaging belongs on master, tags and
+      # workflow_dispatch -- compressing ~300 MB on every feature-branch push
+      # is waste. It runs everywhere for now so the first AppImage and the
+      # first installer come off a clean machine and can be downloaded and
+      # checked; scope it once they have been.
+      #
+      # No FUSE package needed: make-appimage.sh sets APPIMAGE_EXTRACT_AND_RUN
+      # so neither linuxdeploy nor the result mounts anything.
+      - name: Build the AppImage
+        if: matrix.build_type == 'Release'
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          ./tools/make-appimage.sh build dist
+
+      - name: Upload the AppImage
+        if: matrix.build_type == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: subixa-linux-x86_64-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
   windows:
     name: Windows (MSYS2 UCRT64)
     runs-on: windows-latest
@@ -216,4 +239,32 @@ jobs:
         with:
           name: subixa-win64
           path: dist/subixa-win64/
+          if-no-files-found: error
+
+      # See the note on the AppImage step: unconditional for now so the first
+      # installer is built somewhere other than one desk, scoped afterwards.
+      #
+      # Inno Setup is normally preinstalled on the windows runners; installing
+      # it when absent costs nothing when it is present and avoids the job
+      # failing on an image change. This step is pwsh rather than the job's
+      # msys2 shell because choco is a Windows tool.
+      - name: Ensure Inno Setup
+        if: steps.qt-gate.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /? | Select-Object -First 1
+
+      - name: Build the Windows installer
+        if: steps.qt-gate.outputs.ok == 'true'
+        run: ./tools/make-installer-win.sh dist/subixa-win64 dist
+
+      - name: Upload the Windows installer
+        if: steps.qt-gate.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: subixa-win64-installer
+          path: dist/*-setup.exe
           if-no-files-found: error
