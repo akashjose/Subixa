@@ -260,6 +260,21 @@ target_compile_definitions(subixa PRIVATE
 # console programs -- ctest reads their stdout.
 set_target_properties(subixa PROPERTIES WIN32_EXECUTABLE TRUE)
 
+# The Explorer icon and the version block, which are resources in the binary
+# rather than anything Qt knows about. Without them the exe draws as a generic
+# binary, and so does every Start Menu shortcut the installer creates -- a
+# shortcut takes its icon from its target. icons/subixa.rc.in explains why the
+# resource is named `1` and why it is configured rather than committed.
+#
+# enable_language(RC) here rather than in project(): the project line declares
+# CXX only, and a .rc added to a target without the language enabled is not an
+# error, it is silently not compiled -- an exe with no icon and no explanation.
+if(WIN32)
+    enable_language(RC)
+    configure_file(icons/subixa.rc.in "${CMAKE_CURRENT_BINARY_DIR}/subixa.rc" @ONLY)
+    target_sources(subixa PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/subixa.rc")
+endif()
+
 # The window icon, compiled in. The desktop entry points at the installed copy
 # below, but that only covers a launcher: a window needs the icon at runtime,
 # and a player run straight from a build tree has no installed files at all.
