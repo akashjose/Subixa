@@ -383,11 +383,25 @@ all; it is mpv ruling out a backend, not a failure.
     while the screen was wrong, so a readback cannot be trusted to describe what
     is displayed. Settings -> Interface overrides either way.
 
-23. **XML forbids a double hyphen inside a comment.** `icons/subixa.svg` cannot
-    use the em dash the rest of the tree writes as two hyphens. Breaking it does
-    not fail loudly: ImageMagick rendered the entire tile black and reported
-    nothing until asked directly, which sent the first diagnosis after a
-    gradient that was working fine.
+23. **XML forbids a double hyphen inside a comment.** No XML file in the tree can
+    use the em dash the rest of it writes as two hyphens — `icons/subixa.svg`
+    and `com.akashjose.Subixa.metainfo.xml` both. Breaking it does not fail
+    loudly: ImageMagick rendered the entire tile black and reported nothing
+    until asked directly, which sent the first diagnosis after a gradient that
+    was working fine.
+
+    `appstreamcli` is the better-behaved consumer and still misleads, because it
+    reports the file as a *validation* failure — `E: xml-markup-invalid`, exit
+    3, in the same step and the same shape as a genuine metadata error. It
+    never parsed the document, so nothing it says describes the metadata.
+    Check the file parses before reading the complaint as being about
+    AppStream.
+
+    `com.akashjose.Subixa.metainfo.xml` hit this in a comment that was
+    explaining the adjacent rule that XML forbids a comment inside a tag. That
+    file now carries no prose comments at all, which removes the trap from it
+    for good and is right anyway: it is installed verbatim and ships in every
+    package.
 
     *Scope: universal — the XML grammar itself; every conformant consumer on every platform
     rejects the comment, ImageMagick merely did so silently.*
