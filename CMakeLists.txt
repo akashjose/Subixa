@@ -2,7 +2,47 @@
 # Copyright (C) 2026 Akash Jose
 
 cmake_minimum_required(VERSION 3.21)
-project(subixa VERSION 0.5.0 LANGUAGES CXX)
+
+# The version lives in version.txt, and this reads it rather than declaring it.
+#
+# The indirection is not for CMake's benefit. Three things outside CMake need
+# the version before or without a build -- the AppImage, the portable zip and
+# the installer all put it in a filename -- and they used to get it by each
+# running its own sed over the project() line, which is a regex over a file
+# they do not own. A plain file with a number in it is something anything can
+# read, including release-please, which is what rewrites it on a release.
+#
+# So: version.txt is the source, and everything else derives. From here it
+# reaches the binary as SUBIXA_VERSION, the Windows resource block through
+# icons/subixa.rc.in, and the About card through setApplicationVersion; outside,
+# tools/version.sh reads the same file. Do not edit it by hand -- the release
+# PR sets it from the conventional-commit prefixes since the last tag. See
+# docs/releasing.md.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" SUBIXA_VERSION_FILE LIMIT_COUNT 1)
+string(STRIP "${SUBIXA_VERSION_FILE}" SUBIXA_VERSION_FILE)
+if(NOT SUBIXA_VERSION_FILE MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "version.txt should hold one x.y.z version, and holds '${SUBIXA_VERSION_FILE}'.")
+endif()
+project(subixa VERSION ${SUBIXA_VERSION_FILE} LANGUAGES CXX)
+
+# The AppStream metainfo is the one file that carries the version as data rather
+# than deriving it, because a <release> entry is what it is for. That makes it
+# the one that can drift, and drifting is not visible: appstreamcli validates the
+# shape of the entry and has no opinion about which version it names, so a
+# metainfo a release behind passes CI, installs, and tells every software centre
+# the wrong thing.
+#
+# Checking it here rather than in a test suite is deliberate -- it is a property
+# of the tree, not of a build, and configure is the earliest point that can fail.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/com.akashjose.Subixa.metainfo.xml" SUBIXA_METAINFO)
+if(NOT SUBIXA_METAINFO MATCHES "<release version=\"${PROJECT_VERSION}\"")
+    string(REGEX MATCH "<release version=\"([0-9.]+)\"" _ "${SUBIXA_METAINFO}")
+    message(FATAL_ERROR
+        "com.akashjose.Subixa.metainfo.xml names version ${CMAKE_MATCH_1}, "
+        "but project() is ${PROJECT_VERSION}. Both are rewritten together by "
+        "release-please; if you moved one by hand, move the other.")
+endif()
+unset(SUBIXA_METAINFO)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -259,6 +299,21 @@ target_compile_definitions(subixa PRIVATE
 # when diagnosing a Windows install. The test targets are deliberately left as
 # console programs -- ctest reads their stdout.
 set_target_properties(subixa PROPERTIES WIN32_EXECUTABLE TRUE)
+
+# The Explorer icon and the version block, which are resources in the binary
+# rather than anything Qt knows about. Without them the exe draws as a generic
+# binary, and so does every Start Menu shortcut the installer creates -- a
+# shortcut takes its icon from its target. icons/subixa.rc.in explains why the
+# resource is named `1` and why it is configured rather than committed.
+#
+# enable_language(RC) here rather than in project(): the project line declares
+# CXX only, and a .rc added to a target without the language enabled is not an
+# error, it is silently not compiled -- an exe with no icon and no explanation.
+if(WIN32)
+    enable_language(RC)
+    configure_file(icons/subixa.rc.in "${CMAKE_CURRENT_BINARY_DIR}/subixa.rc" @ONLY)
+    target_sources(subixa PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/subixa.rc")
+endif()
 
 # The window icon, compiled in. The desktop entry points at the installed copy
 # below, but that only covers a launcher: a window needs the icon at runtime,

@@ -160,8 +160,20 @@ EOF
 
 `cp -n` matters in the `ldd` command: it also reports the Qt DLLs, and without it
 they would be copied back over whatever `windeployqt6` had just staged. The
-result is roughly 170 DLLs and about 300 MB. There is no installer, and nothing
-is code-signed.
+result is roughly 170 DLLs and about 300 MB. Nothing is code-signed.
+
+The staged folder is what both downloads are made of, and neither adds anything
+to it:
+
+```bash
+tools/make-portable-win.sh dist/subixa-win64 dist   # needs `pacman -S zip`
+tools/make-installer-win.sh dist/subixa-win64 dist  # needs Inno Setup 6
+```
+
+The zip carries a single versioned directory at its root so two releases can be
+extracted side by side; the installer adds shortcuts and an uninstaller and
+nothing else. Both take the version from `version.txt`. On a release CI runs the
+pair — see [`releasing.md`](releasing.md).
 
 The paths above are MSYS2 mount paths, so run this from the **UCRT64 shell**.
 From Git Bash `/ucrt64` does not resolve and every `cp` fails with "No such file

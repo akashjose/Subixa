@@ -1,0 +1,52 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright (C) 2026 Akash Jose
+
+   The Windows resource block: the icon Explorer draws, and the version fields
+   the Properties dialog reads.
+
+   This is a *different* mechanism from the icon compiled in below with
+   qt_add_resources. That one is a QIcon and never leaves the process, so it
+   covers the window and Alt+Tab and nothing else. Explorer, the taskbar's
+   pinned entry and the Start Menu shortcut the installer writes all read the
+   executable's resource table instead, and with no icon there they fall back
+   to the generic binary glyph.
+
+   Configured from icons/subixa.rc.in rather than committed so the version has
+   exactly one source, which is project(subixa VERSION ...). A second copy of a
+   version number is a copy that goes stale.
+
+   The icon is named `1` rather than a symbolic id on purpose: Windows shows
+   whichever icon resource sorts lowest, numeric ids sort before named ones,
+   and `1` is the smallest. A symbolic name works only until something else in
+   the table sorts below it.
+*/
+
+1 ICON "@CMAKE_CURRENT_SOURCE_DIR@/icons/subixa.ico"
+
+1 VERSIONINFO
+FILEVERSION    @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEOS   0x40004L
+FILETYPE 0x1L
+{
+    BLOCK "StringFileInfo"
+    {
+        /* 0409 is en-US, 04B0 is Unicode. The VarFileInfo block below has to
+           agree with this or the Properties dialog shows nothing at all. */
+        BLOCK "040904B0"
+        {
+            VALUE "CompanyName",      "Akash Jose"
+            VALUE "FileDescription",  "Subixa media player"
+            VALUE "FileVersion",      "@PROJECT_VERSION@"
+            VALUE "InternalName",     "subixa"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 Akash Jose. GPL-3.0-or-later."
+            VALUE "OriginalFilename", "subixa.exe"
+            VALUE "ProductName",      "Subixa"
+            VALUE "ProductVersion",   "@PROJECT_VERSION@"
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x409, 1200
+    }
+}

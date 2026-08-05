@@ -39,3 +39,6 @@ testdata/huge.en.ass
 
 # Test artefacts copied next to testclip.mp4 while checking the browser.
 testclip.*.srt
+
+# aqtinstall drops this wherever it is run from.
+aqtinstall.log

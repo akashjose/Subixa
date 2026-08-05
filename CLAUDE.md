@@ -127,7 +127,7 @@ row, is in **`docs/architecture.md`**.
 
 ## Traps
 
-**`docs/traps.md` has all 25 with the evidence.** They are numbered as identities,
+**`docs/traps.md` has all 26 with the evidence.** They are numbered as identities,
 not an order. The index:
 
 | # | | |
@@ -157,6 +157,7 @@ not an order. The index:
 | 23 | XML forbids `--` inside a comment | the SVG icon renders black, silently |
 | 24 | `mpv_create` fails outside a `C` locale | and says so only on a terminal |
 | 25 | `<svg` must be in the first 1 KB | or gdk-pixbuf cannot see the icon at all |
+| 26 | `height: parent.height` inside a `Row` | makes the row height a ratchet, silently |
 
 **Every entry now carries a scope line saying which platform it applies to** —
 reconstructed from the evidence after the lack of one had cost real time.
@@ -207,6 +208,20 @@ failure that looks like something else.
   proxy became hand-written" outlives a rebase or a history rewrite; a hash does
   not. Every hash in the tree went dangling at once when the branch was
   rewritten, and no sentence lost meaning when they were removed.
+- **Every commit subject takes a conventional-commit prefix** — `feat:`, `fix:`,
+  `docs:`, `ci:` and the rest, then a lowercase imperative phrase. This is
+  load-bearing, not ceremony: release-please reads the prefixes on `master` to
+  choose the next version and write `CHANGELOG.md`, so an unprefixed commit is a
+  change that reaches no release. `docs/releasing.md` has the table.
+- **Commit bodies are ASD-STE100 Simplified Technical English, at code level.**
+  Short sentences, active voice, simple tenses. Say what the commit changes and
+  the part of *why* the diff cannot show. Architecture and design reasoning go
+  in `docs/`, not in the log — see `CONTRIBUTING.md`.
+- **The version lives in `version.txt` and nowhere else.** CMake reads it into
+  `project()`; the binary, the Windows resource block, the About card and the
+  three package filenames all derive from there. Do not edit it, or the
+  `<release>` entry in the metainfo, by hand — the release PR writes both, and
+  CMake fails at configure time if they disagree.
 
 ## Where things are
 
@@ -214,12 +229,13 @@ failure that looks like something else.
 |---|---|
 | `docs/roadmap.md` | **where the project stands and what is next — start here** |
 | `docs/architecture.md` | the three founding decisions, modules, the design system, caching |
-| `docs/traps.md` | all 25, with the evidence and what was ruled out |
+| `docs/traps.md` | all 26, with the evidence and what was ruled out |
 | `docs/testing.md` | the suites, the conformance corpus, the render canary |
 | `docs/building.md` | the full Linux build, including the from-source media stack |
 | `docs/windows.md` | the MSYS2 toolchain, the build and the deployment sequence |
 | `docs/graphics.md` | driver selection, and what the Windows port turned up |
 | `docs/keyboard.md` | default bindings |
-| `CHANGELOG.md` | what has been built, milestone by milestone |
+| `docs/releasing.md` | how a version is chosen and the three downloads are built |
+| `CHANGELOG.md` | written by release-please from the commit prefixes; not by hand |
 | `CONTRIBUTING.md` | conventions, and what is most useful to work on |
 | `README.md` | the public page: what this is, and how to build it |

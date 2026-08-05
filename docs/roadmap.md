@@ -134,10 +134,15 @@ a film still clears its position with resume off, and switching a toggle back
 on remembers everything. Both gates carry mutation-checked regression tests.
 
 **The release machinery has now run on machines that are not this one, and it
-is green on all of them.** `.github/workflows/ci.yml` — metadata validation, an
-Ubuntu 24.04 Debug/Release matrix with the media stack cached on a hash of
-`tools/build-deps.sh`, and an MSYS2 UCRT64 job gated on the Windows Qt floor.
-As of 2026-07-31 all four legs pass: lint, Linux Debug, Linux Release, Windows.
+is green on all of them.** The builds live in `.github/workflows/build.yml` —
+an Ubuntu 24.04 Debug/Release matrix with the media stack cached on a hash of
+`tools/build-deps.sh`, and an MSYS2 UCRT64 job gated on the Windows Qt floor —
+and it is called rather than triggered, by `ci.yml` on the way in and
+`release.yml` on the way out, so a release is built by the file that tested it.
+`ci.yml` adds the checks that only make sense before a change lands: the
+freedesktop metadata, and the commit prefixes the version number is computed
+from. As of 2026-07-31 all four legs pass: lint, Linux Debug, Linux Release,
+Windows.
 Ten suites in three independent configurations, on hardware nobody here owns.
 `com.akashjose.Subixa.metainfo.xml` validates and installs. `cmake --install`
 writes real rpaths, `tools/install-linux.sh` scripts the update — which is how
@@ -204,13 +209,17 @@ Ten suites pass, warning-free under `-Wall -Wextra` on every target.
 ## Next
 
 **Feature complete is the honest word for where this sits** — nothing below is
-a feature. What stands between 0.5.0 and something releasable is release
+a feature. What stands between the tree and something releasable is release
 engineering, in this order.
 
-Pushing was the first item here and is now done: the branch is on `origin`, CI
-is green on both platforms, and "ctest passes" has stopped being a sentence
-about one desk. `master` still stays where it is and merges at release time,
-not before.
+Two items here are now done. Pushing: the branch is on `origin`, CI is green on
+both platforms, and "ctest passes" has stopped being a sentence about one desk.
+And the release path itself: a merge to `master` updates a standing release
+pull request, and merging *that* tags, publishes, and attaches the AppImage, the
+Windows portable zip and the Windows installer. The version comes from the
+conventional-commit prefixes rather than from anybody's judgement, and
+`version.txt` is the one place it is written. See
+[`releasing.md`](releasing.md).
 
 1. **Packaging, AppImage first.** The stack argues the order: Subixa needs
    FFmpeg 8, mpv 0.41 and libplacebo 7.3, and no distribution ships them — so
@@ -223,19 +232,51 @@ not before.
    packaging owes beyond the bundle is relocatability, which the absolute
    install rpaths deliberately do not attempt.
 
-   The two CI artifacts make the gap concrete. Windows uploads ~70 MB zipped
+   The two CI artifacts made the gap concrete. Windows uploads ~70 MB zipped
    and it runs when you download it; Linux uploads a few MB that will not run
    anywhere, because its rpaths point at a runner's `~/data/subixa-stack` on a
-   VM that no longer exists. The Windows side reached a usable artifact first
-   only because `windeployqt6` does that packing for you. Nobody has written
-   the Linux equivalent, and an AppImage is what it would be.
+   VM that no longer exists.
+
+   **`tools/make-appimage.sh` now closes that**, built and measured on
+   2026-07-31: 82 MB, `linuxdeploy` plus its Qt plugin, every rpath rewritten
+   to `$ORIGIN`. It runs with `~/data` moved aside — Qt and the media stack
+   unreachable — reaching `VO: [libmpv] 1280x720`. CI builds it on a release
+   and attaches it, and one thing had to be fixed to get there: the runner
+   image has no `libxkbcommon-x11.so.0`, which nothing needs to *build* and
+   `linuxdeploy` needs to *bundle*, because it walks the xcb platform plugin's
+   `ldd` tree. Ten green suites and a failing package step, for weeks.
+
+   **The glibc floor is 2.38, and it was measured rather than assumed.** An
+   AppImage bundles everything except glibc, so the build host sets the
+   minimum. Scanning every ELF file in the bundle, 34 of them want
+   `GLIBC_2.38` — `libmpv`, `libplacebo`, `libshaderc` among them — so this is
+   the stack's requirement, not one stray library's. That means **Ubuntu
+   23.10+, Debian 13+, Fedora 39+**, and it means Ubuntu 22.04 and Debian 12
+   are out. Lowering it would mean building on an older base, which collides
+   with the gcc 14 and C++23 requirement; 22.04 tops out at gcc 12.
+
+   Two things learned validating it, both worth keeping:
+
+   - **The AppImage excludelist omits libraries on the theory that the target
+     has them.** `libpipewire-0.3.so.0` is on it, so the bundle does not carry
+     it, and on Ubuntu 22.04 the AppImage dies on the missing library before
+     glibc is ever consulted. Within the supported range the assumption holds
+     — every distribution with glibc 2.38 ships pipewire — but the failure
+     mode is a missing `.so` on a machine nobody tested, which is the same
+     shape as the wayland packages.
+   - **Hiding `~/data` is not a clean room.** It removes Qt and the media
+     stack and nothing from `/usr/lib`, so it cannot catch an unbundled system
+     library. Only a machine that never had the build dependencies can. The
+     WSL Ubuntu 22.04 instance is that machine, and it is how the pipewire gap
+     was found.
 
 2. **Finish the Windows build.** No longer blocked: the floor split to 6.11
    there, `tools/build-win.sh` runs configure, build, ten suites and staging
    from a clean checkout (2026-07-31, 223 DLLs, 298 MB, verified playing by
-   capture), and CI now does the same on a runner and uploads the result. What
-   remains is that nothing is *packaged* — a staged folder is not an installer
-   — and nothing is signed. Azure Trusted Signing at
+   capture), and CI now does the same on a runner and uploads the result. The
+   staged folder is now packaged both ways — `tools/make-portable-win.sh` for
+   the zip, `tools/make-installer-win.sh` for the Inno Setup installer — so what
+   remains is that nothing is signed. Azure Trusted Signing at
    about $10/month is the only
    certificate option that works headless in CI — OV certificates have needed a
    hardware token since June 2023. The reason the port was argued for is still
@@ -293,6 +334,12 @@ them next; the sizes are honest guesses.
 - **The write cadence knob.** A crash loses up to thirty seconds of position
   (`PositionWriteStep` in `PlaybackHistory`), named and commented if it wants
   lowering.
+- **`qtwayland` is not installed, here or in CI.** The `aqtinstall` line asks
+  for `qtshadertools` and `qtimageformats` only, so there is no `wayland`
+  platform plugin and Qt logs `Could not find the Qt platform plugin "wayland"`
+  before falling back. On a Wayland desktop that means running through
+  XWayland. One more module in the `aqtinstall` line, and one more entry in the
+  AppImage, would fix it.
 - **No `qsTr()` anywhere, and no accessibility.** Zero files. Both get harder the
   longer they wait, and for a *reading* tool the second is more relevant than
   usual. Note `SubtitleManager.cpp` builds `"%1 track%2, %3 line%4%5"` by

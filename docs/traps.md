@@ -411,3 +411,29 @@ all; it is mpv ruling out a backend, not a failure.
     The comments live inside the `svg` element now. **A header added back above the tag
     reintroduces it, silently.** One line checks it:
     `python3 -c "from gi.repository import GdkPixbuf; GdkPixbuf.Pixbuf.new_from_file_at_size('icons/subixa.svg',48,48)"`.
+
+26. **A positioner's child cannot be sized from the positioner.** `SubtitleRow` drew the
+    hairline between the timestamp column and the cue text as a child of the `Row` it
+    divides, with `height: parent.height`. A `Row`'s `implicitHeight` is the tallest of its
+    children, so the divider's height and the row's height each derived from the other. Qt
+    breaks that cycle silently — **no `Binding loop detected` warning ever appears** — by
+    never re-evaluating downward, which turns the row height into a ratchet: it grows with
+    the tallest thing the delegate has ever measured and never shrinks again.
+
+    *Scope: universal — Qt Quick positioner semantics, in Qt 6.12 and independent of driver
+    and platform.*
+
+    With `reuseItems: true` on the list this is a rendering bug that looks like a parsing
+    bug. A delegate keeps its inflated height for every short cue it is later recycled
+    into, so single-line dialogue renders three or four lines tall, scattered through the
+    track with no pattern in the file — and reading the file to find what is special about
+    those cues finds nothing, because the height belongs to the *delegate*, not the cue.
+    Worst on a delegate first laid out before the panel's width settled, where a short cue
+    wraps to a dozen lines and freezes there.
+
+    The line is a sibling of the `Row` now, anchored top to bottom of the `contentItem`,
+    with a plain `Item` holding its width open in the `Row` — so it spans the whole row,
+    which is what a scan edge wanted anyway, and takes no part in measuring it.
+    `tst_qmlpanel::rowHeightFollowsItsTextBothWays` turns the row type up to the maximum
+    and back down and asserts every row returns to the height it had; it fails against the
+    old divider.

@@ -6,7 +6,7 @@ than it needs to be.
 
 ## Before you change anything
 
-**Read [`docs/traps.md`](docs/traps.md).** It is 25 entries, each one something
+**Read [`docs/traps.md`](docs/traps.md).** It is 26 entries, each one something
 that already cost somebody a debugging cycle, and several of them look like
 arbitrary sledgehammers until you read why they exist. If you are touching the
 render path, the subtitle extractor or anything in `qml/ui/`, that file will save
@@ -82,22 +82,43 @@ does not test anything.
 
 ## Commit messages
 
-Match what is already there — run `git log` and read a few. Subjects are a plain
-sentence saying what changed, and bodies explain *why*, particularly when the
-reasoning would not survive being rediscovered. Several commits here exist mainly
-to record a measurement or a false start, which is the point.
+Every subject takes a conventional-commit prefix, then a lowercase phrase in the
+imperative:
 
-Don't hard-wrap mid-sentence; break at sentence boundaries.
+```
+fix(browser): set the height of a subtitle row from its own cue
+```
+
+The prefix is machinery rather than ceremony — release-please reads it to decide
+the next version number and what goes in the changelog, so a commit without one
+is a change that appears in no release. `feat:` bumps the minor, `fix:` and
+`perf:` the patch, and the rest bump nothing;
+[`docs/releasing.md`](docs/releasing.md) has the full table.
+`.commitlintrc.yml` enforces the prefix, on the commits *and* on the pull
+request title, because either can be the one that lands.
+
+Two rules the linter cannot check:
+
+- **Write the body in [ASD-STE100 Simplified Technical
+  English](https://www.asd-ste100.org/).** Short sentences, active voice, simple
+  tenses, one idea per sentence. Say "If you do not set it, MSYS2 changes the
+  argument", not "without which MSYS2 would have been rewriting the argument".
+- **Stay at the level of the code the commit changes.** What it changes, and the
+  part of *why* the diff cannot show — a mechanism, a measurement, a tool that
+  turned out to be absent. Architecture, design reasoning and project context
+  belong in `docs/`, which is where a reader will look for them.
+
+Wrap at 80 columns, and break at sentence boundaries rather than mid-sentence.
 
 ## What is most useful right now
 
-0.5.0 is feature complete, so the useful work is release engineering rather than
-features. [`docs/roadmap.md`](docs/roadmap.md) is ordered by value and honest
-about what is blocked. The top of it is pushing, so that the CI workflow —
-written, but never executed, because nothing has been pushed — runs for the
-first time; packaging comes next, AppImage first, and does not exist in any
-format yet; after those, the release hardening in the roadmap's loose ends,
-none of which is a feature either.
+The tree is feature complete, so the useful work is release engineering rather
+than features. [`docs/roadmap.md`](docs/roadmap.md) is ordered by value and
+honest about what is blocked. CI now builds all three downloads and a merge to
+`master` can cut a release ([`docs/releasing.md`](docs/releasing.md)), so what
+is left is the release hardening in the roadmap's loose ends — code signing on
+Windows, a Flatpak, and the correctness items that a first set of users would
+find. None of it is a feature either.
 
 Things that need a human rather than a patch: anything requiring a screenshot to
 judge, anything on Windows, and the 4K/HEVC/HDR measurements that the Windows

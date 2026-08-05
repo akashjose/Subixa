@@ -96,6 +96,12 @@ running in a headless batch. Run these before reaching for the UI.
   since the player now remembers things and a test that quietly wrote into the
   developer's own settings would be the exact bug this suite exists to catch.
 
+  `rowHeightFollowsItsTextBothWays` is the geometry case: it turns the row type
+  up to the maximum and back down and asserts every row returns to the height it
+  had. A row height that could only ever grow is trap 26, and it reached a
+  release — it reads as a subtitle-parsing bug in a screenshot, so the suite
+  asserting it is measured both ways is what keeps it from coming back.
+
   It earned its keep on the first run, twice. It caught detaching the panel
   silently resetting the reader's tab (trap 13), and then caught an
   `onOpened` handler on `FileDialog` that does not exist — a QML error that

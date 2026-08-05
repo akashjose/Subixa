@@ -28,6 +28,27 @@ fi
 mkdir -p "$DEST"
 cp "$BUILD/subixa.exe" LICENSE "$DEST/"
 
+# Prove the copy landed, because the failure it guards against is invisible.
+# A staging run once stopped before this line while its caller discarded the
+# exit status, and $DEST kept a subixa.exe from an earlier build: right DLL
+# count, right size, correct playback, and none of the day's work in it. An
+# installer was then built from it and verified against the *build* tree rather
+# than the staged one, so everything checked passed.
+#
+# Comparing content rather than timestamps: a copy that silently did not happen
+# leaves an older file, and a copy that half-happened leaves a shorter one.
+#
+# sha256sum rather than cmp, which is not installed here -- cmp ships in
+# diffutils and MSYS2's base does not include it, so `! cmp -s` was true on
+# every run for want of the binary and this guard failed the deploy it was
+# meant to protect. coreutils is guaranteed. Reading from stdin keeps the
+# filename out of the digest.
+if [[ "$(sha256sum < "$BUILD/subixa.exe")" != "$(sha256sum < "$DEST/subixa.exe")" ]]; then
+    echo "error: $DEST/subixa.exe does not match $BUILD/subixa.exe after copying." >&2
+    echo "       The staged bundle would ship a different binary than you built." >&2
+    exit 1
+fi
+
 # qmlimportscanner lives in share/qt6/bin, not bin, and windeployqt6 looks for
 # it beside itself. Without this the scan dies with "Process failed to start"
 # and windeployqt6 exits 0 having staged *nothing* -- an empty directory and a
