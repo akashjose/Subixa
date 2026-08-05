@@ -1,0 +1,19 @@
+# Conventional commits, checked on every pull request by the lint job in
+# .github/workflows/ci.yml -- on the commits and on the title, because either
+# can be the one that lands.
+#
+# The prefix is not decoration. release-please reads it to decide the next
+# version number, so a commit with no prefix is a change that appears in no
+# release and no changelog. docs/releasing.md lists what each type does to the
+# version.
+#
+# What this file cannot check is the part that matters most: the body is written
+# in ASD-STE100 Simplified Technical English and stays at the level of the code
+# the commit changes. CONTRIBUTING.md has the rules.
+extends:
+  - '@commitlint/config-conventional'
+
+rules:
+  # 100 is the default and no subject here has come close, but the type eats
+  # into it now, so it is spelled out rather than inherited silently.
+  header-max-length: [2, always, 100]

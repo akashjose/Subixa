@@ -65,8 +65,13 @@
     </screenshot>
   </screenshots>
 
+  <!-- One entry, rewritten in place rather than accumulated. release-please
+       owns both attributes on a release; the markers are how it finds them, and
+       they have to share the line because XML forbids a comment inside a tag.
+       CMakeLists.txt checks at configure time that the version here still
+       matches project(), so the two cannot drift apart silently. -->
   <releases>
-    <release version="0.5.0" type="development" date="2026-07-29"/>
+    <release version="0.5.0" type="development" date="2026-07-29"/> <!-- x-release-please-version x-release-please-date -->
   </releases>
 
   <content_rating type="oars-1.1"/>

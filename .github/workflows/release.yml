@@ -1,0 +1,72 @@
+# What happens on the way out.
+#
+# Two steps, and the gap between them is deliberate. Every merge into master
+# updates a standing release pull request -- the version it would produce, the
+# changelog entry it would write -- and nothing is published. Merging *that*
+# pull request is the release: it sets version.txt and the metainfo, tags,
+# publishes the GitHub release, and then builds the three downloads and attaches
+# them.
+#
+# So the decision to release is a merge, and the version number in it is
+# computed rather than chosen -- from the conventional-commit prefixes since the
+# last tag. docs/releasing.md is the human account of this.
+#
+# The builds come from build.yml, the same file ci.yml calls, so what is
+# published is what was tested rather than a second implementation of it.
+#
+# One ordering hazard is worth knowing about: release-please tags and publishes
+# before the build runs, because it is one action step and the build depends on
+# its output. If the build then fails, the release exists with no downloads
+# attached. It is recoverable -- fix, then re-run this workflow, and the upload
+# steps use --clobber -- but it is why master is built by CI on every push
+# rather than only here. A release should be cut from a tree already known to
+# build.
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+# Never two of these at once. Both halves write to the repository -- the release
+# pull request, then the release assets -- and cancel-in-progress is wrong here
+# for the same reason: a cancelled upload leaves a release half-attached.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release pull request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # The default GITHUB_TOKEN is enough, but the repository has to allow
+      # Actions to open pull requests -- Settings -> Actions -> General ->
+      # "Allow GitHub Actions to create and approve pull requests". Without it
+      # this step fails on permission rather than doing nothing, which is at
+      # least loud.
+      #
+      # The outputs read below are the root package's. This is a manifest
+      # configuration with one package at ".", so they are unprefixed.
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build:
+    name: Downloads
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: write
+    with:
+      package: true
+      release_tag: ${{ needs.release-please.outputs.tag_name }}

@@ -32,8 +32,8 @@ if [[ ! -x "$BUILD/subixa" ]]; then
 fi
 
 # One source for the version, the same one the binary is compiled with.
-VERSION=$(sed -n 's/^project(subixa VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
-[[ -n "$VERSION" ]] || { echo "error: no version in CMakeLists.txt" >&2; exit 1; }
+source "$(dirname "$0")/version.sh"
+VERSION=$(subixa_version)
 
 QT_PREFIX=${CMAKE_PREFIX_PATH:-$HOME/data/Qt/6.12.0/gcc_64}
 DEPS_PREFIX=${SUBIXA_DEPS_PREFIX:-$HOME/data/subixa-stack}

@@ -14,12 +14,13 @@ happen to have them switched on.
 follows playback, and clicking any row seeks there.*
 
 > [!IMPORTANT]
-> Subixa is pre-release (0.5.0) and there are no downloads yet — no installer,
-> no AppImage, no `.deb`, no Flatpak, no packages of any kind. The features are
-> finished; what stands between this and a release is release engineering —
-> packaging, and CI that has run somewhere other than the development machine.
-> Building from source is currently the only way to run it, and on Linux that
-> means building three media libraries first.
+> Subixa is pre-release. Downloads, once a release is cut, are on the
+> [Releases](https://github.com/akashjose/Subixa/releases) page: an AppImage for
+> Linux, and a portable zip and an installer for Windows. There is no `.deb` and
+> no Flatpak, and the AppImage needs glibc 2.38 or newer — Ubuntu 23.10+, Debian
+> 13+, Fedora 39+. The features are finished; what is left is release hardening.
+> Building from source works on any of the three targets, and on Linux it means
+> building three media libraries first.
 
 ## Why this exists
 

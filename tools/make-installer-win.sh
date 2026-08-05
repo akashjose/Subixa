@@ -28,11 +28,8 @@ fi
 # One source for the version, which is the same one the binary's resource block
 # is configured from. Reading it here rather than repeating it in the .iss is
 # the whole reason this wrapper exists.
-VERSION=$(sed -n 's/^project(subixa VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
-if [[ -z "$VERSION" ]]; then
-    echo "error: could not read the version from CMakeLists.txt." >&2
-    exit 1
-fi
+source "$(dirname "$0")/version.sh"
+VERSION=$(subixa_version)
 
 # Three locations, and the per-user one is not optional: `winget install
 # JRSoftware.InnoSetup` puts it under Local AppData by default, which is neither
