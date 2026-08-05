@@ -90,6 +90,31 @@ release. Notes about how releases work belong in this file.
 
 Other than that date, do not edit any of them by hand.
 
+## The release pull request title is data
+
+Do not tidy it. release-please parses the version back out of that title when
+the pull request merges, and that is how it knows what to tag. A title with no
+version in it means a merge that tags nothing, and release-please then refuses
+to open any further release pull request while an untagged merged one is
+outstanding — one bad title wedges every release after it.
+
+Two separate settings decide that title, which is the trap:
+
+| Setting | Applies to |
+|---|---|
+| `pull-request-title-pattern` | a per-component release pull request |
+| `group-pull-request-title-pattern` | the **grouped** pull request, which is what this repo gets |
+
+`separate-pull-requests: false` sends every candidate through the Merge plugin,
+even a single one, so the pull request that actually opens here is a grouped
+one. Its default pattern is `chore: release ${branch}` and contains no
+`${version}` — so the title reads *chore: release master*, and setting
+`pull-request-title-pattern` has no effect on it whatsoever.
+
+Both patterns must contain `${scope}`, `${component}` and `${version}`.
+`generateMatchPattern` warns in the job log for each one that is missing, and
+those warnings are the only symptom until a release silently fails to tag.
+
 ## What gets built
 
 `build.yml` is called by `ci.yml` on the way in and by `release.yml` on the way
