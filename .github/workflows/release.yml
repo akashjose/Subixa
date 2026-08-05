@@ -16,16 +16,30 @@
 #
 # One ordering hazard is worth knowing about: release-please tags and publishes
 # before the build runs, because it is one action step and the build depends on
-# its output. If the build then fails, the release exists with no downloads
-# attached. It is recoverable -- fix, then re-run this workflow, and the upload
-# steps use --clobber -- but it is why master is built by CI on every push
-# rather than only here. A release should be cut from a tree already known to
-# build.
+# its output. If a build job then fails, the release exists missing whatever
+# that job made -- which is how v0.6.0 shipped the Windows half only. The
+# workflow_dispatch path below is the repair, and it is also why master is built
+# by CI on every push rather than only here: a release should be cut from a tree
+# already known to build.
 name: Release
 
 on:
   push:
     branches: [master]
+  # The recovery path, for a release that exists with downloads missing. It
+  # rebuilds the tree that tag names -- not master -- and attaches the results
+  # with --clobber. Without this there is no way to finish a release after its
+  # build failed, which is how v0.6.0 came to ship the Windows half only.
+  #
+  # It follows that a tag whose own tree cannot build cannot be repaired here,
+  # and should not be: the alternative is attaching binaries built from a
+  # different tree than the tag claims.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to rebuild and attach the downloads to, e.g. v0.6.1
+        type: string
+        required: true
 
 # Never two of these at once. Both halves write to the repository -- the release
 # pull request, then the release assets -- and cancel-in-progress is wrong here
@@ -37,6 +51,7 @@ concurrency:
 jobs:
   release-please:
     name: Release pull request
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -63,10 +78,17 @@ jobs:
   build:
     name: Downloads
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    # always(), because release-please is skipped on the dispatch path and a
+    # skipped dependency would otherwise skip this too.
+    if: >-
+      always() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.release-please.outputs.release_created == 'true'
+      )
     uses: ./.github/workflows/build.yml
     permissions:
       contents: write
     with:
       package: true
-      release_tag: ${{ needs.release-please.outputs.tag_name }}
+      release_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
+      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}

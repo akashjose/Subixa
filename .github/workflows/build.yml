@@ -43,6 +43,14 @@ on:
           Qt gate: see the note there.
         type: string
         default: ''
+      ref:
+        description: >-
+          The commit, branch or tag to build. Empty means the caller's ref,
+          which is what every automatic path wants. release.yml sets it when
+          rebuilding an existing tag by hand, so the downloads come from the
+          tree that tag names rather than from whatever master holds now.
+        type: string
+        default: ''
 
 # Deliberately absent: a permissions block. A called workflow can narrow what
 # the caller granted and cannot widen it, so declaring contents: write here
@@ -54,37 +62,53 @@ jobs:
     name: Linux ${{ matrix.build_type }} (Ubuntu 24.04)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     strategy:
       fail-fast: false
       matrix:
-        build_type: [Debug, Release]
+        # Debug only when testing. Packaging builds Release and nothing else --
+        # a Debug leg on a release run compiles for four minutes and produces
+        # no download, because every packaging step below is Release-gated.
+        build_type: ${{ fromJSON(inputs.package && '["Release"]' || '["Debug","Release"]') }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       # The apt line from docs/building.md, verbatim, plus what CI itself
       # needs: a distribution ffmpeg for testdata/make-fixtures.sh (any ffmpeg
       # with libx264 -- the fixtures deliberately do not require the
       # from-source stack).
       #
-      # libxkbcommon-x11-dev is not in the docs' line and is not needed to
-      # build: it is needed to *bundle*. Qt's xcb platform plugin links
-      # libxkbcommon-x11.so.0, the runner image does not carry it, and
-      # linuxdeploy walks the plugin's ldd tree -- so the build and the ten
-      # suites passed for weeks while the AppImage step died on a missing
-      # library that nothing else in the job wanted.
+      # The second group is the one that keeps breaking, and none of it is
+      # needed to build or to test. Qt's xcb platform plugin loads these at run
+      # time; linuxdeploy walks that plugin's ldd tree to bundle it, and the
+      # runner image carries almost none of them. So the build passes, the ten
+      # suites pass, and the AppImage step dies on a library nothing else in the
+      # job wanted -- which happened twice, one library at a time, because each
+      # missing one hides the next.
+      #
+      # Installing the whole xcb runtime set at once ends that. It is what the
+      # Qt documentation lists for the xcb plugin, not a list grown from
+      # failures.
       - name: Install system prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build pkg-config git curl \
-            nasm g++-14 \
+            ccache nasm g++-14 \
             glslang-dev glslang-tools libshaderc-dev spirv-tools liblcms2-dev libunwind-dev \
             libdav1d-dev libxml2-dev libzimg-dev libass-dev libvulkan-dev \
             libpulse-dev libasound2-dev libpipewire-0.3-dev \
-            libxrandr-dev libxpresent-dev libxss-dev libxkbcommon-dev libxkbcommon-x11-dev \
-            libxinerama-dev \
+            libxrandr-dev libxpresent-dev libxss-dev libxinerama-dev \
             libegl1-mesa-dev libgl-dev libgbm-dev \
             libwayland-dev wayland-protocols \
             patchelf file desktop-file-utils \
+            libxkbcommon-dev libxkbcommon-x11-dev libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xkb1 libxcb-util1 \
             ffmpeg
 
       - name: Cache Qt
@@ -111,6 +135,22 @@ jobs:
           path: ~/data/subixa-stack
           key: subixa-stack-ubuntu-24.04-${{ hashFiles('tools/build-deps.sh') }}
 
+      # Qt and the media stack were already cached and restore in about five
+      # seconds between them. What was never cached is the part that actually
+      # costs: compiling Subixa itself ran just under four minutes of a
+      # four-and-a-half minute job, on every job, every time.
+      #
+      # The key carries the SHA so each run saves a fresh entry, and the
+      # restore-key prefix means a new commit starts from the previous one's
+      # cache rather than from nothing. A branch that touches no C++ then
+      # compiles almost nothing.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-linux-${{ matrix.build_type }}-${{ github.sha }}
+          restore-keys: ccache-linux-${{ matrix.build_type }}-
+
       # build-deps.sh has no self-skip and meson wipes its build trees on every
       # run, so it only runs on a cache miss. meson comes from pipx: Ubuntu
       # 24.04's python is externally managed and its apt meson is too old for
@@ -128,8 +168,10 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DCMAKE_CXX_COMPILER=g++-14 \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSUBIXA_DEPS_PREFIX="$HOME/data/subixa-stack"
           cmake --build build
+          ccache --show-stats
 
       - name: Generate test fixtures
         run: ./testdata/make-fixtures.sh
@@ -200,22 +242,32 @@ jobs:
     name: Windows (MSYS2 UCRT64)
     runs-on: windows-latest
     timeout-minutes: 90
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     defaults:
       run:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       # update: true does the two-pass core update docs/windows.md requires.
       # qt6-tools is not in the docs' install line but owns windeployqt6, which
       # the deploy step needs; zip is not in it either and owns the portable
       # download, and the UCRT64 toolchain does not pull either of them in.
+      #
+      # setup-msys2 caches its own packages already -- cache: true is the
+      # default -- so this step costs its ~1m45s to the pacman update rather
+      # than to downloading, and there is nothing here to switch on.
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: true
           install: >-
             zip
+            mingw-w64-ucrt-x86_64-ccache
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
@@ -257,11 +309,22 @@ jobs:
             echo "::notice title=Windows build waiting on MSYS2::qt6-base is $ver, below the Windows Qt 6.11 floor. The build half of this job is skipped until MSYS2 ships it."
           fi
 
+      # Same reasoning as the Linux ccache above: the compile is the job.
+      - name: Cache ccache
+        if: steps.qt-gate.outputs.ok == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-windows-${{ github.sha }}
+          restore-keys: ccache-windows-
+
       - name: Configure and build
         if: steps.qt-gate.outputs.ok == 'true'
         run: |
-          cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-win
+          ccache --show-stats
 
       - name: Generate test fixtures
         if: steps.qt-gate.outputs.ok == 'true'

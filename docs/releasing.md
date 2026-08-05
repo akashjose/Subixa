@@ -188,12 +188,20 @@ trades a repository secret for them, and it has not been done.
 
 ## When it goes wrong
 
-**The release exists but has no downloads.** release-please tags and publishes
-before the build runs, because the build depends on knowing the tag. If the
-build then fails, the release is real and empty. Fix the cause and re-run the
-**Release** workflow: the upload steps use `--clobber`, so a partial upload is
-replaced rather than colliding. This is also why `master` is built by CI on
-every push — a release should be cut from a tree already known to build.
+**The release exists but has some downloads missing.** release-please tags and
+publishes before the build runs, because the build depends on knowing the tag.
+If a build job then fails, the release is real and short of whatever that job
+made. v0.6.0 shipped the Windows half only, this way.
+
+Run the **Release** workflow from the Actions tab and give it the tag. It
+rebuilds that tag and attaches the results with `--clobber`, so a partial upload
+is replaced rather than colliding.
+
+The catch is that it rebuilds **the tree the tag names**, not `master`. A tag
+whose own tree cannot build cannot be repaired — and should not be, because the
+alternative is attaching binaries built from a different tree than the tag
+claims. When the fix is in `master` rather than in the tag, the honest move is
+to leave that release incomplete and let the next one carry the full set.
 
 **Windows is below the Qt floor.** MSYS2 is a rolling repository and Subixa's
 Windows floor is Qt 6.11. On ordinary CI the Windows job stands down with a
