@@ -65,19 +65,30 @@ of that entry and has no opinion about which version it names, so a metainfo one
 release behind would otherwise pass CI, install, and tell every software centre
 the wrong thing.
 
-That entry carries no `date`, which is deliberate and cost the first release to
-learn. release-please applies **one marker per line**, and XML forbids a comment
-inside a tag, so the version marker and the date marker had to share the line —
-the version moved on 0.6.0 and the date silently stayed at the previous
-release's. AppStream treats the date as optional, and no date is better than a
-confidently wrong one.
+**The `date` on that entry is the one thing still moved by hand.** release-please
+applies one marker per line, and XML forbids a comment inside a tag, so the
+version marker and a date marker cannot both sit on the `<release>` line — the
+version moves and the date does not. Dropping the date is not an option either:
+`appstreamcli` reports `release-time-missing` as an **error**, not a warning, so
+CI fails without it. Set it in the release pull request, next to the version
+release-please has already written.
 
-`CHANGELOG.md` is machine-owned for the same reason and is deliberately just its
-heading. Anything else written under that heading is pushed below the newest
-release entry and wrapped in a heading of release-please's own, drifting further
-down with every release. Notes about how releases work belong in this file.
+That file is installed into `/usr/share/metainfo` and ships inside every
+package, so it carries nothing that is not AppStream data — no explanatory
+comments. The two facts that used to live in them:
 
-Do not edit any of them by hand.
+- The `<id>`, the desktop entry's basename, the icon's installed name and
+  `setDesktopFileName` in `src/main.cpp` must all read `com.akashjose.Subixa`.
+  They move together or not at all.
+- The screenshot URLs point at `master` and 404 until a release merges it. This
+  is why CI validates with `--no-net`.
+
+`CHANGELOG.md` is machine-owned and is deliberately just its heading. Anything
+else written under that heading is pushed below the newest release entry and
+wrapped in a heading of release-please's own, drifting further down with every
+release. Notes about how releases work belong in this file.
+
+Other than that date, do not edit any of them by hand.
 
 ## What gets built
 
