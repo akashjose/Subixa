@@ -13,9 +13,14 @@
 # expire before anyone looks at them.
 name: CI
 
+# Branch pushes are deliberately not here. A branch with an open pull request
+# used to match both triggers, so one commit ran the whole thing twice -- eight
+# jobs for four jobs of work. The pull request is the one that matters, because
+# it is the only one that can lint the commits, so that is the one kept. Push
+# builds master, where there is no pull request to stand in for it.
 on:
   push:
-    branches: [master, 'feature/**']
+    branches: [master]
   pull_request:
     branches: [master, 'feature/**']
   workflow_dispatch:
@@ -77,8 +82,37 @@ jobs:
           validateSingleCommit: false
           subjectPattern: .+
 
+  # Three build jobs cost about fifteen runner-minutes between them, and a
+  # change to a .md file cannot affect any of it. This one job decides whether
+  # they are worth starting.
+  #
+  # The filter is written as "everything, except" rather than as a list of code
+  # paths, so a new directory is built by default. The failure mode of the
+  # opposite spelling is a change nobody compiled.
+  changes:
+    name: What changed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+              - '!LICENSE'
+
   build:
     name: Build
+    needs: changes
+    # workflow_dispatch has no diff to filter on, and is the button someone
+    # presses when they want the downloads, so it always builds.
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
