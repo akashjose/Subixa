@@ -100,6 +100,12 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # Without this the exclusions below do nothing. The default
+          # quantifier is 'some', which includes a file that matches *any*
+          # pattern -- and '**' matches every file, so the filter always said
+          # true and the three build jobs always ran. 'some-with-excludes'
+          # is the one that means "matches a pattern and no negated pattern".
+          predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
               - '**'
