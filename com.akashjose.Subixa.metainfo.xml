@@ -1,10 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- The AppStream identity. The id here, the desktop entry's basename, the
-     icon's installed name and setDesktopFileName in src/main.cpp must all say
-     com.akashjose.Subixa; they move together or not at all.
-     Screenshot URLs point at master, which is merged at release time. They 404
-     until then, which is fine: software centers only read this file from a
-     released package. -->
 <component type="desktop-application">
   <id>com.akashjose.Subixa</id>
   <metadata_license>CC0-1.0</metadata_license>
@@ -65,13 +59,8 @@
     </screenshot>
   </screenshots>
 
-  <!-- One entry, rewritten in place rather than accumulated. release-please
-       owns both attributes on a release; the markers are how it finds them, and
-       they have to share the line because XML forbids a comment inside a tag.
-       CMakeLists.txt checks at configure time that the version here still
-       matches project(), so the two cannot drift apart silently. -->
   <releases>
-    <release version="0.5.0" type="development" date="2026-07-29"/> <!-- x-release-please-version x-release-please-date -->
+    <release version="0.5.0" type="development" date="2026-08-05"/> <!-- x-release-please-version -->
   </releases>
 
   <content_rating type="oars-1.1"/>

@@ -13,7 +13,6 @@
   "include-component-in-tag": false,
   "tag-separator": "-",
   "separate-pull-requests": false,
-  "pull-request-title-pattern": "chore: release ${version}",
   "pull-request-header": "The release PR. Merging it tags the version, publishes the release, and starts the build that attaches the downloads.",
   "changelog-sections": [
     { "type": "feat", "section": "Features" },

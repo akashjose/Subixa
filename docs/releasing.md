@@ -65,6 +65,18 @@ of that entry and has no opinion about which version it names, so a metainfo one
 release behind would otherwise pass CI, install, and tell every software centre
 the wrong thing.
 
+That entry carries no `date`, which is deliberate and cost the first release to
+learn. release-please applies **one marker per line**, and XML forbids a comment
+inside a tag, so the version marker and the date marker had to share the line —
+the version moved on 0.6.0 and the date silently stayed at the previous
+release's. AppStream treats the date as optional, and no date is better than a
+confidently wrong one.
+
+`CHANGELOG.md` is machine-owned for the same reason and is deliberately just its
+heading. Anything else written under that heading is pushed below the newest
+release entry and wrapped in a heading of release-please's own, drifting further
+down with every release. Notes about how releases work belong in this file.
+
 Do not edit any of them by hand.
 
 ## What gets built
@@ -109,6 +121,21 @@ Release-As: 1.0.0
 It applies to that commit alone, so nothing has to be undone afterwards. That
 is why it is a footer rather than a key in `release-please-config.json`, which
 somebody would have to remember to remove.
+
+## The release pull request runs no CI
+
+It has no checks, and this is a property of GitHub rather than a gap in the
+workflows: an event raised by `GITHUB_TOKEN` does not trigger another workflow,
+so a pull request that release-please opened starts nothing. `gh pr checks` on
+it reports nothing at all rather than reporting a failure.
+
+What that costs is the configure-time check on the metainfo version. It does run
+— but in the build that follows the tag, so it reports a mismatch after the
+release is published rather than before. Read the diff on the release pull
+request instead: it is four files, and three of them are one line each.
+
+Handing release-please a personal access token would restore the checks. That
+trades a repository secret for them, and it has not been done.
 
 ## When it goes wrong
 

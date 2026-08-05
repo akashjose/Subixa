@@ -46,7 +46,10 @@ jobs:
 
       - name: Validate freedesktop metadata
         # --no-net: the screenshot URLs point at master, which only gains the
-        # images when a release merges it (see the comment in the metainfo).
+        # images when a release merges it, so they 404 until then
+        # (docs/releasing.md). The metainfo itself carries no comments, because
+        # it is installed verbatim into /usr/share/metainfo and ships in every
+        # package.
         run: |
           desktop-file-validate com.akashjose.Subixa.desktop
           appstreamcli validate --no-net com.akashjose.Subixa.metainfo.xml
