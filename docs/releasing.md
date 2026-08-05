@@ -115,6 +115,19 @@ Both patterns must contain `${scope}`, `${component}` and `${version}`.
 `generateMatchPattern` warns in the job log for each one that is missing, and
 those warnings are the only symptom until a release silently fails to tag.
 
+The **component** in that title is checked too, and this repository deliberately
+has none. release-please parses a component out of the title and compares it
+with the configured one; a mismatch means it declines to build the release, and
+says so once, in the job log:
+
+```
+⚠ PR component: undefined does not match configured component: subixa
+```
+
+A component exists to tell packages apart in a monorepo. There is one package
+here, so `package-name` is not set and the component stays undefined on both
+sides. Setting it buys nothing and adds a field that has to agree with a title.
+
 ## What gets built
 
 `build.yml` is called by `ci.yml` on the way in and by `release.yml` on the way
