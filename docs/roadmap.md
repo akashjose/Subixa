@@ -246,14 +246,23 @@ conventional-commit prefixes rather than from anybody's judgement, and
    `linuxdeploy` needs to *bundle*, because it walks the xcb platform plugin's
    `ldd` tree. Ten green suites and a failing package step, for weeks.
 
-   **The glibc floor is 2.38, and it was measured rather than assumed.** An
+   **The glibc floor is 2.39, and it was measured rather than assumed.** An
    AppImage bundles everything except glibc, so the build host sets the
-   minimum. Scanning every ELF file in the bundle, 34 of them want
-   `GLIBC_2.38` — `libmpv`, `libplacebo`, `libshaderc` among them — so this is
-   the stack's requirement, not one stray library's. That means **Ubuntu
-   23.10+, Debian 13+, Fedora 39+**, and it means Ubuntu 22.04 and Debian 12
-   are out. Lowering it would mean building on an older base, which collides
-   with the gcc 14 and C++23 requirement; 22.04 tops out at gcc 12.
+   minimum. Scanning every ELF file in the bundle, 34 of them wanted
+   `GLIBC_2.38` when this was first measured — `libmpv`, `libplacebo`,
+   `libshaderc` among them — so the floor is the stack's requirement rather
+   than one stray library's. That means **Ubuntu 24.04+, Debian 13+, Fedora
+   40+**, and it means Ubuntu 22.04 and Debian 12 are out. Lowering it would
+   mean building on an older base, which collides with the gcc 14 and C++23
+   requirement; 22.04 tops out at gcc 12.
+
+   **The floor is not ours to set, and it moved without a commit.** It was 2.38
+   until GitHub updated the `ubuntu-24.04` runner image, and the first CI
+   AppImage came out at 2.39 — dropping Ubuntu 23.10 and Fedora 39 with nothing
+   in the tree recording it. `tools/make-appimage.sh` prints the floor it built
+   against on every run, which is the only reason this was caught. Pinning it
+   would mean pinning the build image and accepting an ageing toolchain, so for
+   now the answer is to read that line and keep the docs level with it.
 
    Two things learned validating it, both worth keeping:
 
@@ -261,7 +270,7 @@ conventional-commit prefixes rather than from anybody's judgement, and
      has them.** `libpipewire-0.3.so.0` is on it, so the bundle does not carry
      it, and on Ubuntu 22.04 the AppImage dies on the missing library before
      glibc is ever consulted. Within the supported range the assumption holds
-     — every distribution with glibc 2.38 ships pipewire — but the failure
+     — every distribution new enough to meet the floor ships pipewire — but the failure
      mode is a missing `.so` on a machine nobody tested, which is the same
      shape as the wayland packages.
    - **Hiding `~/data` is not a clean room.** It removes Qt and the media

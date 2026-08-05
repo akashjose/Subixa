@@ -97,9 +97,22 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
+          # Without this the exclusions below do nothing. The default
+          # quantifier is 'some', which includes a file that matches *any*
+          # pattern -- and '**' matches every file, so the filter always said
+          # true and the three build jobs always ran.
+          #
+          # 'every' is the one that reads as an AND: a file counts only when it
+          # matches '**' and also fails to match each negated pattern.
+          #
+          # v4 also has 'some-with-excludes', and reading for that value is how
+          # this first went wrong: the action's README documents v4 while this
+          # was pinned to v3, which takes 'every' or 'some' and nothing else.
+          # 'every' says the same thing and is valid in both.
+          predicate-quantifier: 'every'
           filters: |
             code:
               - '**'
@@ -110,9 +123,21 @@ jobs:
   build:
     name: Build
     needs: changes
-    # workflow_dispatch has no diff to filter on, and is the button someone
-    # presses when they want the downloads, so it always builds.
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.code == 'true'
+    # Only a filter that ran and said "no code changed" may stop a build.
+    #
+    # This was written as `== 'true'` and it skipped every build the moment the
+    # filter job failed -- an invalid input to the action, and three build jobs
+    # silently did not run while the pull request looked merely red somewhere
+    # else. An optimisation must not be able to turn testing off by breaking.
+    #
+    # always() because a failed dependency otherwise skips this job before the
+    # condition is read at all. Then: dispatch always builds, an empty output
+    # from a filter that crashed builds, and only a literal 'false' skips.
+    if: >-
+      always() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.code != 'false'
+      )
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
