@@ -177,7 +177,7 @@ makes of it. See [`docs/testing.md`](docs/testing.md).
 | [`docs/building.md`](docs/building.md) | full build instructions, Linux and Windows |
 | [`docs/roadmap.md`](docs/roadmap.md) | where the project stands and what is next |
 | [`docs/architecture.md`](docs/architecture.md) | modules, the design system, the subtitle row |
-| [`docs/traps.md`](docs/traps.md) | 25 things that have already cost time |
+| [`docs/traps.md`](docs/traps.md) | 26 things that have already cost time |
 | [`docs/testing.md`](docs/testing.md) | the suites, the corpus, the render canary |
 | [`docs/graphics.md`](docs/graphics.md) | driver selection, and what the Windows port turned up |
 | [`docs/keyboard.md`](docs/keyboard.md) | default bindings |

@@ -34,6 +34,7 @@ import Subixa
 // rows in a 700px panel.
 T.ItemDelegate {
     id: row
+    objectName: "subtitleRow"
 
     required property int index
     required property var model
@@ -108,6 +109,19 @@ T.ItemDelegate {
     contentItem: Item {
         implicitHeight: content.implicitHeight
 
+        // The one divider that earns its keep: it establishes the scan edge.
+        // It spans the row rather than the text block, and takes no part in
+        // measuring it -- see the gap it is drawn in, below.
+        Rectangle {
+            x: timeMetrics.width + 2 * Theme.space.md
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: Theme.stroke.hairline
+            color: Theme.color.borderSubtle
+            opacity: 0.6
+            visible: row.wide
+        }
+
         // Wide: timestamp column, hairline, text.
         Row {
             id: content
@@ -165,12 +179,20 @@ T.ItemDelegate {
                 }
             }
 
-            // The one divider that earns its keep: it establishes the scan edge.
-            Rectangle {
+            // The gap the scan edge is drawn in. The line itself is a sibling of
+            // this Row rather than a child of it, because a child sized
+            // `height: parent.height` is circular -- a Row's implicitHeight is
+            // the tallest of its children, so the divider's height and the Row's
+            // height each derive from the other. Qt breaks that silently by
+            // never re-evaluating downward, which makes the row height a
+            // ratchet: it grows with the tallest thing the delegate has ever
+            // held and never shrinks again. With `reuseItems` on the list that
+            // reads as one-line cues rendered four lines tall, worst on a
+            // delegate that was first laid out before the panel's width
+            // settled, where a short cue wraps to a dozen lines.
+            Item {
                 width: Theme.stroke.hairline
-                height: parent.height
-                color: Theme.color.borderSubtle
-                opacity: 0.6
+                height: 1
             }
 
             Column {

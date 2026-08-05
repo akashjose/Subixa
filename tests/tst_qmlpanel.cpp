@@ -74,6 +74,7 @@ private slots:
     void subtitleToggleOffOpensOnTheDefaultTrack();
     void speakerNamesShowWhenTheTrackCarriesThem();
     void detachingKeepsTheViewState();
+    void rowHeightFollowsItsTextBothWays();
     void themeReachesBothWindows();
 
 private:
@@ -658,6 +659,93 @@ void TstQmlPanel::detachingKeepsTheViewState()
     QCOMPARE(named(m_root, "trackTabs")->property("currentIndex").toInt(), 1);
     QCOMPARE(named(m_root, "searchField")->property("text").toString(),
              QStringLiteral("albatross"));
+}
+
+// A row must be as tall as its cue needs *now*, not as tall as the tallest
+// thing that delegate has ever held.
+//
+// The panel had a hairline between the timestamp column and the text, drawn as
+// a child of the same Row it divided and sized `height: parent.height`. That is
+// circular -- a Row's implicitHeight is the tallest of its children, so the
+// divider's height and the Row's height each derived from the other. Qt breaks
+// that silently, with no binding-loop warning, by never re-evaluating downward,
+// which turned the row height into a ratchet. With `reuseItems` on the list, a
+// delegate that had once held a wrapped cue kept that height for every short cue
+// it was recycled into afterwards: single-line dialogue rendered four lines tall,
+// scattered through the list with no pattern in the file. Turning the row type
+// up and back down is the sharpest way to provoke it: it makes every delegate
+// measure tall at once, the way a panel laid out before its width settles does.
+void TstQmlPanel::rowHeightFollowsItsTextBothWays()
+{
+    QVERIFY(openFixture(QStringLiteral("subs.mkv")));
+
+    std::function<void(QQuickItem *, QHash<int, qreal> &)> collect =
+        [&collect](QQuickItem *item, QHash<int, qreal> &out) {
+            for (QQuickItem *child : item->childItems()) {
+                if (child->objectName() == QLatin1String("subtitleRow"))
+                    out.insert(child->property("index").toInt(), child->height());
+                collect(child, out);
+            }
+        };
+    auto rowHeights = [this, &collect]() {
+        QHash<int, qreal> heights;
+        if (auto *list = qobject_cast<QQuickItem *>(named(m_root, "lineList")))
+            collect(list, heights);
+        return heights;
+    };
+
+    // Rows appear at their minimum and grow once the text has measured, so
+    // every reading is taken from a list that has stopped moving rather than
+    // from the first frame that has delegates in it at all.
+    auto settledHeights = [&rowHeights]() {
+        QHash<int, qreal> heights = rowHeights();
+        for (int i = 0; i < 50; ++i) {
+            QTest::qWait(20);
+            const QHash<int, qreal> now = rowHeights();
+            if (!now.isEmpty() && now == heights)
+                break;
+            heights = now;
+        }
+        return heights;
+    };
+
+    QObject *theme = m_engine->singletonInstance<QObject *>(
+        QStringLiteral("Subixa"), QStringLiteral("Theme"));
+    QVERIFY(theme);
+    const int readingSize = theme->property("rowFontSize").toInt();
+
+    const QHash<int, qreal> before = settledHeights();
+    QVERIFY(!before.isEmpty());
+
+    // The reader's own A+ / A-. Larger type wraps the cues harder in a panel of
+    // the same width, which is the cheapest way to make every delegate measure
+    // tall at once -- the same thing a narrow panel at startup does.
+    QVERIFY(theme->setProperty("rowFontSize",
+                               theme->property("maximumRowFontSize")));
+    const QHash<int, qreal> large = settledHeights();
+    QVERIFY(!large.isEmpty());
+
+    QVERIFY(theme->setProperty("rowFontSize", readingSize));
+    const QHash<int, qreal> after = settledHeights();
+
+    // Every row still on screen is back to the height it had at reading size.
+    // Compared per row rather than in total, because a ratchet on one delegate
+    // is the whole symptom.
+    int compared = 0;
+    for (auto it = after.constBegin(); it != after.constEnd(); ++it) {
+        if (!before.contains(it.key()))
+            continue;
+        ++compared;
+        QCOMPARE(it.value(), before.value(it.key()));
+    }
+    QVERIFY2(compared > 0, "no row survived the font change -- the test compared nothing");
+
+    // And the large pass really was taller somewhere, so the comparison above
+    // is not passing because nothing ever moved.
+    bool grew = false;
+    for (auto it = large.constBegin(); it != large.constEnd(); ++it)
+        grew = grew || (before.contains(it.key()) && it.value() > before.value(it.key()));
+    QVERIFY2(grew, "larger type did not make any row taller");
 }
 
 void TstQmlPanel::themeReachesBothWindows()

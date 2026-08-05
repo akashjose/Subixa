@@ -8,6 +8,19 @@ Nothing has been released, so there are no version tags to organise this by.
 
 ## Unreleased — since milestone 5
 
+**Rows are the height of their own cue again.** Some lines in the browser stood
+three or four lines tall holding one short sentence, in no pattern the subtitle
+file explains — because the height was never the cue's. The hairline dividing the
+timestamp column from the text was a child of the row it divides, sized from that
+row, and a `Row` measures itself from its children: the two derived from each
+other, Qt broke the cycle silently, and the height became a ratchet that grew
+with the tallest thing the delegate had ever held and never came back down. With
+the list reusing delegates, one wrapped cue was enough to inflate every short cue
+that followed it through the same delegate. The line is anchored beside the row
+now rather than measured inside it, which also lets it span the full row. Trap
+26, with a test that turns the row type up and back down and insists every row
+returns to the height it started at.
+
 **The browser names the speaker.** ASS tracks carry a Name field per line —
 who speaks it — and the extractor had kept it since the styles-table work
 without the browser showing it. It is now an overline above the cue text,

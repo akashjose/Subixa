@@ -127,7 +127,7 @@ row, is in **`docs/architecture.md`**.
 
 ## Traps
 
-**`docs/traps.md` has all 25 with the evidence.** They are numbered as identities,
+**`docs/traps.md` has all 26 with the evidence.** They are numbered as identities,
 not an order. The index:
 
 | # | | |
@@ -157,6 +157,7 @@ not an order. The index:
 | 23 | XML forbids `--` inside a comment | the SVG icon renders black, silently |
 | 24 | `mpv_create` fails outside a `C` locale | and says so only on a terminal |
 | 25 | `<svg` must be in the first 1 KB | or gdk-pixbuf cannot see the icon at all |
+| 26 | `height: parent.height` inside a `Row` | makes the row height a ratchet, silently |
 
 **Every entry now carries a scope line saying which platform it applies to** —
 reconstructed from the evidence after the lack of one had cost real time.
@@ -214,7 +215,7 @@ failure that looks like something else.
 |---|---|
 | `docs/roadmap.md` | **where the project stands and what is next — start here** |
 | `docs/architecture.md` | the three founding decisions, modules, the design system, caching |
-| `docs/traps.md` | all 25, with the evidence and what was ruled out |
+| `docs/traps.md` | all 26, with the evidence and what was ruled out |
 | `docs/testing.md` | the suites, the conformance corpus, the render canary |
 | `docs/building.md` | the full Linux build, including the from-source media stack |
 | `docs/windows.md` | the MSYS2 toolchain, the build and the deployment sequence |

@@ -6,7 +6,7 @@ than it needs to be.
 
 ## Before you change anything
 
-**Read [`docs/traps.md`](docs/traps.md).** It is 25 entries, each one something
+**Read [`docs/traps.md`](docs/traps.md).** It is 26 entries, each one something
 that already cost somebody a debugging cycle, and several of them look like
 arbitrary sledgehammers until you read why they exist. If you are touching the
 render path, the subtitle extractor or anything in `qml/ui/`, that file will save
