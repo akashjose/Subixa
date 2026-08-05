@@ -60,7 +60,7 @@
   </screenshots>
 
   <releases>
-    <release version="0.5.0" type="development" date="2026-08-05"/> <!-- x-release-please-version -->
+    <release version="0.6.0" type="development" date="2026-08-05"/> <!-- x-release-please-version -->
   </releases>
 
   <content_rating type="oars-1.1"/>
