@@ -143,9 +143,16 @@ of it. On a release it also builds:
 The same three build on demand without cutting a release: run **CI** from the
 Actions tab, and they arrive as workflow artifacts instead of release assets.
 
-The glibc floor on the AppImage is the build host's — Ubuntu 24.04, so 2.38,
-meaning Ubuntu 23.10+, Debian 13+ and Fedora 39+. `docs/roadmap.md` has the
-measurement and what was learned validating it.
+The glibc floor on the AppImage is the build host's, so it is a property of the
+runner image rather than a decision: **2.39**, meaning Ubuntu 24.04+, Debian 13+
+and Fedora 40+. `docs/roadmap.md` has the measurement and what was learned
+validating it.
+
+**It moves on its own.** It was 2.38 until GitHub updated the ubuntu-24.04
+image, which quietly dropped Ubuntu 23.10 and Fedora 39 off the supported list
+with nothing in the tree saying so. `tools/make-appimage.sh` prints the floor it
+just built against on every run — read that line when packaging, and correct
+these three files when it moves.
 
 ## Before the first release
 
