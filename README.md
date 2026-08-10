@@ -1,5 +1,10 @@
 # Subixa
 
+[![CI](https://github.com/akashjose/Subixa/actions/workflows/ci.yml/badge.svg)](https://github.com/akashjose/Subixa/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/akashjose/Subixa)](https://github.com/akashjose/Subixa/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/akashjose/Subixa/total)](https://github.com/akashjose/Subixa/releases)
+[![License](https://img.shields.io/github/license/akashjose/Subixa)](LICENSE)
+
 A desktop video player with a docked, searchable subtitle list.
 
 Every line of every subtitle track, timestamped. Click a line to jump to it,
