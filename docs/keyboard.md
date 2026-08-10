@@ -35,7 +35,12 @@ Settings → Hotkeys:
 | Ctrl+F | focus the search box |
 | Ctrl+O / Ctrl+Shift+O | open a file / open a subtitle file |
 | [ / ] | playback speed, Backspace resets |
-| Ctrl+[ / Ctrl+] | subtitle delay, Ctrl+0 resets |
+| Ctrl+[ / Ctrl+] | subtitle delay, Ctrl+Shift+0 resets |
+| Shift+V | next subtitle track |
+| Ctrl+A | next audio track |
+| Ctrl+1 … Ctrl+4 | picture at 50 / 100 / 150 / 200% of the video's own size |
+| Ctrl+0 | picture back to your saved default size |
+| Ctrl+Shift+1 | save the current picture size as that default |
 | Ctrl+Shift+S | sync subtitles to the selected line |
 | A / B / Shift+A | set loop start / end / clear |
 | R | loop the line playing now |
@@ -49,6 +54,13 @@ Settings → Hotkeys:
 Right-clicking the picture opens the same menu the transport bar's ⋮ button
 does, at the cursor. It is one menu reached two ways rather than two lists to
 keep in step.
+
+Every size the player states is the picture, not the window. Tab and Ctrl+D
+therefore move the window by the width the browser gives up or takes, so a zoom
+preset stays true across a toggle and the film does not change size when you
+open the browser beside it. The window stops at the screen edge, and a maximised
+or fullscreen window cannot move, so in those cases the picture takes the change
+instead.
 
 Minimising pauses a film and leaves music playing, which is what minimising an
 album is for. The distinction is mpv's own view of the file rather than its

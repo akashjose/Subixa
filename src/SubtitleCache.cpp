@@ -31,7 +31,11 @@ constexpr quint32 kMagic = 0x434D5053;
 // entry written before it has no styles at all, and a track styled entirely
 // through its table would go on reading plain out of the cache however often it
 // was reopened.
-constexpr quint32 kFormatVersion = 3;
+//
+// Version 4 is layout alone: a track record now carries its forced and
+// hearing-impaired flags, and every track in an entry written before it would
+// read back as plain.
+constexpr quint32 kFormatVersion = 4;
 
 // Pinned so a Qt upgrade cannot silently change how the primitives below are
 // encoded and turn every existing entry into garbage.
@@ -120,7 +124,7 @@ void writeTrack(QDataStream &out, const SubtitleTrack &track)
 {
     out << qint32(track.id) << qint32(track.streamIndex) << track.language
         << track.title << track.codecName << qint32(track.kind) << track.sidecar
-        << track.sourcePath << track.note;
+        << track.sourcePath << track.note << track.forced << track.hearingImpaired;
     // Ahead of the cues rather than after them: it is track metadata, and a
     // reader that wanted only the header would otherwise have to walk 200k cues
     // to reach it. AssStyleTable is ordered, so this is byte-stable.
@@ -141,7 +145,8 @@ bool readTrack(QDataStream &in, SubtitleTrack &track)
     qint32 lineCount = 0;
 
     in >> id >> streamIndex >> track.language >> track.title >> track.codecName
-        >> kind >> track.sidecar >> track.sourcePath >> track.note;
+        >> kind >> track.sidecar >> track.sourcePath >> track.note >> track.forced
+        >> track.hearingImpaired;
 
     // The styles table, bounded exactly as the cue count is: it is another number
     // out of the file that decides how much to read.

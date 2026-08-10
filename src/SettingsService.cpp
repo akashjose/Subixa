@@ -23,7 +23,7 @@ constexpr auto kSchemaKey = "meta/schemaVersion";
 // The groups holding one subgroup per file, which is what can grow without
 // bound. Everything else in the file is a preference: a fixed set of keys that
 // pruning must never touch.
-constexpr const char *kPrunedGroups[] = {"resume", "subtitle"};
+constexpr const char *kPrunedGroups[] = {"resume", "subtitle", "audio"};
 
 }  // namespace
 

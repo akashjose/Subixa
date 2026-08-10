@@ -253,6 +253,7 @@ set(SUBIXA_QML_FILES
     qml/SubtitlePanel.qml
     qml/SubtitleRow.qml
     qml/SettingsWindow.qml
+    qml/TrackPreference.qml
     qml/Theme.qml
     qml/ui/Icons.qml
     qml/ui/Icon.qml

@@ -10,6 +10,8 @@
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QHash>
+#include <QtCore/QLocale>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSaveFile>
 #include <QtCore/QTextStream>
@@ -32,17 +34,67 @@ QString kindName(SubtitleKind kind)
     return QStringLiteral("unknown");
 }
 
-// Short label for a tab: prefer the language, fall back to the title, then to
-// the source file, and only then to a bare ordinal.
+// "eng" -> "English", empty for a code QLocale does not know.
+//
+// Named apart from SubtitleManager::languageName, which publishes it to QML: a
+// member of that name would shadow this one inside every member function below.
+QString languageNameFor(const QString &code)
+{
+    if (code.isEmpty())
+        return {};
+    // ffmpeg writes ISO 639-2/B ("ger", "fre"); a sidecar's filename tag is
+    // usually 639-1 ("en"). codeToLanguage tries every scheme it knows.
+    const QLocale::Language language = QLocale::codeToLanguage(code);
+    return language == QLocale::AnyLanguage ? QString()
+                                            : QLocale::languageToString(language);
+}
+
+// What tells this track apart from the others in its language: the title, else
+// the flavour flags.
+QString qualifierFor(const SubtitleTrack &track)
+{
+    QString title = track.title.trimmed();
+    // The extractor gives a title-less sidecar its filename. That is a source,
+    // not a qualifier, and it is already in the tooltip.
+    if (track.sidecar && title == QFileInfo(track.sourcePath).fileName())
+        title.clear();
+    // "eng" tagged "English" is the language twice over.
+    if (!title.isEmpty()) {
+        const QString name = languageNameFor(track.language);
+        if (title.compare(track.language, Qt::CaseInsensitive) == 0
+            || (!name.isEmpty() && title.compare(name, Qt::CaseInsensitive) == 0))
+            title.clear();
+    }
+    if (!title.isEmpty())
+        return title;
+    if (track.hearingImpaired)
+        return QStringLiteral("SDH");
+    if (track.forced)
+        return QStringLiteral("Forced");
+    return {};
+}
+
+// Short label for a tab: the language, qualified by whatever tells this track
+// apart from the others in it. Falling back to the title, then to the source
+// file, and only then to a bare ordinal. Unqualified, a release carrying four
+// Italian tracks printed "ITA" four times.
 QString labelFor(const SubtitleTrack &track)
 {
+    QString base;
     if (!track.language.isEmpty() && track.language != QLatin1String("und"))
-        return track.language.toUpper();
-    if (!track.title.isEmpty())
-        return track.title;
-    if (track.sidecar)
-        return QFileInfo(track.sourcePath).fileName();
-    return QStringLiteral("Track %1").arg(track.id + 1);
+        base = track.language.toUpper();
+    else if (!track.title.isEmpty())
+        base = track.title;
+    else if (track.sidecar)
+        base = QFileInfo(track.sourcePath).fileName();
+    else
+        return QStringLiteral("Track %1").arg(track.id + 1);
+
+    const QString qualifier = qualifierFor(track);
+    // A label that already *is* the title has nothing left to qualify.
+    if (qualifier.isEmpty() || qualifier == base)
+        return base;
+    return base + QLatin1Char(' ') + qualifier;
 }
 
 // SubRip wants hh:mm:ss,mmm -- same fields as the browser's timestamp with a
@@ -154,9 +206,8 @@ void SubtitleManager::onExtractFinished(int requestId, const SubtitleTrackList &
     if (m_tracks.isEmpty()) {
         setStatus(QStringLiteral("no subtitle tracks"));
     } else {
-        // "cached" is worth saying out loud: it is the difference between a
-        // nine-second wait and none, and without it a hit is indistinguishable
-        // from a parse that was suspiciously quick.
+        // "cached" is worth saying: without it a hit is indistinguishable from
+        // a parse that was suspiciously quick.
         setStatus(QStringLiteral("%1 track%2, %3 line%4%5")
                       .arg(textTracks)
                       .arg(textTracks == 1 ? QString() : QStringLiteral("s"))
@@ -201,15 +252,38 @@ void SubtitleManager::rebuildTracksView()
     m_tracksView.clear();
     m_tracksView.reserve(m_tracks.size());
 
+    // Two tracks can be genuinely indistinguishable -- one language, no title,
+    // no flags -- and a strip of identical tabs is no better than the bare
+    // language it replaced. Only the repeats take an ordinal.
+    QStringList labels;
+    labels.reserve(m_tracks.size());
+    QHash<QString, int> occurrences;
+    for (const SubtitleTrack &track : std::as_const(m_tracks)) {
+        labels.append(labelFor(track));
+        ++occurrences[labels.constLast()];
+    }
+    QHash<QString, int> numbered;
+    for (qsizetype i = 0; i < labels.size(); ++i) {
+        const QString base = labels.at(i);
+        if (occurrences.value(base) < 2)
+            continue;
+        // The first keeps the bare label, so no file grows a pointless "1".
+        if (++numbered[base] > 1)
+            labels[i] = base + QLatin1Char(' ') + QString::number(numbered.value(base));
+    }
+
+    qsizetype index = 0;
     for (const SubtitleTrack &track : std::as_const(m_tracks)) {
         QVariantMap entry;
         entry[QStringLiteral("id")] = track.id;
-        entry[QStringLiteral("label")] = labelFor(track);
+        entry[QStringLiteral("label")] = labels.at(index++);
         entry[QStringLiteral("language")] = track.language;
         entry[QStringLiteral("title")] = track.title;
         entry[QStringLiteral("codec")] = track.codecName;
         entry[QStringLiteral("kind")] = kindName(track.kind);
         entry[QStringLiteral("sidecar")] = track.sidecar;
+        entry[QStringLiteral("forced")] = track.forced;
+        entry[QStringLiteral("hearingImpaired")] = track.hearingImpaired;
         entry[QStringLiteral("source")] = QFileInfo(track.sourcePath).fileName();
         // Full path as well as the display name: selecting a sidecar in mpv means
         // matching or adding it by path, since mpv numbers external tracks
@@ -267,11 +341,20 @@ SubtitleLineModel *SubtitleManager::model(int trackId) const
     return model;
 }
 
-int SubtitleManager::preferredTrackIndex(const QVariantMap &remembered,
-                                         const QString &preferredLanguage) const
+QVariantMap SubtitleManager::preferredTrackChoice(const QVariantMap &remembered,
+                                                  const QVariantList &preferences) const
 {
-    return MpvTrackList::preferredTrackIndex(m_tracksView, remembered,
-                                             preferredLanguage);
+    const MpvTrackList::TrackChoice choice =
+        MpvTrackList::preferredTrackChoice(m_tracksView, remembered, preferences);
+    QVariantMap out;
+    out[QStringLiteral("index")] = choice.index;
+    out[QStringLiteral("matched")] = choice.matched;
+    return out;
+}
+
+QString SubtitleManager::languageName(const QString &code)
+{
+    return languageNameFor(code);
 }
 
 QString SubtitleManager::formatTimestamp(qint64 ms)
@@ -297,8 +380,7 @@ QString SubtitleManager::exportTrack(int trackId, const QUrl &target) const
     // Deliberately *not* QIODevice::Text. That flag translates every "\n" below
     // into "\r\n" on Windows and leaves it alone everywhere else, so the same
     // track exported on two machines would come out byte-different -- the same
-    // objection as the explicit encoding below. It was a no-op on Linux, which
-    // is why it survived this long. Every SubRip reader accepts LF.
+    // objection as the explicit encoding below. Every SubRip reader accepts LF.
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly))
         return QStringLiteral("cannot write %1: %2")

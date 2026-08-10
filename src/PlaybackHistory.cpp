@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Akash Jose
 
 #include "PlaybackHistory.h"
+
+#include "MpvTrackList.h"
 #include "SettingsService.h"
 
 #include <QtCore/QCryptographicHash>
@@ -15,7 +17,48 @@ constexpr auto kGroup = "resume";
 // Separate from kGroup on purpose: finishing a film clears its resume entry, and
 // that must not also forget which track was being read.
 constexpr auto kSubtitleGroup = "subtitle";
-constexpr auto kPreferredLanguageKey = "subtitle/preferredLanguage";
+constexpr auto kAudioGroup = "audio";
+
+// The plain keys under a stream type's group, beside its hashed per-file
+// subgroups. They describe the last choice made anywhere rather than a file, and
+// survive SettingsService::prune() because it walks childGroups.
+constexpr auto kPreferredLanguageKey = "preferredLanguage";
+constexpr auto kPreferredForcedKey = "preferredForced";
+constexpr auto kPreferredHearingImpairedKey = "preferredHearingImpaired";
+constexpr auto kPreferredVisualImpairedKey = "preferredVisualImpaired";
+constexpr auto kPreferenceModeKey = "preferenceMode";
+constexpr auto kPreferenceListKey = "preference";
+
+// "eng", "eng+sdh", "jpn+ad". A QVariantList of QVariantMaps round-trips
+// through QSettings, but lands in the ini as a base64 blob, and this file is
+// one somebody is meant to be able to open and fix.
+QString entryToToken(const QVariantMap &entry)
+{
+    QString token = MpvTrackList::canonicalLanguage(
+        entry.value(QStringLiteral("language")).toString());
+    if (token.isEmpty())
+        return {};
+    if (entry.value(QStringLiteral("forced")).toBool())
+        token += QStringLiteral("+forced");
+    if (entry.value(QStringLiteral("hearingImpaired")).toBool())
+        token += QStringLiteral("+sdh");
+    if (entry.value(QStringLiteral("visualImpaired")).toBool())
+        token += QStringLiteral("+ad");
+    return token;
+}
+
+QVariantMap tokenToEntry(const QString &token)
+{
+    const QStringList parts = token.split(QLatin1Char('+'), Qt::SkipEmptyParts);
+    QVariantMap entry;
+    if (parts.isEmpty())
+        return entry;
+    entry[QStringLiteral("language")] = MpvTrackList::canonicalLanguage(parts.first());
+    entry[QStringLiteral("forced")] = parts.contains(QLatin1String("forced"));
+    entry[QStringLiteral("hearingImpaired")] = parts.contains(QLatin1String("sdh"));
+    entry[QStringLiteral("visualImpaired")] = parts.contains(QLatin1String("ad"));
+    return entry;
+}
 
 }  // namespace
 
@@ -53,22 +96,14 @@ PlaybackHistory::~PlaybackHistory()
 void PlaybackHistory::startFlushTimer()
 {
     // The app's one deliberate periodic write, and deliberately not the resume
-    // tick. The QML `Settings` groups (ui, subtitleStyle) share this file, and
-    // before this they had no flush anyone here owned -- they went out on
-    // whatever sync() the resume tick happened to do. This is now their flush,
-    // whatever remember() does.
+    // tick. It is also the owned path to disk for the QML `Settings` groups that
+    // share this file, which otherwise go out on whatever sync() remember()
+    // happened to do. Not a fix for a live bug: measured on Qt 6.12, a QML
+    // `Settings` group reaches disk about half a second after a property changes
+    // with nobody calling sync() at all.
     //
-    // Measured, so it is not oversold: they do not actually depend on it. On Qt
-    // 6.12 a QML `Settings` group reaches disk about half a second after a
-    // property changes with nobody calling sync() at all -- QQmlSettings has its
-    // own write timer, and QSettings posts itself an update after every setValue
-    // and syncs when the event loop next turns. So this is one owned path to
-    // disk in place of two borrowed ones, not a fix for a live bug.
-    //
-    // Costing nothing when nothing changed is what makes a 30-second period
-    // reasonable: sync() on a file with no pending values is a stat, not a
-    // rewrite -- it does not even recreate the file if it has been deleted -- so
-    // an idle player writes nothing at all.
+    // A 30-second period is reasonable because it costs nothing when nothing
+    // changed: sync() on a file with no pending values is a stat, not a rewrite.
     m_flushTimer.setInterval(FlushIntervalMs);
     // Nothing here needs the wakeup to be punctual, and a coarse timer lets the
     // kernel group it with others.
@@ -205,32 +240,63 @@ double PlaybackHistory::resumeFor(const QString &path) const
     return (ok && position > 0.0) ? position : -1.0;
 }
 
+QString PlaybackHistory::groupFor(const QString &type)
+{
+    return QString::fromLatin1(type == QLatin1String("audio") ? kAudioGroup
+                                                              : kSubtitleGroup);
+}
+
+QString PlaybackHistory::entryKey(const QString &type, const QString &path)
+{
+    return groupFor(type) + QLatin1Char('/') + keyFor(path);
+}
+
+void PlaybackHistory::rememberPreferredFlavour(const QString &type,
+                                               const QString &language, bool forced,
+                                               bool hearingImpaired,
+                                               bool visualImpaired)
+{
+    // Only a real language tag is worth keeping -- "und" would match half a
+    // container -- and the flavour goes with it or not at all, since it only
+    // qualifies the language stored beside it.
+    if (language.isEmpty() || language == QLatin1String("und"))
+        return;
+
+    const QString group = groupFor(type) + QLatin1Char('/');
+    m_settings->setValue(group + QLatin1String(kPreferredLanguageKey),
+                         MpvTrackList::canonicalLanguage(language));
+    m_settings->setValue(group + QLatin1String(kPreferredForcedKey), forced);
+    m_settings->setValue(group + QLatin1String(kPreferredHearingImpairedKey),
+                         hearingImpaired);
+    m_settings->setValue(group + QLatin1String(kPreferredVisualImpairedKey),
+                         visualImpaired);
+}
+
 void PlaybackHistory::rememberSubtitle(const QString &path, int streamIndex,
                                        const QString &sidecarPath,
-                                       const QString &language)
+                                       const QString &language, bool forced,
+                                       bool hearingImpaired)
 {
     if (path.isEmpty() || !m_settings)
         return;
 
-    const QString key =
-        QString::fromLatin1(kSubtitleGroup) + QLatin1Char('/') + keyFor(path);
+    const QString key = entryKey(QStringLiteral("subtitle"), path);
 
     m_settings->setValue(key + QStringLiteral("/streamIndex"), streamIndex);
     m_settings->setValue(key + QStringLiteral("/sidecarPath"),
                          sidecarPath.isEmpty()
                              ? QString()
                              : QFileInfo(sidecarPath).absoluteFilePath());
-    m_settings->setValue(key + QStringLiteral("/language"), language);
+    m_settings->setValue(key + QStringLiteral("/language"),
+                         MpvTrackList::canonicalLanguage(language));
     m_settings->setValue(key + QStringLiteral("/path"),
                          QFileInfo(path).absoluteFilePath());
     // What SettingsService ages the entry by.
     m_settings->setValue(key + QStringLiteral("/lastUsed"),
                          QDateTime::currentSecsSinceEpoch());
 
-    // The fallback for files with no entry of their own. Only a real language
-    // tag is worth keeping -- "und" would match half a container.
-    if (!language.isEmpty() && language != QLatin1String("und"))
-        m_settings->setValue(QString::fromLatin1(kPreferredLanguageKey), language);
+    rememberPreferredFlavour(QStringLiteral("subtitle"), language, forced,
+                             hearingImpaired, false);
 
     // Written through: this follows a deliberate choice of track, which happens
     // a handful of times in a session rather than every few seconds.
@@ -243,8 +309,7 @@ QVariantMap PlaybackHistory::subtitleFor(const QString &path) const
     if (path.isEmpty() || !m_settings)
         return out;
 
-    const QString key =
-        QString::fromLatin1(kSubtitleGroup) + QLatin1Char('/') + keyFor(path);
+    const QString key = entryKey(QStringLiteral("subtitle"), path);
     const QVariant streamIndex = m_settings->value(key + QStringLiteral("/streamIndex"));
     if (!streamIndex.isValid())
         return out;
@@ -257,11 +322,137 @@ QVariantMap PlaybackHistory::subtitleFor(const QString &path) const
     return out;
 }
 
-QString PlaybackHistory::preferredLanguage() const
+void PlaybackHistory::rememberAudio(const QString &path, int streamIndex,
+                                    const QString &language, bool visualImpaired)
+{
+    if (path.isEmpty() || !m_settings)
+        return;
+
+    const QString key = entryKey(QStringLiteral("audio"), path);
+    m_settings->setValue(key + QStringLiteral("/streamIndex"), streamIndex);
+    m_settings->setValue(key + QStringLiteral("/language"),
+                         MpvTrackList::canonicalLanguage(language));
+    m_settings->setValue(key + QStringLiteral("/path"),
+                         QFileInfo(path).absoluteFilePath());
+    m_settings->setValue(key + QStringLiteral("/lastUsed"),
+                         QDateTime::currentSecsSinceEpoch());
+
+    rememberPreferredFlavour(QStringLiteral("audio"), language, false, false,
+                             visualImpaired);
+    flush();
+}
+
+QVariantMap PlaybackHistory::audioFor(const QString &path) const
+{
+    QVariantMap out;
+    if (path.isEmpty() || !m_settings)
+        return out;
+
+    const QString key = entryKey(QStringLiteral("audio"), path);
+    const QVariant streamIndex = m_settings->value(key + QStringLiteral("/streamIndex"));
+    if (!streamIndex.isValid())
+        return out;
+
+    out[QStringLiteral("streamIndex")] = streamIndex.toInt();
+    out[QStringLiteral("language")] =
+        m_settings->value(key + QStringLiteral("/language")).toString();
+    return out;
+}
+
+QString PlaybackHistory::preferenceMode(const QString &type) const
+{
+    if (!m_settings)
+        return QStringLiteral("learn");
+    const QString mode =
+        m_settings
+            ->value(groupFor(type) + QLatin1Char('/') + QLatin1String(kPreferenceModeKey),
+                    QStringLiteral("learn"))
+            .toString();
+    // Anything unrecognised reads as "learn", not as "no preference at all".
+    if (mode == QLatin1String("file") || mode == QLatin1String("explicit"))
+        return mode;
+    return QStringLiteral("learn");
+}
+
+void PlaybackHistory::setPreferenceMode(const QString &type, const QString &mode)
+{
+    if (!m_settings)
+        return;
+    m_settings->setValue(groupFor(type) + QLatin1Char('/')
+                             + QLatin1String(kPreferenceModeKey),
+                         mode);
+    flush();
+}
+
+QVariantList PlaybackHistory::preferenceList(const QString &type) const
+{
+    QVariantList out;
+    if (!m_settings)
+        return out;
+    const QStringList tokens =
+        m_settings
+            ->value(groupFor(type) + QLatin1Char('/') + QLatin1String(kPreferenceListKey))
+            .toStringList();
+    for (const QString &token : tokens) {
+        const QVariantMap entry = tokenToEntry(token.trimmed());
+        if (!entry.isEmpty())
+            out.append(entry);
+    }
+    return out;
+}
+
+void PlaybackHistory::setPreferenceList(const QString &type, const QVariantList &entries)
+{
+    if (!m_settings)
+        return;
+    QStringList tokens;
+    tokens.reserve(entries.size());
+    for (const QVariant &entry : entries) {
+        const QString token = entryToToken(entry.toMap());
+        if (!token.isEmpty())
+            tokens.append(token);
+    }
+    m_settings->setValue(groupFor(type) + QLatin1Char('/')
+                             + QLatin1String(kPreferenceListKey),
+                         tokens);
+    flush();
+}
+
+QString PlaybackHistory::preferredLanguage(const QString &type) const
 {
     if (!m_settings)
         return {};
-    return m_settings->value(QString::fromLatin1(kPreferredLanguageKey)).toString();
+    return m_settings
+        ->value(groupFor(type) + QLatin1Char('/') + QLatin1String(kPreferredLanguageKey))
+        .toString();
+}
+
+QVariantList PlaybackHistory::preferredTracks(const QString &type) const
+{
+    const QString mode = preferenceMode(type);
+    // Nothing to walk: the caller leaves the file's own default alone. Not the
+    // same as a list that matches nothing, which still means "we tried".
+    if (mode == QLatin1String("file"))
+        return {};
+    if (mode == QLatin1String("explicit"))
+        return preferenceList(type);
+
+    const QString language = preferredLanguage(type);
+    if (language.isEmpty() || !m_settings)
+        return {};
+
+    const QString group = groupFor(type) + QLatin1Char('/');
+    QVariantMap learned;
+    learned[QStringLiteral("language")] = language;
+    learned[QStringLiteral("forced")] =
+        m_settings->value(group + QLatin1String(kPreferredForcedKey), false).toBool();
+    learned[QStringLiteral("hearingImpaired")] =
+        m_settings->value(group + QLatin1String(kPreferredHearingImpairedKey), false)
+            .toBool();
+    learned[QStringLiteral("visualImpaired")] =
+        m_settings->value(group + QLatin1String(kPreferredVisualImpairedKey), false)
+            .toBool();
+    return QVariantList{learned};
 }
 
 void PlaybackHistory::forget(const QString &path)
@@ -274,7 +465,7 @@ void PlaybackHistory::forget(const QString &path)
     if (key == m_pendingKey)
         resetPending();
     m_settings->remove(key);
-    m_settings->remove(QString::fromLatin1(kSubtitleGroup) + QLatin1Char('/')
-                       + keyFor(path));
+    m_settings->remove(entryKey(QStringLiteral("subtitle"), path));
+    m_settings->remove(entryKey(QStringLiteral("audio"), path));
     flush();
 }

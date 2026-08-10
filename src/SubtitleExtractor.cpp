@@ -9,6 +9,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
 #include <QtCore/QStringList>
 #include <QtCore/QStringView>
@@ -185,6 +186,60 @@ QString languageFromSidecarName(const QString &videoBase, const QFileInfo &sidec
         }
     }
     return {};
+}
+
+// Whether a dotted or spaced name carries `tag` as a word of its own. Substring
+// matching is wrong here: "cc" is inside "Occitan" and "forced" inside a title
+// somebody wrote about the plot.
+bool hasTag(const QString &text, QLatin1String tag)
+{
+    static const QRegularExpression separator(QStringLiteral("[^\\p{L}\\p{N}]+"));
+    const QStringList words = text.split(separator, Qt::SkipEmptyParts);
+    for (const QString &word : words) {
+        if (word.compare(tag, Qt::CaseInsensitive) == 0)
+            return true;
+    }
+    return false;
+}
+
+// The tags a release writes into a track title or a sidecar filename. Read as
+// well as the container's disposition bits, because plenty of releases set no
+// bit and write "SDH" in the title instead.
+bool looksHearingImpaired(const QString &text)
+{
+    return hasTag(text, QLatin1String("sdh")) || hasTag(text, QLatin1String("cc"))
+           || hasTag(text, QLatin1String("hi"))
+           || text.contains(QLatin1String("hearing impaired"), Qt::CaseInsensitive);
+}
+
+bool looksForced(const QString &text)
+{
+    return hasTag(text, QLatin1String("forced"));
+}
+
+// A sidecar's flavour tags: its dotted name after the video's own base, less
+// whatever supplied the language. Position is the only thing separating the two
+// readings of "hi" -- Hindi in the language slot, hearing-impaired anywhere
+// else -- so "film.hi.srt" is Hindi and "film.eng.hi.srt" is English SDH.
+QString sidecarFlavourTags(const QString &videoBase, const QFileInfo &sidecar)
+{
+    const QString stem = sidecar.completeBaseName();
+    if (!stem.startsWith(videoBase))
+        return stem;
+
+    QStringList tags =
+        stem.mid(videoBase.size()).split(QLatin1Char('.'), Qt::SkipEmptyParts);
+    // The first match only, because that is the one languageFromSidecarName
+    // took: "film.es.es.srt" keeps its second tag.
+    const QString language = languageFromSidecarName(videoBase, sidecar);
+    if (!language.isEmpty()) {
+        const auto it = std::find_if(tags.begin(), tags.end(), [&language](const QString &tag) {
+            return tag.compare(language, Qt::CaseInsensitive) == 0;
+        });
+        if (it != tags.end())
+            tags.erase(it);
+    }
+    return tags.join(QLatin1Char('.'));
 }
 
 QStringList findSidecars(const QString &mediaPath)
@@ -381,7 +436,19 @@ bool SubtitleExtractor::readContainer(const QString &path, const QString &videoB
         track.language = dictValue(st->metadata, "language");
         track.title = dictValue(st->metadata, "title");
 
+        track.forced = (st->disposition & AV_DISPOSITION_FORCED) != 0
+                       || looksForced(track.title);
+        track.hearingImpaired = (st->disposition & AV_DISPOSITION_HEARING_IMPAIRED) != 0
+                                || looksHearingImpaired(track.title);
+
         if (sidecar) {
+            // A sidecar has no disposition, so its name is all there is. Only
+            // the tags after the video's base name count, or a film called
+            // "Forced" would mark every sidecar beside it forced.
+            const QString tags = sidecarFlavourTags(videoBase, QFileInfo(path));
+            track.forced = track.forced || looksForced(tags);
+            track.hearingImpaired = track.hearingImpaired || looksHearingImpaired(tags);
+
             if (track.title.isEmpty())
                 track.title = shortName;
             if (track.language.isEmpty())

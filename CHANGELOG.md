@@ -33,5 +33,3 @@
 * **browser:** set the height of a subtitle row from its own cue ([53ce5ae](https://github.com/akashjose/Subixa/commit/53ce5ae5dade28ac5dcd1f58bf3568e07dba32a0))
 * **metadata:** correct the release metadata and the changelog layout ([575b667](https://github.com/akashjose/Subixa/commit/575b667ea6983250a808e679ba8ab70984ce5f0b))
 * **metadata:** remove the prose comments from the AppStream metainfo ([da55542](https://github.com/akashjose/Subixa/commit/da5554293d527060c7bc9214fde387d8ed7cc661))
-
-## Changelog

@@ -11,13 +11,16 @@ import Subixa
 
 ApplicationWindow {
     id: root
-    // Wide enough that the video keeps a usable pane with the browser docked at
-    // its default 360, which is the arrangement this player is for.
-    readonly property int defaultWindowWidth: 1980
-    readonly property int defaultWindowHeight: 1200
+    // One video pixel per screen pixel for a 1080p film, with the browser docked
+    // beside it -- the arrangement this player is for. There is no default
+    // window size: the window is only ever the picture plus the browser it is
+    // sharing the width with and the transport bar under it.
+    readonly property int defaultPictureWidth: 1920
+    readonly property int defaultPictureHeight: 1080
     readonly property int defaultPanelWidth: 360
-    width: root.defaultWindowWidth
-    height: root.defaultWindowHeight
+    readonly property int splitHandleWidth: 8
+    width: root.defaultPictureWidth + root.defaultPanelWidth + root.splitHandleWidth
+    height: root.defaultPictureHeight + transportBar.implicitHeight
     minimumWidth: 680
     minimumHeight: 420
     visible: true
@@ -35,31 +38,24 @@ ApplicationWindow {
 
     // Every service is also reachable as a property of root, and every binding
     // that hands one to a child goes through these rather than naming the id
-    // directly.
+    // directly (trap 19).
     //
-    // This is the shadowing trap that already cost this codebase the `lines` ->
-    // `linesModel` rename in SubtitlePanel, and it bit again the moment the
-    // settings window appeared: a child declaring `required property var prefs`
-    // and being given `prefs: prefs` resolves the right-hand side to its *own*
-    // property, so the binding is to itself. Nothing errors -- the property is a
-    // `var`, so it simply holds undefined, every control reading through it
-    // falls back to its declared default, and the settings window comes up
-    // showing zeroes for values that are not zero.
-    //
-    // Qualifying with `root.` makes that unrepresentable rather than something
-    // to remember.
+    // A child declaring `required property var prefs` and given `prefs: prefs`
+    // resolves the right-hand side to its *own* property, so the binding is to
+    // itself. Nothing errors: the property is a `var`, so it holds undefined and
+    // every control reading through it falls back to its declared default.
+    // Qualifying with `root.` makes that unrepresentable.
     readonly property var linesModel: lines
     readonly property var queue: playlist
     readonly property var prefsStore: prefs
     readonly property var subStyleStore: subStyle
     readonly property var shortcutStore: keys
     readonly property var subtitleManager: subs
+    readonly property var historyStore: history
 
     // ---- persisted preferences -----------------------------------------
-    // Everything the player should look the same way it did last time. Written
-    // into the same QSettings file PlaybackHistory and ShortcutRegistry use,
-    // under its own group, so there is one file to look at when something is
-    // remembered that should not be.
+    // Written into the same QSettings file PlaybackHistory and ShortcutRegistry
+    // use, under its own group, so there is one file to look at.
     //
     // Restored in Component.onCompleted and saved on close rather than bound in
     // both directions: a binding from a window's own width to a stored value is
@@ -69,8 +65,12 @@ ApplicationWindow {
         id: prefs
         category: "ui"
 
-        property int windowWidth: 1980
-        property int windowHeight: 1200
+        // The window rather than the picture, because this is restored before
+        // there is a layout to measure chrome against. The panel's own state is
+        // restored alongside it, so the picture comes back the size it was.
+        // -1 is "never saved", and then the default picture decides the size.
+        property int windowWidth: -1
+        property int windowHeight: -1
         // Off, and a stored geometry stops shadowing the default -- which is the
         // confusing half of remembering it: raising the default does nothing for
         // anyone who has ever moved the window.
@@ -78,8 +78,14 @@ ApplicationWindow {
         property int windowX: -1
         property int windowY: -1
         property bool windowMaximized: false
+        // The picture the zoom keys return to, saved on purpose rather than
+        // whatever the window happened to be last. -1 until somebody saves one,
+        // and then the arrangement the player ships with stands in.
+        property int savedPictureWidth: -1
+        property int savedPictureHeight: -1
+        property bool announceResize: true
 
-        property int panelWidth: 360
+        property int panelWidth: root.defaultPanelWidth
         property bool panelVisible: true
         property bool panelDetached: false
         property int detachedX: -1
@@ -99,25 +105,17 @@ ApplicationWindow {
 
         // Playback behaviour
         property bool playNextAutomatically: true
-        // Minimising a film should not go on playing into a window nobody can
-        // see. Music should: minimising is how an album gets out of the way.
-        // The rule is the same either way -- stop what cannot be watched -- and
-        // hasVideo is what tells the two apart.
         property bool pauseOnMinimize: true
-        // Off, so coming back does not start playing on its own. Restoring a
-        // window is often how someone goes looking for something rather than a
-        // decision to watch, and a player that begins the moment it reappears is
-        // the more startling of the two defaults. Pressing play is one key.
+        // Off, so restoring a window does not start playing on its own.
         property bool resumeOnRestore: false
-        // The two halves of per-file memory, independent on purpose: finishing
-        // a film clears its position and must not also forget which of
-        // sixty-five tracks this household reads -- PlaybackHistory keeps them
-        // in separate groups for exactly this reason. Off gates only the
-        // restore; the history keeps being written, so switching one back on
-        // remembers everything, including the period it was off. Both default
-        // on, which is the behaviour the player has always had.
+        // Independent on purpose: finishing a film clears its position and must
+        // not also forget which track was being read, which is why
+        // PlaybackHistory keeps them in separate groups. Off gates only the
+        // restore -- the history keeps being written, so switching one back on
+        // remembers the period it was off too.
         property bool resumeWhereLeftOff: true
         property bool rememberSubtitleTrack: true
+        property bool rememberAudioTrack: true
         property int seekStep: 5
         property int seekStepLarge: 10
         property int volumeStep: 5
@@ -129,8 +127,7 @@ ApplicationWindow {
         property bool showEndTime: false
         property bool showCueDuration: false
         // On by default, unlike the QC readouts above: who is speaking is
-        // reading material, not tooling, and it costs nothing on the tracks
-        // (most of them) that carry no names.
+        // reading material, not tooling.
         property bool showActors: true
         property bool followOffOnScroll: true
     }
@@ -140,10 +137,8 @@ ApplicationWindow {
     //
     // The colours here are the only ones in the app that are not Theme tokens,
     // and deliberately so: they are how subtitles are drawn *over the film*, in
-    // mpv's #AARRGGBB spelling. White on a black outline is right over any
-    // footage and has nothing to do with whether the UI is light or dark --
-    // tying them to the theme would mean switching to the light theme changed
-    // the subtitles burnt into the picture.
+    // mpv's #AARRGGBB spelling. Tying them to the theme would mean switching to
+    // the light theme changed the subtitles burnt into the picture.
     Settings {
         id: subStyle
         category: "subtitleStyle"
@@ -196,20 +191,46 @@ ApplicationWindow {
         Theme.reducedMotion = prefs.reducedMotion
         root.applyTextRendering()
 
-        root.width = prefs.windowWidth
-        root.height = prefs.windowHeight
-        // -1 means "never saved": let the window manager place it rather than
-        // dropping it at the top-left corner.
-        if (prefs.rememberGeometry && prefs.windowX >= 0 && prefs.windowY >= 0) {
-            root.x = prefs.windowX
-            root.y = prefs.windowY
+        // All of it or none of it: restoring the stored size while the switch is
+        // off left an old size reopening forever, which is the opposite of what
+        // the switch promises.
+        if (prefs.rememberGeometry && prefs.windowWidth > 0) {
+            root.width = prefs.windowWidth
+            root.height = prefs.windowHeight
+            // -1 means "never saved": let the window manager place it rather than
+            // dropping it at the top-left corner.
+            if (prefs.windowX >= 0 && prefs.windowY >= 0) {
+                root.x = prefs.windowX
+                root.y = prefs.windowY
+            }
+            if (prefs.windowMaximized)
+                root.visibility = Window.Maximized
+        } else {
+            // The default picture assumes room for a 1080p frame and a browser
+            // beside it. A smaller screen gets a smaller picture rather than a
+            // window whose transport bar is off the edge of it.
+            var limit = root.screen
+            var wanted = Qt.size(root.width, root.height)
+            root.width = limit ? Math.min(wanted.width, limit.desktopAvailableWidth)
+                               : wanted.width
+            root.height = limit ? Math.min(wanted.height, limit.desktopAvailableHeight)
+                                : wanted.height
         }
-        if (prefs.windowMaximized)
-            root.visibility = Window.Maximized
 
         root.panelVisible = prefs.panelVisible
         root.panelDetached = prefs.panelDetached
         dockedPanel.SplitView.preferredWidth = prefs.panelWidth
+
+        // Everything above resizes the window, and none of it is worth
+        // announcing. A frame is not enough to wait: the panel's width lands in
+        // a later pass than the window's.
+        settleTimer.start()
+    }
+
+    Timer {
+        id: settleTimer
+        interval: 600
+        onTriggered: root.sizeSettled = true
     }
 
     // A shadow costs a render pass, and on Mesa's software rasterizers that is
@@ -238,13 +259,13 @@ ApplicationWindow {
         }
     }
 
-    function resetWindowSize() {
+    function resetPictureSize() {
         root.visibility = Window.Windowed
-        root.width = root.defaultWindowWidth
-        root.height = root.defaultWindowHeight
         dockedPanel.SplitView.preferredWidth = root.defaultPanelWidth
-        prefs.windowWidth = root.defaultWindowWidth
-        prefs.windowHeight = root.defaultWindowHeight
+        root.resizeToPicture(root.defaultPictureWidth, root.defaultPictureHeight,
+                             "default size")
+        prefs.windowWidth = root.width
+        prefs.windowHeight = root.height
         prefs.panelWidth = root.defaultPanelWidth
         // -1 is "never saved", so the window manager places it rather than the
         // stored corner.
@@ -286,25 +307,8 @@ ApplicationWindow {
         // is how they learn what they are being drawn on.
         rowBackground: Theme.color.bgSurface
         // The tab is the whole selection -- currentTrack is derived from it --
-        // so there is nothing else to set here. -1 when the file has no
-        // browsable track, which reads back as "nothing to list".
-        //
-        // Which tab that is comes from C++: the track last read in this very
-        // file, else the language last chosen anywhere, else the first browsable
-        // one. What the store knows is passed in rather than looked up there, so
-        // neither of these two objects has to know about the other.
-        //
-        // The per-file toggle empties the map rather than skipping the
-        // assignment: preferredTrackIndex must still run so the tab gets the
-        // language-fallback-or-first default instead of inheriting the
-        // previous film's index. The language fallback stays active in both
-        // states -- the toggle says "per file", and the language carrying
-        // forward is a preference, not history.
-        onLoaded: panelUi.tabIndex =
-            subs.preferredTrackIndex(prefs.rememberSubtitleTrack
-                                         ? history.subtitleFor(root.currentFile)
-                                         : ({}),
-                                     history.preferredLanguage())
+        // so there is nothing else to set here.
+        onLoaded: root.applyPreferredSubtitleTrack()
     }
 
     PlaybackHistory {
@@ -328,12 +332,10 @@ ApplicationWindow {
     // The track being browsed, in the browser's own numbering -- an index into
     // the manager's track list, which is not mpv's track ids and never was.
     //
-    // Derived rather than assigned. Three paths choose a track (a tab, the
-    // transport's subtitle menu, and the one remembered for this file) and each
-    // used to write this *and* the tab; the menu path only ever wrote the tab,
-    // so picking a track there left the browser listing the previous track's
-    // cues and export writing them. One selection, panelUi.tabIndex, and this
-    // is how the rest of the window reads it.
+    // Derived rather than assigned: three paths choose a track (a tab, the
+    // transport's subtitle menu, and the one remembered for this file), and any
+    // that failed to write both this and the tab left the browser listing the
+    // previous track's cues. panelUi.tabIndex is the one selection.
     readonly property int currentTrack: {
         var track = subs.tracks[panelUi.tabIndex]
         return track !== undefined && track.browsable ? track.id : -1
@@ -345,10 +347,8 @@ ApplicationWindow {
     readonly property bool fullscreen: visibility === Window.FullScreen
 
     // ---- minimising -------------------------------------------------------
-    // A film playing into a taskbar button is nobody watching it, so minimising
-    // stops it. Music is the opposite: minimising is *how* an album is put on in
-    // the background, and pausing it there would be the player second-guessing
-    // the obvious. mpv.hasVideo is what separates them, and it discounts cover
+    // Minimising stops a film and not an album -- for music it is *how* you put
+    // one on in the background. mpv.hasVideo separates them, discounting cover
     // art so a tagged mp3 does not read as a film.
     readonly property bool minimized: visibility === Window.Minimized
     // Whether the pause was ours to undo. Restoring must not start something
@@ -374,6 +374,9 @@ ApplicationWindow {
     // What the panel was doing before fullscreen hid it, so leaving fullscreen
     // restores that rather than unconditionally showing it.
     property bool panelVisibleBeforeFullscreen: true
+    // Assigned rather than put through setPanelShown: the window size is the
+    // screen going in and the pre-fullscreen size coming out, so the picture is
+    // already where it was and widening for the returning panel would overshoot.
     onFullscreenChanged: {
         if (root.fullscreen) {
             root.panelVisibleBeforeFullscreen = root.panelVisible
@@ -392,6 +395,17 @@ ApplicationWindow {
     Timer {
         id: chromeTimer
         interval: 2500
+    }
+
+    // Separate from showChrome: chrome floats over the film only in fullscreen,
+    // but a pointer parked on the picture is in the way in a window too.
+    readonly property bool showPointer: pointerTimer.running || transportHover.hovered
+
+    Timer {
+        id: pointerTimer
+        // Slower than mpv's 1 s: this player is used with a pointer in hand,
+        // scrubbing and clicking subtitle rows.
+        interval: 2000
     }
 
     // ---- file lifecycle -------------------------------------------------
@@ -423,6 +437,11 @@ ApplicationWindow {
             playlist.setCurrentPath(path)
         else
             playlist.openFolderOf(path)
+
+        // Both selections start over, or the outgoing film's answers apply to
+        // the incoming one.
+        root.subtitleSelectionIsOurs = false
+        root.audioSelectionApplied = false
 
         mpv.loadFile(path)
         subs.load(path)
@@ -504,8 +523,7 @@ ApplicationWindow {
         }
 
         function onCommandFailed(what, reason) {
-            // mpv refusing a command used to be silent, which is how a malformed
-            // sidecar produced a tab that simply did nothing.
+            // Or a malformed sidecar produces a tab that silently does nothing.
             root.notify(what + ": " + reason, "error")
         }
 
@@ -579,6 +597,27 @@ ApplicationWindow {
 
     property bool panelDetached: false
 
+    // Whether the lit tab is a *choice* -- this file's remembered track, or a
+    // preference that matched -- or merely the tab the panel fell back to
+    // because it has to be showing something. Only a choice may be pushed at
+    // mpv; forcing a fallback would override the track the release flagged.
+    property bool subtitleSelectionIsOurs: false
+
+    // The per-file toggle empties the map rather than skipping the call: the
+    // choice must still be made, or the tab inherits the previous film's index.
+    function applyPreferredSubtitleTrack() {
+        var choice = subs.preferredTrackChoice(
+                         prefs.rememberSubtitleTrack
+                             ? history.subtitleFor(root.currentFile) : ({}),
+                         history.preferredTracks("subtitle"))
+        panelUi.tabIndex = choice.index
+        root.subtitleSelectionIsOurs = choice.matched
+        if (choice.matched)
+            root.applySubtitleSelection()
+        else
+            root.syncPanelToSubtitleTrack()
+    }
+
     function selectTrack(index) {
         var tracks = subs.tracks
         var track = tracks[index]
@@ -588,13 +627,177 @@ ApplicationWindow {
         // setting it here as well is what makes the tab the selection rather
         // than a thing that happens to agree with one.
         panelUi.tabIndex = index
+        root.subtitleSelectionIsOurs = true
         root.applySubtitleSelection()
         // A tab click is a statement about this film, so it is worth keeping.
         // Only explicit choices are remembered -- storing what the sync handlers
         // do would overwrite the user's track with mpv's default on every open.
         history.rememberSubtitle(root.currentFile, track.streamIndex,
                                  track.sidecar ? track.sourcePath : "",
-                                 track.language)
+                                 track.language, track.forced,
+                                 track.hearingImpaired)
+    }
+
+    // ---- audio track -----------------------------------------------------
+    // Whether this file's audio track has been decided. mpv republishes its
+    // track list more than once per file -- adding a sidecar does it -- and
+    // without this the preference would undo a track picked by hand ten minutes
+    // in.
+    property bool audioSelectionApplied: false
+
+    function applyPreferredAudioTrack() {
+        if (root.audioSelectionApplied || mpv.audioTracks.length === 0)
+            return
+        root.audioSelectionApplied = true
+
+        var id = mpv.preferredAudioTrack(
+                     prefs.rememberAudioTrack
+                         ? history.audioFor(root.currentFile) : ({}),
+                     history.preferredTracks("audio"))
+        // -1 is "no opinion", and the file's own default is already playing.
+        if (id >= 0 && id !== mpv.audioTrack)
+            mpv.setAudioTrack(id)
+    }
+
+    // What to store for an audio track picked by hand. External audio is
+    // skipped: its ff-index counts within its own file, so storing it would
+    // name an unrelated embedded stream.
+    function rememberAudioChoice(id) {
+        if (root.currentFile === "" || id < 0)
+            return
+        var track = mpv.trackById(id)
+        if (track.id === undefined || track.external)
+            return
+        // An untagged track has no `language` key, and handing QML's `undefined`
+        // to a QString parameter stores the literal text "undefined".
+        history.rememberAudio(root.currentFile, track.ffIndex,
+                              track.language !== undefined ? track.language : "",
+                              track.visualImpaired === true)
+    }
+
+    // ---- cycling ---------------------------------------------------------
+    // Both of these record where they land, as deliberately as a menu pick.
+    function cycleAudioTrack() {
+        var id = mpv.nextTrackOfType("audio", mpv.audioTrack)
+        if (id < 0) {
+            root.osd("No audio tracks")
+            return
+        }
+        mpv.setAudioTrack(id)
+        root.rememberAudioChoice(id)
+        root.osd("Audio: " + root.trackLabel(mpv.trackById(id)))
+    }
+
+    function cycleSubtitleTrack() {
+        var id = mpv.nextTrackOfType("sub", mpv.subtitleTrack)
+        if (id < 0) {
+            root.osd("No subtitle tracks")
+            return
+        }
+        var track = mpv.trackById(id)
+        mpv.setSubtitleTrack(id)
+        root.rememberMpvSubtitle(track)
+        // Or the next track-list refresh drags the tab back to what the
+        // preference said.
+        root.subtitleSelectionIsOurs = true
+        root.osd("Subtitles: " + root.trackLabel(track))
+    }
+
+    // ---- window sizing ---------------------------------------------------
+    // The picture is what every size here means: what the zoom keys set, what
+    // the readout says, what the reset button resets, what a saved default
+    // holds. The window is that plus the two spans below.
+    readonly property int pictureWidth: Math.round(video.width)
+    readonly property int pictureHeight: Math.round(video.height)
+
+    // The browser's share of the window width. Computed from the panel rather
+    // than measured, so it is already right in the pass that shows, hides or
+    // resets it -- a measurement would still be describing the old layout.
+    function dockedPanelSpan() {
+        return root.panelVisible && !root.panelDetached
+             ? dockedPanel.SplitView.preferredWidth + root.splitHandleWidth
+             : 0
+    }
+
+    // The transport bar's share of the window height. Nothing here changes it,
+    // so measuring is safe, and only a layout knows what it came to.
+    function transportSpan() {
+        return root.height - video.height
+    }
+
+    // One way out for every sizing action, so the readout knows this size came
+    // from us rather than from a drag.
+    function resizeToPicture(w, h, why) {
+        var wanted = Qt.size(Math.round(w) + root.dockedPanelSpan(),
+                             Math.round(h) + root.transportSpan())
+
+        // 200% of a 4K film is larger than most screens, and a window bigger
+        // than the screen is one whose transport bar cannot be reached.
+        var limit = root.screen
+        if (limit) {
+            wanted = Qt.size(Math.min(wanted.width, limit.desktopAvailableWidth),
+                             Math.min(wanted.height, limit.desktopAvailableHeight))
+        }
+        root.resizeReason = why
+        root.width = wanted.width
+        root.height = wanted.height
+    }
+
+    // 100% is one video pixel per screen pixel.
+    function zoomTo(scale) {
+        if (root.fullscreen) {
+            root.osd("Leave fullscreen first")
+            return
+        }
+        if (mpv.videoSize.width <= 0 || mpv.videoSize.height <= 0) {
+            root.osd("No video to size against")
+            return
+        }
+        root.resizeToPicture(mpv.videoSize.width * scale,
+                             mpv.videoSize.height * scale,
+                             Math.round(scale * 100) + "%")
+    }
+
+    function zoomToDefault() {
+        if (root.fullscreen) {
+            root.osd("Leave fullscreen first")
+            return
+        }
+        // -1 is "never saved one", and then the picture the player ships with
+        // stands in.
+        root.resizeToPicture(prefs.savedPictureWidth > 0 ? prefs.savedPictureWidth
+                                                         : root.defaultPictureWidth,
+                             prefs.savedPictureHeight > 0 ? prefs.savedPictureHeight
+                                                          : root.defaultPictureHeight,
+                             "default size")
+    }
+
+    function saveDefaultPictureSize() {
+        if (root.fullscreen) {
+            root.osd("Leave fullscreen first")
+            return
+        }
+        prefs.savedPictureWidth = root.pictureWidth
+        prefs.savedPictureHeight = root.pictureHeight
+        root.osd("Saved " + root.pictureWidth + " × " + root.pictureHeight
+                 + " as your default")
+    }
+
+    // Showing or hiding the browser hands the window the width it released or
+    // took, so the picture does not move. Without this a zoom preset stops being
+    // true the moment the panel does, which is the whole reason the picture is
+    // the anchor.
+    function setPanelShown(visible, detached) {
+        var before = root.dockedPanelSpan()
+        root.panelVisible = visible
+        root.panelDetached = detached
+        var delta = root.dockedPanelSpan() - before
+        if (delta === 0 || root.fullscreen || root.visibility !== Window.Windowed)
+            return
+        var limit = root.screen
+        root.width = limit
+                   ? Math.min(root.width + delta, limit.desktopAvailableWidth)
+                   : root.width + delta
     }
 
     // The transport's subtitle menu reaches tracks the panel cannot list, so a
@@ -606,12 +809,12 @@ ApplicationWindow {
             return
         var entry = mpv.subtitleHistoryEntry(track)
         history.rememberSubtitle(root.currentFile, entry.streamIndex,
-                                 entry.sidecarPath, entry.language)
+                                 entry.sidecarPath, entry.language, entry.forced,
+                                 entry.hearingImpaired)
     }
 
-    // Tells mpv to burn the track the panel is showing over the video. Until this
-    // existed the two were independent, so you could read one language in the
-    // panel while another rendered on screen with no way to reconcile them.
+    // Tells mpv to burn the track the panel is showing over the video, so the
+    // two cannot end up on different languages.
     function applySubtitleSelection() {
         var track = subs.tracks[panelUi.tabIndex]
         if (track === undefined || !track.browsable)
@@ -622,15 +825,14 @@ ApplicationWindow {
             mpv.selectSubtitleStream(track.streamIndex)
     }
 
-    // The other direction: picking a subtitle track from the transport menu moves
-    // the panel to the matching tab, so the two agree no matter which was used.
-    // Moving the tab is the whole of it -- currentTrack derives from it, so the
-    // list and the export target follow without a second write to keep in step.
+    // The other direction: a track picked from the transport menu moves the
+    // panel's tab, and currentTrack derives from that, so the list and the
+    // export target follow without a second write.
     //
-    // The whole search happens in C++, where the two numberings meet: one file
-    // can be named relatively in the extractor and absolutely by mpv. -1 means
-    // mpv is showing something the browser cannot list, or has not caught up
-    // with the file yet, and both mean leave the tab alone.
+    // The search is in C++, where the two numberings meet: one file can be named
+    // relatively in the extractor and absolutely by mpv. -1 means mpv is showing
+    // something the browser cannot list, or has not caught up with the file yet,
+    // and both mean leave the tab alone.
     function syncPanelToSubtitleTrack() {
         var index = mpv.browserTrackForSubtitle(subs.tracks)
         if (index >= 0)
@@ -643,14 +845,26 @@ ApplicationWindow {
         // pick a tab before mpv has a track list to match it against. Retrying
         // when the list changes covers that, and also re-selects after a
         // sub-add lands.
-        function onTracksChanged() { root.applySubtitleSelection() }
+        function onTracksChanged() {
+            // When the selection is not ours the arrow points the other way and
+            // the panel follows mpv instead.
+            if (root.subtitleSelectionIsOurs)
+                root.applySubtitleSelection()
+            else
+                root.syncPanelToSubtitleTrack()
+            root.applyPreferredAudioTrack()
+        }
         function onSubtitleTrackChanged() { root.syncPanelToSubtitleTrack() }
     }
 
     function trackLabel(t) {
         var parts = []
-        if (t.language !== undefined && t.language !== "")
-            parts.push(t.language)
+        if (t.language !== undefined && t.language !== "") {
+            // The name, not mpv's two-letter code: this menu read "en · SDH"
+            // while the browser's tab beside it read "ENG SDH" for one track.
+            var named = subs.languageName(t.language)
+            parts.push(named !== "" ? named : t.language)
+        }
         if (t.title !== undefined && t.title !== "")
             parts.push(t.title)
         if (parts.length === 0)
@@ -690,8 +904,8 @@ ApplicationWindow {
     }
 
     // ---- notices --------------------------------------------------------
-    // A file that will not play used to leave a black picture and a line in a
-    // log nobody is reading.
+    // So a file that will not play says so, rather than leaving a black picture
+    // and a line in a log.
     property string noticeText: ""
     property string noticeSeverity: "info"
     property string noticeAction: ""
@@ -705,9 +919,8 @@ ApplicationWindow {
 
     Timer {
         id: noticeTimer
-        // Long enough to read a sentence, short enough that it is gone by the
-        // time the next file is open. Paused while the banner is hovered, so it
-        // cannot vanish out from under someone reading it.
+        // Paused while the banner is hovered, so it cannot vanish out from
+        // under someone reading it.
         interval: 9000
         running: false
         onTriggered: {
@@ -738,6 +951,48 @@ ApplicationWindow {
         osdTimer.restart()
     }
     Timer { id: osdTimer; interval: 1100; onTriggered: root.osdText = "" }
+
+    // ---- the resize readout ----------------------------------------------
+    // Appended to the readout when we are the ones resizing, and cleared once
+    // said: the next resize is a drag until proven otherwise.
+    property string resizeReason: ""
+    // Or every launch opens with an OSD over the first frame.
+    property bool sizeSettled: false
+    property size announcedPicture: Qt.size(0, 0)
+
+    function announceSize() {
+        var why = root.resizeReason
+        root.resizeReason = ""
+        if (!root.sizeSettled || !prefs.announceResize || root.fullscreen)
+            return
+        // Showing or hiding the panel moves the window and leaves the picture
+        // alone, so there is nothing to report -- and reporting it anyway would
+        // put an OSD over every Tab press.
+        if (why === "" && root.pictureWidth === root.announcedPicture.width
+                       && root.pictureHeight === root.announcedPicture.height)
+            return
+        root.announcedPicture = Qt.size(root.pictureWidth, root.pictureHeight)
+        root.osd(root.pictureWidth + " × " + root.pictureHeight
+                 + (why === "" ? "" : "  ·  " + why))
+    }
+
+    // Debounced: a drag changes the size every frame, and a programmed resize
+    // sets width and height separately, so announcing on the change itself
+    // would report the half-applied size.
+    Timer {
+        id: resizeAnnounce
+        interval: 120
+        onTriggered: root.announceSize()
+    }
+    onWidthChanged: resizeAnnounce.restart()
+    onHeightChanged: resizeAnnounce.restart()
+    // The picture can also move without the window: a panel toggle the screen
+    // has no room to absorb, or one while maximised.
+    Connections {
+        target: video
+        function onWidthChanged() { resizeAnnounce.restart() }
+        function onHeightChanged() { resizeAnnounce.restart() }
+    }
 
     // ---- actions ---------------------------------------------------------
     // Every keyboard action in one switch, driven by the registry rather than by
@@ -780,21 +1035,25 @@ ApplicationWindow {
             root.osd(mpv.muted ? "Muted" : Math.round(mpv.volume) + "%"); break
         case "audio-delay-up": root.nudgeAudioDelay(0.05); break
         case "audio-delay-down": root.nudgeAudioDelay(-0.05); break
+        case "audio-cycle": root.cycleAudioTrack(); break
 
         case "subtitle-toggle":
             mpv.setSubtitleVisible(!mpv.subtitleVisible)
             root.osd(mpv.subtitleVisible ? "Subtitles on" : "Subtitles off"); break
+        case "subtitle-cycle": root.cycleSubtitleTrack(); break
         case "sub-delay-up": root.nudgeSubtitleDelay(0.05); break
         case "sub-delay-down": root.nudgeSubtitleDelay(-0.05); break
         case "sub-delay-reset":
             mpv.setSubtitleDelay(0); root.osd("Subtitle delay 0.000 s"); break
         case "sub-sync-here": root.syncSubtitlesToCurrentRow(); break
 
-        case "panel-toggle": root.panelVisible = !root.panelVisible; break
-        case "panel-detach": root.panelDetached = !root.panelDetached; break
+        case "panel-toggle":
+            root.setPanelShown(!root.panelVisible, root.panelDetached); break
+        case "panel-detach":
+            root.setPanelShown(root.panelVisible, !root.panelDetached); break
         case "search-focus":
             if (!root.panelVisible)
-                root.panelVisible = true
+                root.setPanelShown(true, root.panelDetached)
             if (root.activePanel !== null)
                 root.activePanel.focusSearch()
             break
@@ -819,6 +1078,12 @@ ApplicationWindow {
         case "loop-this-cue": root.loopCurrentCue(); break
 
         case "fullscreen": case "fullscreen-alt": root.toggleFullscreen(); break
+        case "zoom-half": root.zoomTo(0.5); break
+        case "zoom-one": root.zoomTo(1.0); break
+        case "zoom-one-half": root.zoomTo(1.5); break
+        case "zoom-double": root.zoomTo(2.0); break
+        case "zoom-default": root.zoomToDefault(); break
+        case "zoom-save": root.saveDefaultPictureSize(); break
         case "leave-fullscreen":
             // Esc means "get this out of the way", and what is in the way
             // depends on where it is: fullscreen comes down to a window, and a
@@ -1055,6 +1320,8 @@ ApplicationWindow {
             prefs: root.prefsStore
             subStyle: root.subStyleStore
             shortcuts: root.shortcutStore
+            history: root.historyStore
+            manager: root.subtitleManager
             qtVersion: qtRuntimeVersion
             onClosing: settingsLoader.active = false
             onSubtitleStyleChanged: root.applySubtitleStyle()
@@ -1082,7 +1349,8 @@ ApplicationWindow {
             followOffOnScroll: root.prefsStore.followOffOnScroll
             onSeekRequested: (seconds) => root.mpv.seek(seconds)
             onTrackActivated: (index) => root.selectTrack(index)
-            onDetachToggled: root.panelDetached = !root.panelDetached
+            onDetachToggled: root.setPanelShown(root.panelVisible,
+                                                !root.panelDetached)
             onExportRequested: root.exportCurrentTrack()
             onSettingsRequested: settingsLoader.active = true
             onOpenSubtitleRequested: subtitleDialog.open()
@@ -1121,7 +1389,7 @@ ApplicationWindow {
         // Closing the window is the same statement as pressing Dock.
         onClosing: {
             root.savePreferences()
-            root.panelDetached = false
+            root.setPanelShown(root.panelVisible, false)
         }
 
         Component.onCompleted: {
@@ -1186,7 +1454,7 @@ ApplicationWindow {
         // The default handle is a hairline: hard to hit with a mouse and
         // invisible against a dark theme.
         handle: Rectangle {
-            implicitWidth: 8
+            implicitWidth: root.splitHandleWidth
             color: "transparent"
 
             // The affordance that was missing: without a resize cursor the
@@ -1267,7 +1535,10 @@ ApplicationWindow {
                     // replaces the default rather than adding to it, and
                     // dropping LeftButton would take the double-click with it.
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onPositionChanged: chromeTimer.restart()
+                    onPositionChanged: {
+                        chromeTimer.restart()
+                        pointerTimer.restart()
+                    }
                     onDoubleClicked: root.toggleFullscreen()
                     // The same list the transport's overflow button opens, at
                     // the cursor. Every other player puts it here, and reaching
@@ -1277,7 +1548,7 @@ ApplicationWindow {
                         if (mouse.button === Qt.RightButton)
                             transportBar.popupOverflowAt(videoMouse, mouse.x, mouse.y)
                     }
-                    cursorShape: root.showChrome ? Qt.ArrowCursor : Qt.BlankCursor
+                    cursorShape: root.showPointer ? Qt.ArrowCursor : Qt.BlankCursor
 
                     // The wheel over the picture is volume, in the step the
                     // arrow keys use and with the same readout, so the two are
@@ -1298,12 +1569,10 @@ ApplicationWindow {
 
                         onWheel: (event) => {
                             volumeWheel.pending += event.angleDelta.y
-                            // Truncated toward zero, so a half-notch of scroll
-                            // is held rather than rounded into a step nobody
-                            // asked for. This is also what makes a sideways
-                            // scroll harmless: it contributes no vertical
-                            // movement, so it can never reach a whole notch on
-                            // its own and be read as a turn downwards.
+                            // Truncated toward zero, so a half-notch is held
+                            // rather than rounded into a step. It is also what
+                            // makes a sideways scroll harmless: no vertical
+                            // movement can never reach a whole notch.
                             var notches = Math.trunc(volumeWheel.pending / 120)
                             if (notches === 0)
                                 return
@@ -1329,8 +1598,7 @@ ApplicationWindow {
                     onActionTriggered: openDialog.open()
                 }
 
-                // Drop feedback. The DropArea used to accept a file with no
-                // visual response at all -- the cursor was the only hint.
+                // Drop feedback, so the cursor is not the only hint.
                 Rectangle {
                     anchors.fill: parent
                     visible: dropArea.containsDrag
@@ -1431,7 +1699,7 @@ ApplicationWindow {
         // detached, and only one instance may exist at a time.
         Loader {
             id: dockedPanel
-            SplitView.preferredWidth: 360
+            SplitView.preferredWidth: root.defaultPanelWidth
             SplitView.minimumWidth: 240
             SplitView.maximumWidth: 720
             visible: root.panelVisible && !root.panelDetached
@@ -1467,7 +1735,10 @@ ApplicationWindow {
 
         onAction: (id) => root.dispatch(id)
         onSeekRequested: (seconds) => root.mpv.seek(seconds)
-        onAudioTrackPicked: (id) => root.mpv.setAudioTrack(id)
+        onAudioTrackPicked: (id) => {
+            root.mpv.setAudioTrack(id)
+            root.rememberAudioChoice(id)
+        }
         onSubtitleTrackPicked: (track) => {
             if (track === null) {
                 root.mpv.setSubtitleTrack(-1)

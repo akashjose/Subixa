@@ -14,27 +14,14 @@
 
 struct mpv_handle;
 
-// Playback, as a plain QObject.
+// Playback, as a plain QObject. The video surface is MpvVideoItem, which takes
+// one of these as a property and owns only the render context and framebuffer.
 //
-// This used to be one class with the video surface, which meant the mpv handle
-// was owned by a scene-graph item. Three things followed from that and all of
-// them were wrong:
-//
-//   * Teardown ran in the wrong order. Qt destroys a QQuickFramebufferObject's
-//     Renderer on the render thread *after* the item's own destructor, so the
-//     handle was destroyed while the render context that referenced it was
-//     still alive -- the reverse of libmpv's documented requirement. Now the
-//     engine is created in main() ahead of the QML engine, so it outlives every
-//     item that draws from it and the ordering is correct by construction
-//     rather than by care.
-//   * Nothing about playback could be tested without a window, because the
-//     class *was* a window's worth of machinery. Everything here runs under
-//     vo=null in a test.
-//   * Every new player feature -- A-B loop, sync offset, screenshots, filters --
-//     had to be bolted onto a QQuickItem to reach mpv at all.
-//
-// The video surface is MpvVideoItem, which takes one of these as a property and
-// owns only the render context and the framebuffer.
+// Keeping the two apart is load-bearing: main() creates the engine ahead of the
+// QML engine so it outlives every item that draws from it, which is libmpv's
+// documented requirement and one a scene-graph item cannot honour -- Qt destroys
+// a QQuickFramebufferObject's Renderer after the item's own destructor.
+// docs/architecture.md has the rest of the reasoning.
 class MpvEngine : public QObject
 {
     Q_OBJECT
@@ -61,6 +48,9 @@ class MpvEngine : public QObject
     // video *track*: cover art in a music file is one, and treating it as video
     // would mean an album pauses itself the moment the window is minimised.
     Q_PROPERTY(bool hasVideo READ hasVideo NOTIFY hasVideoChanged)
+    // dwidth/dheight, the *display* size, so an anamorphic file reports the
+    // shape it is meant to be seen at. What the zoom presets scale against.
+    Q_PROPERTY(QSize videoSize READ videoSize NOTIFY videoSizeChanged)
     // Selected sid/aid, or -1 for off. -1 rather than mpv's "no" so QML can
     // compare with an integer.
     Q_PROPERTY(int subtitleTrack READ subtitleTrack NOTIFY subtitleTrackChanged)
@@ -192,6 +182,20 @@ public:
     // from mpv's side of the bridge -- ff-index, or the filename mpv loaded.
     Q_INVOKABLE QVariantMap subtitleHistoryEntry(const QVariantMap &track) const;
 
+    // The audio track to play, as an mpv id, or -1 for "leave mpv's own choice
+    // alone". `remembered` is PlaybackHistory::audioFor() and `preferences`
+    // PlaybackHistory::preferredTracks("audio").
+    Q_INVOKABLE int preferredAudioTrack(const QVariantMap &remembered,
+                                        const QVariantList &preferences) const;
+
+    // The track after `id` among this file's tracks of `type` ("audio" or
+    // "sub"), wrapping at the end, or -1 when there is nothing to move to.
+    // mpv's ids are neither contiguous nor ordered, so this is a search.
+    Q_INVOKABLE int nextTrackOfType(const QString &type, int id) const;
+
+    // The track carrying `id`, or an empty map.
+    Q_INVOKABLE QVariantMap trackById(int id) const;
+
     // ---- timing -------------------------------------------------------
     Q_INVOKABLE void setSubtitleDelay(double seconds);
     Q_INVOKABLE void adjustSubtitleDelay(double deltaSeconds);
@@ -295,8 +299,10 @@ private:
     // dropped. mpv returning an error is the only signal that, say, a sub-add of
     // a malformed file did nothing.
     bool checked(int rc, const QString &what);
-    void setPropertyDouble(const QString &name, double value, const QString &what);
-    void setPropertyFlag(const QString &name, bool value, const QString &what);
+    // Both report whether mpv took the value, so a setter knows whether it may
+    // cache what it just sent.
+    bool setPropertyDouble(const QString &name, double value, const QString &what);
+    bool setPropertyFlag(const QString &name, bool value, const QString &what);
     void applyHardwareDecoding();
     void applySoftwareRasterizerWorkaround();
 

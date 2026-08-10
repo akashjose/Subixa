@@ -13,12 +13,6 @@ import Subixa
 // this open beside the player, not blocking it. Everything applies live and
 // there is no OK button -- a settings dialog with Apply/Cancel is a promise to
 // roll back that this app has no mechanism to keep.
-//
-// It exists at all because the player had no settings surface whatsoever.
-// Subtitle appearance -- the single thing users change most in any player, and
-// the thing a subtitle-reading app most obviously needs -- was not configurable,
-// and everything that was lived behind a 10px "More" button or a key nobody
-// could discover.
 Window {
     id: win
 
@@ -27,6 +21,10 @@ Window {
     required property var prefs
     required property var subStyle
     required property var shortcuts
+    // Read directly rather than mirrored into `prefs`: the track preferences
+    // live in PlaybackHistory's groups, not in the QML Settings block.
+    required property var history
+    required property var manager
     // qVersion() from C++, because QML cannot ask: Qt.application.version is
     // this application's version, which is how the About card once printed
     // "Built on Qt 0.5.0" without anyone noticing it was wrong.
@@ -210,6 +208,17 @@ Window {
                     }
 
                     FormRow {
+                        label: "Remember the audio track per file"
+                        help: "Reopen a film on the track you were listening "
+                              + "to. Files with an English and a Japanese track "
+                              + "stop having to be told twice."
+                        AppSwitch {
+                            checked: win.prefs.rememberAudioTrack
+                            onToggled: win.prefs.rememberAudioTrack = checked
+                        }
+                    }
+
+                    FormRow {
                         label: "Pause when the window is minimised"
                         help: "Only films. Music keeps playing, since minimising "
                               + "is how an album is put on in the background."
@@ -299,6 +308,19 @@ Window {
 
                 SectionCard {
                     visible: win.page === 0
+                    title: "Audio track"
+
+                    TrackPreference {
+                        Layout.fillWidth: true
+                        history: win.history
+                        manager: win.manager
+                        type: "audio"
+                        hasVisualImpaired: true
+                    }
+                }
+
+                SectionCard {
+                    visible: win.page === 0
                     title: "Picture"
 
                     Repeater {
@@ -325,6 +347,20 @@ Window {
                 }
 
                 // ================= SUBTITLES =================
+                SectionCard {
+                    visible: win.page === 1
+                    title: "Subtitle track"
+
+                    TrackPreference {
+                        Layout.fillWidth: true
+                        history: win.history
+                        manager: win.manager
+                        type: "subtitle"
+                        hasForced: true
+                        hasHearingImpaired: true
+                    }
+                }
+
                 SectionCard {
                     visible: win.page === 1
                     title: "Appearance on the video"
@@ -814,17 +850,60 @@ Window {
                     }
 
                     FormRow {
-                        label: "Window size"
-                        help: "The size a new window opens at."
-                        readout: win.player.width + "×" + win.player.height
+                        label: "Picture size"
+                        help: "The video itself, which is the size everything "
+                              + "here means. The window around it is this plus "
+                              + "the transport bar, and the browser while it is "
+                              + "docked."
+                        readout: win.player.pictureWidth + "×"
+                                 + win.player.pictureHeight
                         RowLayout {
                             spacing: Theme.space.sm
                             TextButton {
-                                text: "Reset to " + win.player.defaultWindowWidth
-                                      + "×" + win.player.defaultWindowHeight
+                                text: "Reset to "
+                                      + win.player.defaultPictureWidth + "×"
+                                      + win.player.defaultPictureHeight
                                 variant: "tonal"
-                                onClicked: win.player.resetWindowSize()
+                                onClicked: win.player.resetPictureSize()
                             }
+                        }
+                    }
+
+                    FormRow {
+                        label: "Your default size"
+                        help: "Where Ctrl+0 returns the picture to. Saved on "
+                              + "purpose rather than tracking wherever you last "
+                              + "left it, so it stays the size you meant."
+                        readout: win.prefs.savedPictureWidth > 0
+                                     ? win.prefs.savedPictureWidth + "×"
+                                       + win.prefs.savedPictureHeight
+                                     : "not set"
+                        RowLayout {
+                            spacing: Theme.space.sm
+                            TextButton {
+                                text: "Save " + win.player.pictureWidth + "×"
+                                      + win.player.pictureHeight
+                                variant: "tonal"
+                                onClicked: win.player.saveDefaultPictureSize()
+                            }
+                            TextButton {
+                                text: "Clear"
+                                enabled: win.prefs.savedPictureWidth > 0
+                                onClicked: {
+                                    win.prefs.savedPictureWidth = -1
+                                    win.prefs.savedPictureHeight = -1
+                                }
+                            }
+                        }
+                    }
+
+                    FormRow {
+                        label: "Announce the size when resizing"
+                        help: "Shows the picture's size over the video while the "
+                              + "window is being resized, and after a zoom key."
+                        AppSwitch {
+                            checked: win.prefs.announceResize
+                            onToggled: win.prefs.announceResize = checked
                         }
                     }
 

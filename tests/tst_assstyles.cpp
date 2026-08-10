@@ -94,7 +94,7 @@ private slots:
     void anUnknownStyleNameRendersPlain();
     void theTableSurvivesTheContainer();
     void strikeOutOverrideIsNotAShadowDepth();
-    void aVersionTwoCacheEntryIsRefused();
+    void anOlderCacheEntryIsRefused();
 };
 
 // The Format: line says which column is which, and files do reorder it -- the
@@ -411,11 +411,12 @@ void TstAssStyles::strikeOutOverrideIsNotAShadowDepth()
 }
 
 // Trap 14: an extractor change without a cache version bump serves the old text
-// forever. Version 3 is that bump, and the mechanism is one integer -- so it is
-// worth an assertion that a version-2 entry is *refused* rather than read with
-// the new layout, which would take a per-cue style out of the next cue's
-// timestamp.
-void TstAssStyles::aVersionTwoCacheEntryIsRefused()
+// forever. The mechanism is one integer, so it is worth an assertion that an
+// entry written under an older version is *refused* rather than read with the
+// current layout, which would take a per-cue style out of the next cue's
+// timestamp. The expected version below moves with every bump on purpose: a
+// layout change that forgets to move it is exactly what this catches.
+void TstAssStyles::anOlderCacheEntryIsRefused()
 {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -465,7 +466,7 @@ void TstAssStyles::aVersionTwoCacheEntryIsRefused()
     }
     // magic is a big-endian quint32, then the version: byte 7 is its low octet.
     QVERIFY(bytes.size() > 8);
-    QCOMPARE(quint8(bytes.at(7)), quint8(3));
+    QCOMPARE(quint8(bytes.at(7)), quint8(4));
     bytes[7] = char(2);
     {
         QFile f(entry);
@@ -475,7 +476,7 @@ void TstAssStyles::aVersionTwoCacheEntryIsRefused()
 
     SubtitleTrackList stale;
     QVERIFY2(!cache.load(media, stamps, &stale),
-             "a version-2 entry was served: the format version does not gate reads, "
+             "an older entry was served: the format version does not gate reads, "
              "so every cue written before the styles table would be read with the "
              "new layout");
 }

@@ -190,11 +190,8 @@ MpvEngine::~MpvEngine()
 
     // Every render context must be freed before the handle is destroyed --
     // libmpv is explicit about the order and the reverse is a use-after-free on
-    // the render thread. The ordering holds because the engine is created in
-    // main() ahead of the QML engine, so the window (and with it the scene
-    // graph, which blocks on the render thread as it tears down) is gone by the
-    // time this runs. That is an invariant of main()'s declaration order and
-    // nothing else, so it is worth saying out loud when it stops being true.
+    // the render thread. This holds only because main() declares the engine
+    // ahead of the QML engine, so it is worth a warning when it stops being so.
     if (m_liveRenderContexts.loadAcquire() != 0) {
         qWarning("MpvEngine is being destroyed with %d render context(s) still "
                  "alive -- the mpv handle is about to be freed out from under "
@@ -261,23 +258,33 @@ bool MpvEngine::checked(int rc, const QString &what)
     return false;
 }
 
-void MpvEngine::setPropertyDouble(const QString &name, double value,
+// Every setter below caches the value it sent and emits, rather than waiting for
+// mpv to observe it back. The observation is real but it arrives a turn of the
+// event loop later -- the wakeup is a queued call -- so a caller that sets a
+// property and reads it in the same statement was seeing the value it had just
+// replaced. That is why the subtitle toggle announced the opposite of what it
+// did, and why a held volume key lost steps: each repeat computed from a figure
+// mpv had already moved past. The observer still runs and still wins; this only
+// closes the gap until it does.
+bool MpvEngine::setPropertyDouble(const QString &name, double value,
                                   const QString &what)
 {
     if (!m_mpv)
-        return;
+        return false;
     double v = value;
-    checked(mpv_set_property(m_mpv, name.toUtf8().constData(), MPV_FORMAT_DOUBLE, &v),
-            what);
+    return checked(
+        mpv_set_property(m_mpv, name.toUtf8().constData(), MPV_FORMAT_DOUBLE, &v),
+        what);
 }
 
-void MpvEngine::setPropertyFlag(const QString &name, bool value, const QString &what)
+bool MpvEngine::setPropertyFlag(const QString &name, bool value, const QString &what)
 {
     if (!m_mpv)
-        return;
+        return false;
     int flag = value ? 1 : 0;
-    checked(mpv_set_property(m_mpv, name.toUtf8().constData(), MPV_FORMAT_FLAG, &flag),
-            what);
+    return checked(
+        mpv_set_property(m_mpv, name.toUtf8().constData(), MPV_FORMAT_FLAG, &flag),
+        what);
 }
 
 void MpvEngine::handleMpvEvent(void *ev)
@@ -455,6 +462,15 @@ void MpvEngine::refreshTracks()
             in.value(QStringLiteral("default"), false).toBool();
         out[QStringLiteral("external")] =
             in.value(QStringLiteral("external"), false).toBool();
+        // The flavour flags, which the history matches on across files: a
+        // release tags its plain and SDH tracks with the same language, so the
+        // language alone cannot say which of them was chosen.
+        out[QStringLiteral("forced")] =
+            in.value(QStringLiteral("forced"), false).toBool();
+        out[QStringLiteral("hearingImpaired")] =
+            in.value(QStringLiteral("hearing-impaired"), false).toBool();
+        out[QStringLiteral("visualImpaired")] =
+            in.value(QStringLiteral("visual-impaired"), false).toBool();
         out[QStringLiteral("externalFilename")] =
             in.value(QStringLiteral("external-filename"));
         // mpv's own flag for a still it decoded out of a tag rather than a
@@ -689,27 +705,39 @@ void MpvEngine::setVolume(double volume)
 {
     // mpv will amplify past 100, and people expect it to -- quiet films are a
     // real thing. Capped at 150 so a keyboard repeat cannot walk it somewhere
-    // that clips badly.
-    setPropertyDouble(QStringLiteral("volume"), qBound(0.0, volume, 150.0),
-                      QStringLiteral("volume"));
+    // that clips badly. Cached after the bound, so a readback reports what was
+    // applied rather than what was asked for.
+    const double v = qBound(0.0, volume, 150.0);
+    if (setPropertyDouble(QStringLiteral("volume"), v, QStringLiteral("volume"))) {
+        m_volume = v;
+        emit volumeChanged();
+    }
 }
 
 void MpvEngine::toggleMute()
 {
-    command({QStringLiteral("cycle"), QStringLiteral("mute")});
+    // Setting the flag rather than cycling it, so the new value is known here
+    // and can be cached.
+    setMuted(!m_muted);
 }
 
 void MpvEngine::setMuted(bool muted)
 {
-    setPropertyFlag(QStringLiteral("mute"), muted, QStringLiteral("mute"));
+    if (setPropertyFlag(QStringLiteral("mute"), muted, QStringLiteral("mute"))) {
+        m_muted = muted;
+        emit mutedChanged();
+    }
 }
 
 void MpvEngine::setSpeed(double speed)
 {
     // Below ~0.25 audio filters start dropping out and above 4 it is unusable;
     // both ends are mpv's practical limits rather than hard ones.
-    setPropertyDouble(QStringLiteral("speed"), qBound(0.25, speed, 4.0),
-                      QStringLiteral("speed"));
+    const double v = qBound(0.25, speed, 4.0);
+    if (setPropertyDouble(QStringLiteral("speed"), v, QStringLiteral("speed"))) {
+        m_speed = v;
+        emit speedChanged();
+    }
 }
 
 // ---- tracks ------------------------------------------------------------
@@ -736,8 +764,11 @@ void MpvEngine::setAudioTrack(int id)
 
 void MpvEngine::setSubtitleVisible(bool visible)
 {
-    setPropertyFlag(QStringLiteral("sub-visibility"), visible,
-                    QStringLiteral("sub-visibility"));
+    if (setPropertyFlag(QStringLiteral("sub-visibility"), visible,
+                        QStringLiteral("sub-visibility"))) {
+        m_subtitleVisible = visible;
+        emit subtitleVisibleChanged();
+    }
 }
 
 bool MpvEngine::selectSubtitleStream(int ffIndex)
@@ -771,8 +802,7 @@ void MpvEngine::selectSubtitleFile(const QString &path)
 
 void MpvEngine::addSubtitleFile(const QString &path)
 {
-    // `select` rather than `cached`: the user just picked this file, so showing
-    // it is the whole point.
+    // `select` rather than `cached`: the user just picked this file.
     command({QStringLiteral("sub-add"), path, QStringLiteral("select")});
 }
 
@@ -791,14 +821,53 @@ QVariantMap MpvEngine::subtitleHistoryEntry(const QVariantMap &track) const
     return MpvTrackList::historyEntryForTrack(track);
 }
 
+int MpvEngine::preferredAudioTrack(const QVariantMap &remembered,
+                                   const QVariantList &preferences) const
+{
+    return MpvTrackList::preferredAudioId(m_tracks, remembered, preferences);
+}
+
+int MpvEngine::nextTrackOfType(const QString &type, int id) const
+{
+    const QVariantList tracks = MpvTrackList::tracksOfType(m_tracks, type.toUtf8().constData());
+    if (tracks.isEmpty())
+        return -1;
+
+    // Not found -- which includes the track being off at -1 -- starts at the
+    // beginning, so a first press turns something on.
+    int current = -1;
+    for (int i = 0; i < tracks.size(); ++i) {
+        if (tracks.at(i).toMap().value(QStringLiteral("id")).toInt() == id) {
+            current = i;
+            break;
+        }
+    }
+    const int next = (current + 1) % tracks.size();
+    return tracks.at(next).toMap().value(QStringLiteral("id")).toInt();
+}
+
+QVariantMap MpvEngine::trackById(int id) const
+{
+    for (const QVariant &entry : m_tracks) {
+        const QVariantMap track = entry.toMap();
+        if (track.value(QStringLiteral("id")).toInt() == id)
+            return track;
+    }
+    return {};
+}
+
 // ---- timing ------------------------------------------------------------
 
 void MpvEngine::setSubtitleDelay(double seconds)
 {
     // Wider than anyone should need, but a badly muxed broadcast capture can be
     // minutes out and refusing to express that is worse than allowing it.
-    setPropertyDouble(QStringLiteral("sub-delay"), qBound(-600.0, seconds, 600.0),
-                      QStringLiteral("sub-delay"));
+    const double v = qBound(-600.0, seconds, 600.0);
+    if (setPropertyDouble(QStringLiteral("sub-delay"), v,
+                          QStringLiteral("sub-delay"))) {
+        m_subtitleDelay = v;
+        emit subtitleDelayChanged();
+    }
 }
 
 void MpvEngine::adjustSubtitleDelay(double deltaSeconds)
@@ -808,8 +877,12 @@ void MpvEngine::adjustSubtitleDelay(double deltaSeconds)
 
 void MpvEngine::setAudioDelay(double seconds)
 {
-    setPropertyDouble(QStringLiteral("audio-delay"), qBound(-60.0, seconds, 60.0),
-                      QStringLiteral("audio-delay"));
+    const double v = qBound(-60.0, seconds, 60.0);
+    if (setPropertyDouble(QStringLiteral("audio-delay"), v,
+                          QStringLiteral("audio-delay"))) {
+        m_audioDelay = v;
+        emit audioDelayChanged();
+    }
 }
 
 // ---- A-B loop ----------------------------------------------------------
