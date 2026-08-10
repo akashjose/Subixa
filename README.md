@@ -1,5 +1,10 @@
 # Subixa
 
+[![CI](https://github.com/akashjose/Subixa/actions/workflows/ci.yml/badge.svg)](https://github.com/akashjose/Subixa/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/akashjose/Subixa)](https://github.com/akashjose/Subixa/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/akashjose/Subixa/total)](https://github.com/akashjose/Subixa/releases)
+[![License](https://img.shields.io/github/license/akashjose/Subixa)](LICENSE)
+
 A desktop video player with a docked, searchable subtitle list.
 
 Every line of every subtitle track, timestamped. Click a line to jump to it,
@@ -13,14 +18,23 @@ happen to have them switched on.
 *The highlighted row and the line on the picture are the same cue — the list
 follows playback, and clicking any row seeks there.*
 
+## Download
+
+Three builds are attached to every release, each with a `.sha256` beside it.
+Take them from the [latest release](https://github.com/akashjose/Subixa/releases/latest):
+
+| Platform | File | |
+|---|---|---|
+| Linux | `Subixa-<version>-x86_64.AppImage` | needs glibc 2.39 or newer — Ubuntu 24.04+, Debian 13+, Fedora 40+ |
+| Windows | `subixa-<version>-win64-setup.exe` | installer: Start Menu shortcuts and an uninstaller |
+| Windows | `Subixa-<version>-win64-portable.zip` | no install, one versioned directory at the root |
+
 > [!IMPORTANT]
-> Subixa is pre-release. Downloads, once a release is cut, are on the
-> [Releases](https://github.com/akashjose/Subixa/releases) page: an AppImage for
-> Linux, and a portable zip and an installer for Windows. There is no `.deb` and
-> no Flatpak, and the AppImage needs glibc 2.39 or newer — Ubuntu 24.04+, Debian
-> 13+, Fedora 40+. The features are finished; what is left is release hardening.
-> Building from source works on any of the three targets, and on Linux it means
-> building three media libraries first.
+> Subixa is pre-release: the features are finished, and what is left is release
+> hardening.
+
+There is no `.deb` and no Flatpak. Building from source works on any of the
+three targets, and on Linux it means building three media libraries first.
 
 ## Why this exists
 
