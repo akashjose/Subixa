@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/akashjose/Subixa/compare/v0.6.1...v0.7.0) (2026-08-10)
+
+
+### Features
+
+* remember tracks across files, and size the window by the picture ([d7c5347](https://github.com/akashjose/Subixa/commit/d7c5347d3777bbc0e097e87b4e92b0148c5f09f2))
+* remember tracks across files, and size the window by the picture ([a481aed](https://github.com/akashjose/Subixa/commit/a481aed8e198623074d94edbe8e4a6518dbc6323)), closes [#10](https://github.com/akashjose/Subixa/issues/10)
+
 ## [0.6.1](https://github.com/akashjose/Subixa/compare/v0.6.0...v0.6.1) (2026-08-05)
 
 
