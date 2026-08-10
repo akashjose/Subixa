@@ -51,12 +51,15 @@ const QVector<ShortcutRegistry::Action> &ShortcutRegistry::actions()
         {"mute",            "Mute",                     "Audio",    "M",            false},
         {"audio-delay-up",  "Audio later",              "Audio",    "Ctrl+Shift+Right", true},
         {"audio-delay-down","Audio earlier",            "Audio",    "Ctrl+Shift+Left",  true},
+        {"audio-cycle",     "Next audio track",         "Audio",    "Ctrl+A",       true},
 
         // Subtitles
         {"subtitle-toggle", "Show / hide subtitles",    "Subtitles", "V",           false},
+        {"subtitle-cycle",  "Next subtitle track",      "Subtitles", "Shift+V",     false},
         {"sub-delay-up",    "Subtitles later",          "Subtitles", "Ctrl+]",      true},
         {"sub-delay-down",  "Subtitles earlier",        "Subtitles", "Ctrl+[",      true},
-        {"sub-delay-reset", "Reset subtitle timing",    "Subtitles", "Ctrl+0",      true},
+        // Ctrl+0 until the zoom presets took Ctrl+0..4 as a set.
+        {"sub-delay-reset", "Reset subtitle timing",    "Subtitles", "Ctrl+Shift+0", true},
         {"sub-sync-here",   "Sync subtitles to this line", "Subtitles", "Ctrl+Shift+S", true},
 
         // Browser
@@ -80,6 +83,14 @@ const QVector<ShortcutRegistry::Action> &ShortcutRegistry::actions()
         {"fullscreen",      "Fullscreen",               "Window",   "F",            false},
         {"fullscreen-alt",  "Fullscreen (alternate)",   "Window",   "F11",          true},
         {"leave-fullscreen","Leave fullscreen, or minimise", "Window", "Esc",       false},
+        // Percentages of the video's own size: 100% is one video pixel per
+        // screen pixel.
+        {"zoom-half",       "Picture at 50%",           "Window",   "Ctrl+1",       true},
+        {"zoom-one",        "Picture at 100%",          "Window",   "Ctrl+2",       true},
+        {"zoom-one-half",   "Picture at 150%",          "Window",   "Ctrl+3",       true},
+        {"zoom-double",     "Picture at 200%",          "Window",   "Ctrl+4",       true},
+        {"zoom-default",    "Picture at your default size", "Window", "Ctrl+0",     true},
+        {"zoom-save",       "Save this picture size as your default", "Window", "Ctrl+Shift+1", true},
 
         // Application
         {"open-file",       "Open a file",              "Application", "Ctrl+O",    true},

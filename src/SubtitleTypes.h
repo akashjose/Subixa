@@ -80,6 +80,8 @@ struct SubtitleTrack
     QString codecName;
     SubtitleKind kind = SubtitleKind::Unknown;
     bool sidecar = false;  // came from a file next to the video, not from it
+    bool forced = false;
+    bool hearingImpaired = false;  // SDH, CC, or the container's own flag
     QString sourcePath;
     QString note;  // why a track has no lines, when that needs explaining
     // The track's [V4+ Styles] table, by style name. Empty for a format that has

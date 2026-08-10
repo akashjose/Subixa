@@ -176,6 +176,7 @@ private slots:
     void wholesaleOffsetRebasesToZero();
     void subtitlesAlreadyAtZeroAreNotRebased();
     void sidecarsAreFoundNextToTheVideo();
+    void sidecarNamesSayWhatKindOfTrackTheyAre();
     void nonAsciiFilenamesReachTheDecoder();
 
     void cacheReproducesTheParseExactly();
@@ -375,6 +376,58 @@ void TstSubtitles::sidecarsAreFoundNextToTheVideo()
     // The language suffix in sidecar.fr.srt is where a sidecar's tag comes from.
     QVERIFY(trackByLanguage(tracks, QStringLiteral("fr"))
             || trackByLanguage(tracks, QStringLiteral("fre")));
+}
+
+void TstSubtitles::sidecarNamesSayWhatKindOfTrackTheyAre()
+{
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+
+    const QString video = media.filePath(QStringLiteral("film.mkv"));
+    QVERIFY(QFile::copy(fixture(QStringLiteral("subs.mkv")), video));
+
+    const auto writeSidecar = [&media](const QString &name) {
+        QFile srt(media.filePath(name));
+        QVERIFY(srt.open(QIODevice::WriteOnly));
+        srt.write("1\n00:00:01,000 --> 00:00:03,000\nA line.\n\n");
+    };
+    writeSidecar(QStringLiteral("film.eng.forced.srt"));
+    writeSidecar(QStringLiteral("film.eng.sdh.srt"));
+    // "hi" reads two ways, and only where it sits says which: here it is the
+    // language tag, so this is Hindi and not English hearing-impaired.
+    writeSidecar(QStringLiteral("film.hi.srt"));
+    writeSidecar(QStringLiteral("film.spa.hi.srt"));
+
+    const SubtitleTrackList tracks = parse(video);
+    const auto sidecarNamed = [&tracks](const QString &file) -> const SubtitleTrack * {
+        for (const SubtitleTrack &t : tracks) {
+            if (t.sidecar && QFileInfo(t.sourcePath).fileName() == file)
+                return &t;
+        }
+        return nullptr;
+    };
+
+    const SubtitleTrack *forced = sidecarNamed(QStringLiteral("film.eng.forced.srt"));
+    QVERIFY(forced);
+    QVERIFY(forced->forced);
+    QVERIFY(!forced->hearingImpaired);
+
+    const SubtitleTrack *sdh = sidecarNamed(QStringLiteral("film.eng.sdh.srt"));
+    QVERIFY(sdh);
+    QVERIFY(sdh->hearingImpaired);
+    QVERIFY(!sdh->forced);
+
+    const SubtitleTrack *hindi = sidecarNamed(QStringLiteral("film.hi.srt"));
+    QVERIFY(hindi);
+    QCOMPARE(hindi->language, QStringLiteral("hi"));
+    QVERIFY2(!hindi->hearingImpaired,
+             "a Hindi sidecar was read as hearing-impaired");
+
+    // The same tag one place further along, where nothing else claims it.
+    const SubtitleTrack *spanishSdh = sidecarNamed(QStringLiteral("film.spa.hi.srt"));
+    QVERIFY(spanishSdh);
+    QCOMPARE(spanishSdh->language, QStringLiteral("spa"));
+    QVERIFY(spanishSdh->hearingImpaired);
 }
 
 // The path handed to avformat_open_input has to be UTF-8 on every platform.
@@ -1045,6 +1098,8 @@ void TstSubtitles::hostileCacheCountsAreRefused()
     // them should fail loudly rather than leave the test poisoning padding.
     // Version 3 adding the [V4+ Styles] table is exactly that -- it put a third
     // count between the track header and the cues, and this walk went red.
+    // Version 4 did it again on a smaller scale: two flavour flags at the end of
+    // the track header moved every count after them by two bytes.
     qint64 trackCountAt = -1;
     qint64 styleCountAt = -1;
     qint64 lineCountAt = -1;
@@ -1075,9 +1130,9 @@ void TstSubtitles::hostileCacheCountsAreRefused()
         // The first track's fields, up to its cue count.
         qint32 id = 0, streamIndex = 0, kind = 0;
         QString language, title, codecName, sourcePath, note;
-        bool sidecar = false;
+        bool sidecar = false, forced = false, hearingImpaired = false;
         in >> id >> streamIndex >> language >> title >> codecName >> kind
-            >> sidecar >> sourcePath >> note;
+            >> sidecar >> sourcePath >> note >> forced >> hearingImpaired;
         QCOMPARE(in.status(), QDataStream::Ok);
 
         styleCountAt = buffer.pos();

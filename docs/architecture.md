@@ -207,22 +207,61 @@ makes that safe.
   while `Windowed` is what stops a fullscreen session writing the screen's size back as the
   window size. Volume and mute are written through immediately instead, so a `kill -9`
   cannot lose them.
-- *Per file*, in `PlaybackHistory`: the resume position, and now **which subtitle track was
-  being read**. In separate groups on purpose — finishing a film clears its position by
-  design, and that must not also forget the track. Embedded tracks are stored by ffmpeg
-  stream index and sidecars by absolute path, the same split `MpvEngine` uses to select
-  them, because mpv's own numbering follows from neither.
 
-A new file with no entry of its own falls back to the language last chosen anywhere, then
-to the first browsable track. Only an explicit choice is remembered — a tab click or the
-transport's Subs menu — never what the sync handlers do, or mpv's default would overwrite
-the reader's track on every open.
+  The opening geometry is the only size stored as a *window*, because it is restored
+  before there is a layout to measure chrome against; the panel's state is restored
+  beside it, so the picture comes back the size it was. Nothing else is a window size —
+  there is no default window size, only a default *picture* of 1920×1080 with the
+  browser docked beside it, and the window is whatever holds that. Every size the
+  player states is the picture: the zoom presets, the resize readout, the reset button,
+  the saved default behind Ctrl+0. `dockedPanelSpan()` and `transportSpan()` are the
+  two halves of the conversion, and the first is what lets a Tab or a Ctrl+D give the
+  window the width the browser released and hold the picture still. The panel span is
+  computed rather than measured on purpose: it has to be right in the same pass the
+  panel width changes in, which a measurement is not. Size and position restore as a
+  set: a half-restore left a stale size reopening forever with the switch off.
+- *Per file*, in `PlaybackHistory`: the resume position, **which subtitle track was being
+  read**, and **which audio track was playing**. In separate groups on purpose — finishing a
+  film clears its position by design, and that must not also forget the tracks. Embedded
+  tracks are stored by ffmpeg stream index and sidecars by absolute path, the same split
+  `MpvEngine` uses to select them, because mpv's own numbering follows from neither.
 
-Both restores are optional: *Resume where you left off* and *Remember the subtitle track
-per file*, under Settings → Playback, independent because finishing a film clears its
-position and must not forget the track. Off gates only the restore — recording continues,
-so nothing is lost to the period a toggle was off, and finish-clears-the-position keeps
-working either way.
+**Which track a new file opens on.** A file with no entry of its own is answered by a
+cross-file preference, held per stream type in three modes. *Follow the file* is the absence
+of an opinion; *learn* forms one by watching what gets chosen; *explicit* is an ordered list
+stated up front. Only an explicit choice is ever learned — a tab click, the transport menu,
+a cycle key — never what the sync handlers do, or mpv's default would overwrite the reader's
+track on every open.
+
+Three things about it are load-bearing:
+
+- **A preference is a language *and a flavour*.** A release ships plain English and English
+  SDH tagged alike, so language alone put the plain track up in the next episode however
+  deliberately SDH had been chosen in this one. `forced`, `hearingImpaired` and
+  `visualImpaired` come off the container's disposition bits, falling back to the track
+  title, which is where most releases actually say it.
+- **Within an entry the language is a requirement and the flavour a preference.** A file
+  whose only English track is plain still gets English rather than falling through to
+  another language; across entries, order decides.
+- **Not matching is not the same as matching nothing.** `preferredTrackChoice` returns
+  `matched` beside the index, because the panel must light *some* tab while mpv must be told
+  nothing. Pushing the fallback tab at mpv is exactly what *follow the file* asks us not to
+  do, and `Main.qml` gates on that flag rather than re-applying unconditionally.
+
+**One spelling of a language.** ffmpeg reports what the container holds (`eng`, `jpn`), mpv
+publishes two-letter codes (`en`, `ja`) and sometimes region-tagged ones (`es-419`), and the
+settings page offers a third list. `MpvTrackList::canonicalLanguage` folds all of them to
+ISO 639-2/B before anything is compared or stored. Without it an audio preference of `eng`
+matched no track mpv called `en` — the preference did nothing at all, on every file, which
+reads exactly like a feature that was never wired up.
+
+The restores are optional: *Resume where you left off*, *Remember the subtitle track per
+file* and *Remember the audio track per file*, under Settings → Playback, independent
+because finishing a film clears its position and must not forget the tracks. Off gates only
+the restore — recording continues, so nothing is lost to the period a toggle was off, and
+finish-clears-the-position keeps working either way. The per-file toggle and the mode are
+different questions: the toggle says whether *this film's* entry is honoured, the mode says
+what answers when there is none.
 
 **The browser shows the subtitler's own styling** (`SubtitleStyle`). `rawText` was kept per
 cue from the start for this: italics, bold and speaker colours carry meaning, and the list

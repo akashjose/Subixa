@@ -64,17 +64,27 @@ public:
     // parses sees an empty model rather than a dangling pointer.
     Q_INVOKABLE SubtitleLineModel *model(int trackId) const;
 
-    // Which track a newly parsed file should open on, as an index into tracks():
-    // the one last read in this very file, else the language last chosen
-    // anywhere, else the first browsable track, else -1.
+    // Which track a newly parsed file should open on, as { index, matched }:
+    // the one last read in this very file, else the first preference this file
+    // can satisfy, else the first browsable track with `matched` false, else
+    // index -1.
+    //
+    // `matched` false means nothing asked for this track and the tab is only
+    // showing something because a panel has to. Pushing that at mpv would
+    // override the track the release flagged.
     //
     // `remembered` is PlaybackHistory::subtitleFor() for this file and
-    // `preferredLanguage` its cross-file fallback, passed in as plain data so
-    // the store and the track list stay unaware of each other. The rule itself
-    // is MpvTrackList::preferredTrackIndex(), beside the mpv-side mapping it has
+    // `preferences` is PlaybackHistory::preferredTracks(), its cross-file
+    // fallback in order, passed in as plain data so the store and the track list
+    // stay unaware of each other. The rule itself is
+    // MpvTrackList::preferredTrackChoice(), beside the mpv-side mapping it has
     // to agree with about how a sidecar is named.
-    Q_INVOKABLE int preferredTrackIndex(const QVariantMap &remembered,
-                                        const QString &preferredLanguage) const;
+    Q_INVOKABLE QVariantMap preferredTrackChoice(const QVariantMap &remembered,
+                                                 const QVariantList &preferences) const;
+
+    // "eng" -> "English". Empty for a code QLocale does not know, which the
+    // caller shows as the raw code.
+    Q_INVOKABLE static QString languageName(const QString &code);
 
     Q_INVOKABLE static QString formatTimestamp(qint64 ms);
 

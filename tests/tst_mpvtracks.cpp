@@ -65,6 +65,11 @@ private slots:
     void opensOnTheTrackThisFileWasLeftOn();
     void aRememberedSidecarSurvivesBeingRenamed();
     void fallsBackToTheLanguageThenTheFirstTrack();
+    void carriesTheKindOfTrackForwardNotOnlyTheLanguage();
+    void walksThePreferenceListInOrder();
+    void aFallbackTabIsNotASelection();
+    void picksAnAudioTrackOrLeavesMpvAlone();
+    void oneSpellingOfALanguage();
     void skipsTracksTheBrowserCannotList();
     void findsTheTabForMpvsSubtitle();
     void storesAnMpvTrackTheWayTheHistoryKeepsIt();
@@ -515,7 +520,8 @@ namespace {
 // the reconciliation reads are set; the rest are labels for the tab bar.
 QVariantMap makeBrowserTrack(int streamIndex, const QString &language,
                              bool browsable = true,
-                             const QString &sidecarPath = QString())
+                             const QString &sidecarPath = QString(),
+                             bool forced = false, bool hearingImpaired = false)
 {
     QVariantMap track;
     track[QStringLiteral("streamIndex")] = streamIndex;
@@ -523,7 +529,33 @@ QVariantMap makeBrowserTrack(int streamIndex, const QString &language,
     track[QStringLiteral("browsable")] = browsable;
     track[QStringLiteral("sidecar")] = !sidecarPath.isEmpty();
     track[QStringLiteral("sourcePath")] = sidecarPath;
+    track[QStringLiteral("forced")] = forced;
+    track[QStringLiteral("hearingImpaired")] = hearingImpaired;
     return track;
+}
+
+// One entry of the cross-file preference: a kind of track, not only a language.
+QVariantMap preferenceEntry(const QString &language, bool forced = false,
+                            bool hearingImpaired = false,
+                            bool visualImpaired = false)
+{
+    QVariantMap out;
+    out[QStringLiteral("language")] = language;
+    out[QStringLiteral("forced")] = forced;
+    out[QStringLiteral("hearingImpaired")] = hearingImpaired;
+    out[QStringLiteral("visualImpaired")] = visualImpaired;
+    return out;
+}
+
+// What PlaybackHistory::preferredTracks() returns, for the ordinary one-entry
+// case. An empty language is no preference at all rather than an entry that
+// matches nothing -- the same distinction the store makes.
+QVariantList preferred(const QString &language, bool forced = false,
+                       bool hearingImpaired = false)
+{
+    if (language.isEmpty())
+        return {};
+    return QVariantList{preferenceEntry(language, forced, hearingImpaired)};
 }
 
 // What PlaybackHistory::subtitleFor() returns for a file a track has been chosen
@@ -552,13 +584,13 @@ void TstMpvTracks::opensOnTheTrackThisFileWasLeftOn()
     // would otherwise pick a different tab.
     QCOMPARE(MpvTrackList::preferredTrackIndex(
                  tracks, remembered(4, QString(), QStringLiteral("fre")),
-                 QStringLiteral("eng")),
+                 preferred(QStringLiteral("eng"))),
              2);
 
     // Stream index, not position: the two coincide nowhere here, which is the
     // whole reason the browser cannot just store a tab number.
     QCOMPARE(MpvTrackList::preferredTrackIndex(
-                 tracks, remembered(2, QString(), QStringLiteral("eng")), QString()),
+                 tracks, remembered(2, QString(), QStringLiteral("eng")), preferred(QString())),
              0);
 
     // Through QML the map makes a round trip via JavaScript, where every number
@@ -567,18 +599,18 @@ void TstMpvTracks::opensOnTheTrackThisFileWasLeftOn()
     viaJs[QStringLiteral("streamIndex")] = 3.0;
     viaJs[QStringLiteral("sidecarPath")] = QString();
     viaJs[QStringLiteral("language")] = QStringLiteral("jpn");
-    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, viaJs, QString()), 1);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, viaJs, preferred(QString())), 1);
 
     // A stream this file no longer has -- a remux, or an entry from a file that
     // has since been replaced -- falls through rather than selecting nothing.
     QCOMPARE(MpvTrackList::preferredTrackIndex(
                  tracks, remembered(9, QString(), QStringLiteral("jpn")),
-                 QStringLiteral("jpn")),
+                 preferred(QStringLiteral("jpn"))),
              1);
 
     // A file no track has ever been chosen in: no entry at all, which is not the
     // same as an entry saying stream 0.
-    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QString()), 0);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, preferred(QString())), 0);
 }
 
 void TstMpvTracks::aRememberedSidecarSurvivesBeingRenamed()
@@ -590,7 +622,7 @@ void TstMpvTracks::aRememberedSidecarSurvivesBeingRenamed()
     };
 
     QCOMPARE(MpvTrackList::preferredTrackIndex(
-                 tracks, remembered(-1, sidecar, QStringLiteral("fre")), QString()),
+                 tracks, remembered(-1, sidecar, QStringLiteral("fre")), preferred(QString())),
              1);
 
     // The store holds an absolute path and the extractor may hold whatever
@@ -599,7 +631,7 @@ void TstMpvTracks::aRememberedSidecarSurvivesBeingRenamed()
     // wrong tab.
     const QString messy = QStringLiteral(SUBIXA_TESTDATA_DIR "/../testdata/sidecar.srt");
     QCOMPARE(MpvTrackList::preferredTrackIndex(
-                 tracks, remembered(-1, messy, QStringLiteral("fre")), QString()),
+                 tracks, remembered(-1, messy, QStringLiteral("fre")), preferred(QString())),
              1);
 
     // The two branches must not leak into each other, and the list is ordered so
@@ -615,12 +647,12 @@ void TstMpvTracks::aRememberedSidecarSurvivesBeingRenamed()
     QCOMPARE(MpvTrackList::preferredTrackIndex(
                  sidecarFirst,
                  remembered(0, fixture(QStringLiteral("gone.srt")), QString()),
-                 QString()),
+                 preferred(QString())),
              0);
     // And the reverse: a remembered embedded stream must find the embedded track
     // rather than the sidecar sitting at stream 0 of its own file.
     QCOMPARE(MpvTrackList::preferredTrackIndex(
-                 sidecarFirst, remembered(0, QString(), QString()), QString()),
+                 sidecarFirst, remembered(0, QString(), QString()), preferred(QString())),
              1);
 }
 
@@ -632,14 +664,219 @@ void TstMpvTracks::fallsBackToTheLanguageThenTheFirstTrack()
         makeBrowserTrack(4, QStringLiteral("fre")),
     };
 
-    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QStringLiteral("fre")), 2);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, preferred(QStringLiteral("fre"))), 2);
     // Two tracks in one language is the ordinary case, not the exotic one -- a
-    // film with English and English SDH has it. The first wins; the language is
-    // a fallback, and there is nothing else to tell them apart.
-    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QStringLiteral("eng")), 0);
+    // film with English and English SDH has it. Nothing here tells these two
+    // apart, so the first wins.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, preferred(QStringLiteral("eng"))), 0);
     // A language the file does not carry, and no language at all.
-    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QStringLiteral("deu")), 0);
-    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QString()), 0);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, preferred(QStringLiteral("deu"))), 0);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, preferred(QString())), 0);
+}
+
+void TstMpvTracks::carriesTheKindOfTrackForwardNotOnlyTheLanguage()
+{
+    // The shape a release actually ships: plain and SDH in one language, tagged
+    // identically apart from the flag. Found on a 37-track file where choosing
+    // English SDH and letting the playlist advance put the plain English track
+    // up in the next episode, every time.
+    const QVariantList tracks = {
+        makeBrowserTrack(7, QStringLiteral("eng")),
+        makeBrowserTrack(8, QStringLiteral("eng"), true, QString(), false, true),
+        makeBrowserTrack(3, QStringLiteral("ita"), true, QString(), true, false),
+        makeBrowserTrack(6, QStringLiteral("ita"), true, QString(), false, true),
+    };
+
+    // The flavour picks between two tracks the language cannot separate, in
+    // either direction -- this is not "prefer SDH", it is "prefer what was
+    // chosen".
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, {}, preferred(QStringLiteral("eng"), false, true)),
+             1);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, {}, preferred(QStringLiteral("eng"))),
+             0);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, {}, preferred(QStringLiteral("ita"), true, false)),
+             2);
+
+    // The language is the requirement and the flavour only a preference: a file
+    // with no SDH track in the language still opens on that language rather than
+    // falling through to the first browsable track in another one.
+    const QVariantList noSdh = {
+        makeBrowserTrack(2, QStringLiteral("fre"), true, QString(), false, true),
+        makeBrowserTrack(3, QStringLiteral("eng")),
+        makeBrowserTrack(4, QStringLiteral("eng"), true, QString(), true, false),
+    };
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 noSdh, {}, preferred(QStringLiteral("eng"), false, true)),
+             1);
+
+    // And the track remembered for this very file still outranks all of it: an
+    // explicit choice here beats an inference from somewhere else.
+    QCOMPARE(MpvTrackList::preferredTrackIndex(
+                 tracks, remembered(7, QString(), QStringLiteral("eng")),
+                 preferred(QStringLiteral("eng"), false, true)),
+             0);
+}
+
+void TstMpvTracks::walksThePreferenceListInOrder()
+{
+    // A dual-audio release with English SDH beside plain English: the shape both
+    // halves of the preference exist for.
+    const QVariantList tracks = {
+        makeBrowserTrack(2, QStringLiteral("jpn")),
+        makeBrowserTrack(3, QStringLiteral("eng")),
+        makeBrowserTrack(4, QStringLiteral("eng"), true, QString(), false, true),
+    };
+
+    const QVariantList engSdhThenJpn = {
+        preferenceEntry(QStringLiteral("eng"), false, true),
+        preferenceEntry(QStringLiteral("jpn"))
+    };
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, engSdhThenJpn), 2);
+
+    // Order decides, and it decides *within* an entry too: putting English first
+    // means plain English beats Japanese, because a language match is what an
+    // entry is for and the flavour is only how it is refined.
+    const QVariantList engSdhThenJpnNoSdh = {
+        preferenceEntry(QStringLiteral("eng"), false, true),
+        preferenceEntry(QStringLiteral("jpn"))
+    };
+    const QVariantList noSdhAvailable = {
+        makeBrowserTrack(2, QStringLiteral("jpn")),
+        makeBrowserTrack(3, QStringLiteral("eng")),
+    };
+    QCOMPARE(MpvTrackList::preferredTrackIndex(noSdhAvailable, {}, engSdhThenJpnNoSdh), 1);
+
+    // Reversing the list reverses the answer -- otherwise the order is decoration.
+    const QVariantList jpnFirst = {
+        preferenceEntry(QStringLiteral("jpn")),
+        preferenceEntry(QStringLiteral("eng"), false, true)
+    };
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, jpnFirst), 0);
+
+    // An entry the file cannot satisfy is skipped rather than ending the walk.
+    const QVariantList missingFirst = {
+        preferenceEntry(QStringLiteral("fre")),
+        preferenceEntry(QStringLiteral("eng"), false, true)
+    };
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, missingFirst), 2);
+}
+
+void TstMpvTracks::aFallbackTabIsNotASelection()
+{
+    const QVariantList tracks = {
+        makeBrowserTrack(2, QStringLiteral("jpn")),
+        makeBrowserTrack(3, QStringLiteral("eng")),
+    };
+
+    // The distinction the whole "follow the file" mode rests on. With no
+    // preference the panel still has to light a tab -- it cannot show nothing --
+    // but that tab is not a choice, and pushing it at mpv would override the
+    // track the release itself flagged as default.
+    const MpvTrackList::TrackChoice fallback =
+        MpvTrackList::preferredTrackChoice(tracks, {}, {});
+    QCOMPARE(fallback.index, 0);
+    QVERIFY(!fallback.matched);
+
+    // A preference that matches is a choice.
+    const MpvTrackList::TrackChoice chosen = MpvTrackList::preferredTrackChoice(
+        tracks, {}, preferred(QStringLiteral("eng")));
+    QCOMPARE(chosen.index, 1);
+    QVERIFY(chosen.matched);
+
+    // So is this file's own remembered track.
+    const MpvTrackList::TrackChoice remembered = MpvTrackList::preferredTrackChoice(
+        tracks, ::remembered(3, QString(), QStringLiteral("eng")), {});
+    QCOMPARE(remembered.index, 1);
+    QVERIFY(remembered.matched);
+
+    // A preference naming a language the file has not got is not a match, so the
+    // file's default still stands rather than being overridden by the first tab.
+    const MpvTrackList::TrackChoice missed = MpvTrackList::preferredTrackChoice(
+        tracks, {}, preferred(QStringLiteral("fre")));
+    QCOMPARE(missed.index, 0);
+    QVERIFY(!missed.matched);
+}
+
+void TstMpvTracks::picksAnAudioTrackOrLeavesMpvAlone()
+{
+    // mpv's numbering: aid 1 and 2 over ffmpeg streams 1 and 2, with the
+    // Japanese track flagged default -- the dual-audio shape exactly.
+    QVariantMap japanese = makeTrack(1, "audio", 1, true);
+    japanese[QStringLiteral("language")] = QStringLiteral("ja");
+    QVariantMap english = makeTrack(2, "audio", 2);
+    english[QStringLiteral("language")] = QStringLiteral("en");
+    QVariantMap describes = makeTrack(3, "audio", 3);
+    describes[QStringLiteral("language")] = QStringLiteral("en");
+    describes[QStringLiteral("visualImpaired")] = true;
+    const QVariantList tracks = {makeTrack(1, "video", 0), japanese, english, describes};
+
+    // -1 is "no opinion", which leaves the container's default playing. Not a
+    // first-track fallback: there is no panel here that has to be showing
+    // something, so having nothing to say is a perfectly good answer.
+    QCOMPARE(MpvTrackList::preferredAudioId(tracks, {}, {}), -1);
+
+    // The stored code is three letters and mpv's is two. This is the comparison
+    // that silently did nothing before they were normalised.
+    QCOMPARE(MpvTrackList::preferredAudioId(tracks, {},
+                                            preferred(QStringLiteral("eng"))),
+             2);
+    // Audio description is the audio side's flavour, and it is a preference in
+    // both directions: asking for it gets it, not asking for it avoids it.
+    QVariantList wantsDescription = {
+        preferenceEntry(QStringLiteral("eng"), false, false, true)
+    };
+    QCOMPARE(MpvTrackList::preferredAudioId(tracks, {}, wantsDescription), 3);
+
+    // This file's remembered track wins over the preference, by ff-index.
+    QVariantMap rememberedAudio;
+    rememberedAudio[QStringLiteral("streamIndex")] = 1;
+    QCOMPARE(MpvTrackList::preferredAudioId(tracks, rememberedAudio,
+                                            preferred(QStringLiteral("eng"))),
+             1);
+    // A stream this file no longer has falls through to the preference rather
+    // than selecting nothing.
+    QVariantMap gone;
+    gone[QStringLiteral("streamIndex")] = 9;
+    QCOMPARE(MpvTrackList::preferredAudioId(tracks, gone,
+                                            preferred(QStringLiteral("eng"))),
+             2);
+    // Subtitle tracks are not audio tracks, however well they match.
+    QVariantMap engSub = makeTrack(1, "sub", 4);
+    engSub[QStringLiteral("language")] = QStringLiteral("en");
+    QCOMPARE(MpvTrackList::preferredAudioId({makeTrack(1, "video", 0), engSub}, {},
+                                            preferred(QStringLiteral("eng"))),
+             -1);
+}
+
+void TstMpvTracks::oneSpellingOfALanguage()
+{
+    // Three sources name a language and none of them agree: ffmpeg hands over
+    // what the container holds, mpv publishes two-letter codes, and the settings
+    // page offers a third list. An audio preference of "eng" matched no track
+    // mpv called "en", so the preference simply never fired.
+    QCOMPARE(MpvTrackList::canonicalLanguage(QStringLiteral("en")),
+             QStringLiteral("eng"));
+    QCOMPARE(MpvTrackList::canonicalLanguage(QStringLiteral("eng")),
+             QStringLiteral("eng"));
+    // The 639-2/B and /T split, which containers and libraries disagree on.
+    QCOMPARE(MpvTrackList::canonicalLanguage(QStringLiteral("deu")),
+             MpvTrackList::canonicalLanguage(QStringLiteral("ger")));
+    // Region tags are a distinction this preference does not draw: mpv reports
+    // "es-419" for Latin American Spanish, and it is still Spanish.
+    QCOMPARE(MpvTrackList::canonicalLanguage(QStringLiteral("es-419")),
+             MpvTrackList::canonicalLanguage(QStringLiteral("spa")));
+
+    // A code nothing can place still has to match itself, or a track tagged with
+    // something obscure becomes unselectable.
+    QCOMPARE(MpvTrackList::canonicalLanguage(QStringLiteral("qzz")),
+             QStringLiteral("qzz"));
+    QVERIFY(MpvTrackList::sameLanguage(QStringLiteral("QZZ"), QStringLiteral("qzz")));
+    // Empty is not a language, and must not match another empty one -- half the
+    // tracks in an untagged file would answer to it.
+    QVERIFY(!MpvTrackList::sameLanguage(QString(), QString()));
 }
 
 void TstMpvTracks::skipsTracksTheBrowserCannotList()
@@ -654,18 +891,18 @@ void TstMpvTracks::skipsTracksTheBrowserCannotList()
     };
 
     QCOMPARE(MpvTrackList::preferredTrackIndex(
-                 tracks, remembered(2, QString(), QStringLiteral("eng")), QString()),
+                 tracks, remembered(2, QString(), QStringLiteral("eng")), preferred(QString())),
              2);
-    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QStringLiteral("fre")), 2);
-    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, QString()), 2);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, preferred(QStringLiteral("fre"))), 2);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(tracks, {}, preferred(QString())), 2);
 
     // A file whose subtitles are all bitmap opens on no tab at all, rather than
     // on the previous film's tab over another film's cues.
     const QVariantList unreadable = {
         makeBrowserTrack(2, QStringLiteral("eng"), false),
     };
-    QCOMPARE(MpvTrackList::preferredTrackIndex(unreadable, {}, QStringLiteral("eng")), -1);
-    QCOMPARE(MpvTrackList::preferredTrackIndex({}, {}, QString()), -1);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(unreadable, {}, preferred(QStringLiteral("eng"))), -1);
+    QCOMPARE(MpvTrackList::preferredTrackIndex({}, {}, preferred(QString())), -1);
 }
 
 void TstMpvTracks::findsTheTabForMpvsSubtitle()
@@ -719,6 +956,7 @@ void TstMpvTracks::storesAnMpvTrackTheWayTheHistoryKeepsIt()
 {
     QVariantMap embedded = makeTrack(2, "sub", 3);
     embedded[QStringLiteral("language")] = QStringLiteral("jpn");
+    embedded[QStringLiteral("hearingImpaired")] = true;
     const QVariantMap forEmbedded = MpvTrackList::historyEntryForTrack(embedded);
     // ff-index, not sid: sid is mpv's own numbering and means nothing to the
     // extractor, which is what has to find this track again next time.
@@ -726,6 +964,11 @@ void TstMpvTracks::storesAnMpvTrackTheWayTheHistoryKeepsIt()
     QVERIFY(forEmbedded.value(QStringLiteral("sidecarPath")).toString().isEmpty());
     QCOMPARE(forEmbedded.value(QStringLiteral("language")).toString(),
              QStringLiteral("jpn"));
+    // The flavour comes through too: a choice made in the transport menu has to
+    // carry the same thing forward as one made on a tab, or which control was
+    // used would decide what the next file opens on.
+    QVERIFY(forEmbedded.value(QStringLiteral("hearingImpaired")).toBool());
+    QVERIFY(!forEmbedded.value(QStringLiteral("forced")).toBool());
 
     const QString sidecar = fixture(QStringLiteral("sidecar.srt"));
     QVariantMap external = makeTrack(4, "sub", 0, false, sidecar);
@@ -755,8 +998,8 @@ void TstMpvTracks::storesAnMpvTrackTheWayTheHistoryKeepsIt()
         makeBrowserTrack(3, QStringLiteral("jpn")),
         makeBrowserTrack(0, QStringLiteral("fre"), true, sidecar),
     };
-    QCOMPARE(MpvTrackList::preferredTrackIndex(browserTracks, forExternal, QString()), 1);
-    QCOMPARE(MpvTrackList::preferredTrackIndex(browserTracks, forEmbedded, QString()), 0);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(browserTracks, forExternal, preferred(QString())), 1);
+    QCOMPARE(MpvTrackList::preferredTrackIndex(browserTracks, forEmbedded, preferred(QString())), 0);
 }
 
 QTEST_MAIN(TstMpvTracks)

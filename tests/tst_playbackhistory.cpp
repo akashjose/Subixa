@@ -52,6 +52,10 @@ private slots:
     void roundTripsASubtitleSelection();
     void subtitleSelectionSurvivesFinishingTheFilm();
     void preferredLanguageFollowsTheLastChoice();
+    void theModeDecidesWhatThePreferenceIs();
+    void anExplicitListRoundTripsInOrder();
+    void languagesAreStoredInOneSpelling();
+    void audioIsRememberedTheSameWayAsSubtitles();
 
     void aFlushPutsThePositionInTheFile();
     void aStoredPositionCarriesItsLastUsedStamp();
@@ -273,6 +277,141 @@ void TstPlaybackHistory::preferredLanguageFollowsTheLastChoice()
     history.rememberSubtitle(QStringLiteral("/media/films/d.mkv"), 2, QString(),
                              QStringLiteral("und"));
     QCOMPARE(history.preferredLanguage(), QStringLiteral("spa"));
+}
+
+void TstPlaybackHistory::theModeDecidesWhatThePreferenceIs()
+{
+    PlaybackHistory history(settingsFile());
+    const QString subtitle = QStringLiteral("subtitle");
+
+    // "learn" is the default, because it is what the player did before the
+    // setting existed. An unrecognised mode -- a hand-edited file, a setting
+    // from a later version -- has to read as that too rather than as silence.
+    QCOMPARE(history.preferenceMode(subtitle), QStringLiteral("learn"));
+    history.setPreferenceMode(subtitle, QStringLiteral("nonsense"));
+    QCOMPARE(history.preferenceMode(subtitle), QStringLiteral("learn"));
+
+    history.rememberSubtitle(QStringLiteral("/media/films/a.mkv"), 3, QString(),
+                             QStringLiteral("eng"), false, true);
+    QVariantList learned = history.preferredTracks(subtitle);
+    QCOMPARE(learned.size(), 1);
+    QCOMPARE(learned.first().toMap().value(QStringLiteral("language")).toString(),
+             QStringLiteral("eng"));
+    QVERIFY(learned.first().toMap().value(QStringLiteral("hearingImpaired")).toBool());
+
+    // "file" is the absence of an opinion, and an empty list is how the caller
+    // is told to leave the container's own default alone. The learned language
+    // is still there underneath -- switching modes must not destroy it.
+    history.setPreferenceMode(subtitle, QStringLiteral("file"));
+    QVERIFY(history.preferredTracks(subtitle).isEmpty());
+    QCOMPARE(history.preferredLanguage(subtitle), QStringLiteral("eng"));
+
+    // And explicit answers from the list, not from what was last chosen.
+    QVariantMap wanted;
+    wanted[QStringLiteral("language")] = QStringLiteral("jpn");
+    history.setPreferenceList(subtitle, QVariantList{wanted});
+    history.setPreferenceMode(subtitle, QStringLiteral("explicit"));
+    const QVariantList explicitList = history.preferredTracks(subtitle);
+    QCOMPARE(explicitList.size(), 1);
+    QCOMPARE(explicitList.first().toMap().value(QStringLiteral("language")).toString(),
+             QStringLiteral("jpn"));
+
+    // The two stream types are independent: setting one must not answer for the
+    // other, or a preference for Japanese audio would arrive as one for Japanese
+    // subtitles.
+    QCOMPARE(history.preferenceMode(QStringLiteral("audio")), QStringLiteral("learn"));
+    QVERIFY(history.preferredTracks(QStringLiteral("audio")).isEmpty());
+}
+
+void TstPlaybackHistory::anExplicitListRoundTripsInOrder()
+{
+    PlaybackHistory history(settingsFile());
+    const QString type = QStringLiteral("subtitle");
+
+    QVariantMap engSdh;
+    engSdh[QStringLiteral("language")] = QStringLiteral("eng");
+    engSdh[QStringLiteral("hearingImpaired")] = true;
+    QVariantMap eng;
+    eng[QStringLiteral("language")] = QStringLiteral("eng");
+    QVariantMap jpnForced;
+    jpnForced[QStringLiteral("language")] = QStringLiteral("jpn");
+    jpnForced[QStringLiteral("forced")] = true;
+
+    history.setPreferenceList(type, QVariantList{engSdh, eng, jpnForced});
+
+    // Order is the whole meaning of the list, so it is the thing most worth
+    // pinning: "English SDH, then English, then forced Japanese" reordered is a
+    // different preference.
+    const QVariantList back = history.preferenceList(type);
+    QCOMPARE(back.size(), 3);
+    QCOMPARE(back.at(0).toMap().value(QStringLiteral("language")).toString(),
+             QStringLiteral("eng"));
+    QVERIFY(back.at(0).toMap().value(QStringLiteral("hearingImpaired")).toBool());
+    QVERIFY(!back.at(1).toMap().value(QStringLiteral("hearingImpaired")).toBool());
+    QCOMPARE(back.at(2).toMap().value(QStringLiteral("language")).toString(),
+             QStringLiteral("jpn"));
+    QVERIFY(back.at(2).toMap().value(QStringLiteral("forced")).toBool());
+
+    // Stored as readable tokens rather than as a serialised QVariant blob: this
+    // file is one somebody is meant to be able to open and fix.
+    history.flush();
+    const QString text = fileText();
+    QVERIFY2(text.contains(QStringLiteral("eng+sdh")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("jpn+forced")), qPrintable(text));
+
+    // An entry with no language is not an entry. It would match every track or
+    // none depending on where it landed, and neither is what an empty row means.
+    history.setPreferenceList(type, QVariantList{QVariantMap{}});
+    QVERIFY(history.preferenceList(type).isEmpty());
+}
+
+void TstPlaybackHistory::languagesAreStoredInOneSpelling()
+{
+    PlaybackHistory history(settingsFile());
+
+    // mpv publishes two-letter codes and a container carries three-letter ones,
+    // and both reach this store: the subtitle browser writes "eng" for the very
+    // track mpv's own menu calls "en". Stored as they arrive, one preference
+    // would be recorded two ways and neither would reliably match.
+    history.rememberAudio(QStringLiteral("/media/films/a.mkv"), 1,
+                          QStringLiteral("ja"));
+    QCOMPARE(history.preferredLanguage(QStringLiteral("audio")),
+             QStringLiteral("jpn"));
+
+    QVariantMap german;
+    german[QStringLiteral("language")] = QStringLiteral("de");
+    history.setPreferenceList(QStringLiteral("audio"), QVariantList{german});
+    // 639-2/B, which is what a container carries: "ger", not the 639-2/T "deu".
+    QCOMPARE(history.preferenceList(QStringLiteral("audio"))
+                 .first()
+                 .toMap()
+                 .value(QStringLiteral("language"))
+                 .toString(),
+             QStringLiteral("ger"));
+}
+
+void TstPlaybackHistory::audioIsRememberedTheSameWayAsSubtitles()
+{
+    PlaybackHistory history(settingsFile());
+    const QString film = QStringLiteral("/media/films/dual-audio.mkv");
+
+    QVERIFY(history.audioFor(film).isEmpty());
+
+    history.rememberAudio(film, 2, QStringLiteral("eng"));
+    const QVariantMap entry = history.audioFor(film);
+    QCOMPARE(entry.value(QStringLiteral("streamIndex")).toInt(), 2);
+    QCOMPARE(entry.value(QStringLiteral("language")).toString(), QStringLiteral("eng"));
+
+    // Its own group, so remembering an audio track says nothing about the
+    // subtitle track in the same film.
+    QVERIFY(history.subtitleFor(film).isEmpty());
+
+    // And forget() takes both, or a file cleared out of the history would keep
+    // answering for one of the two.
+    history.rememberSubtitle(film, 3, QString(), QStringLiteral("eng"));
+    history.forget(film);
+    QVERIFY(history.audioFor(film).isEmpty());
+    QVERIFY(history.subtitleFor(film).isEmpty());
 }
 
 void TstPlaybackHistory::aFlushPutsThePositionInTheFile()

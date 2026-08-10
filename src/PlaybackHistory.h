@@ -23,27 +23,21 @@ class QSettings;
 // keeping is deleted rather than left to go stale, so resumeFor() can stay a
 // plain lookup.
 //
-// The subtitle selection is kept in its own group, not beside the position:
-// finishing a film clears the resume entry, and it would be perverse for that to
-// also forget that this household reads the Latin American Spanish track.
+// The track selections are kept in their own groups, not beside the position:
+// finishing a film clears the resume entry, and that must not also forget which
+// track was being read.
 //
-// remember() is called every few seconds for the whole length of a film, so what
-// it costs matters: QSettings has no partial write, and every sync serialises the
-// entire settings file. So remember() holds the position in members and hands it
-// to QSettings only when it has moved a PositionWriteStep. That gate, not the
-// flush timer, is what cuts the writes: QSettings posts itself an update after
-// every setValue and syncs when the event loop next turns, so under a running
-// player anything that reaches setValue reaches the disk. Staying short of
-// QSettings is the only way to not write.
+// remember() is called every few seconds for the whole length of a film, and
+// QSettings has no partial write -- every sync serialises the entire file. So
+// remember() holds the position in members and hands it to QSettings only once
+// it has moved a PositionWriteStep. That gate, not the flush timer, is what cuts
+// the writes: QSettings posts itself an update after every setValue and syncs on
+// the next turn of the event loop, so anything reaching setValue reaches disk.
 //
-// flush() is the one thing here that *asks* for the file, on a slow timer, on
-// destruction, and whenever a caller wants it current. It is also the app's
-// mid-session flush for everything else in the file: Qt gives every QSettings on
-// a path one shared representation, so the QML `Settings` groups in Main.qml
-// (ui, subtitleStyle) go out with it. Those have a path to disk of their own and
-// are not relying on this -- see startFlushTimer() -- but they were riding on
-// the resume tick's sync() before, which is not something the next change to
-// remember() should have to know about.
+// flush() is the one thing here that *asks* for the file. It is also the app's
+// mid-session flush for everything else in it: Qt gives every QSettings on a
+// path one shared representation, so the QML `Settings` groups in Main.qml go
+// out with it.
 class PlaybackHistory : public QObject
 {
     Q_OBJECT
@@ -80,18 +74,50 @@ public:
 
     // Which subtitle track was being read in `path`. Embedded tracks are stored
     // by ffmpeg stream index and sidecars by absolute path, for the same reason
-    // MpvObject selects them that way: mpv's own numbering follows from neither.
+    // MpvEngine selects them that way: mpv's own numbering follows from neither.
+    //
+    // `forced` and `hearingImpaired` are what the *next* file is matched on.
     Q_INVOKABLE void rememberSubtitle(const QString &path, int streamIndex,
                                       const QString &sidecarPath,
-                                      const QString &language);
+                                      const QString &language,
+                                      bool forced = false,
+                                      bool hearingImpaired = false);
     // { streamIndex, sidecarPath, language }, or an empty map when this file has
     // never had a track chosen in it.
     Q_INVOKABLE QVariantMap subtitleFor(const QString &path) const;
 
-    // The language last chosen anywhere, used to pick a track in a file that has
-    // no entry of its own -- somebody who reads English SDH reads it in the next
-    // film too. Empty when nothing has been chosen yet.
-    Q_INVOKABLE QString preferredLanguage() const;
+    // The same, for the audio track: no sidecars, so `streamIndex` is mpv's
+    // ff-index. `visualImpaired` is the audio-description flag.
+    Q_INVOKABLE void rememberAudio(const QString &path, int streamIndex,
+                                   const QString &language,
+                                   bool visualImpaired = false);
+    // { streamIndex, language }, or empty when this file has never had an audio
+    // track chosen in it.
+    Q_INVOKABLE QVariantMap audioFor(const QString &path) const;
+
+    // ---- cross-file preference -----------------------------------------
+    // `type` is "subtitle" or "audio" throughout.
+
+    // "file", "learn" or "explicit". Anything unrecognised reads as "learn",
+    // which is what the player did before this setting existed.
+    Q_INVOKABLE QString preferenceMode(const QString &type) const;
+    Q_INVOKABLE void setPreferenceMode(const QString &type, const QString &mode);
+
+    // The explicit list, in order, each entry
+    // { language, forced, hearingImpaired, visualImpaired }. Kept whatever the
+    // mode is: switching to "follow the file" for one film should not throw
+    // away a list somebody built.
+    Q_INVOKABLE QVariantList preferenceList(const QString &type) const;
+    Q_INVOKABLE void setPreferenceList(const QString &type, const QVariantList &entries);
+
+    // What the selection walks, in order: empty in "file" mode, the one learned
+    // entry in "learn" mode, the explicit list in "explicit" mode. Empty means
+    // the file's own default is left alone -- not the same as a list that
+    // matches nothing, and the caller has to tell them apart.
+    Q_INVOKABLE QVariantList preferredTracks(const QString &type) const;
+
+    // The language last chosen anywhere, whatever the mode.
+    Q_INVOKABLE QString preferredLanguage(const QString &type = QStringLiteral("subtitle")) const;
 
     // Pure policy, static so it can be tested without touching storage.
     static bool worthRemembering(double position, double duration);
@@ -121,6 +147,13 @@ private:
     // "/home/user/film.mkv" would silently become nested groups. The real path is
     // stored alongside the hash so the file stays readable by a human.
     static QString keyFor(const QString &path);
+    // "subtitle" unless the caller said "audio": one misspelling from QML must
+    // not silently write a third group nothing ever reads.
+    static QString groupFor(const QString &type);
+    static QString entryKey(const QString &type, const QString &path);
+    void rememberPreferredFlavour(const QString &type, const QString &language,
+                                  bool forced, bool hearingImpaired,
+                                  bool visualImpaired);
 
     void startFlushTimer();
     // Hands the held position to QSettings, unless it says the same thing as the

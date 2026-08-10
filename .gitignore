@@ -40,5 +40,10 @@ testdata/huge.en.ass
 # Test artefacts copied next to testclip.mp4 while checking the browser.
 testclip.*.srt
 
+# ctest's own scratch: cost data and the last run's log. It lands under the
+# directory ctest was invoked from, so a run started at the top of the tree
+# leaves it here rather than inside build/, which is already ignored.
+Testing/
+
 # aqtinstall drops this wherever it is run from.
 aqtinstall.log
