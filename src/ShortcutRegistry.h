@@ -31,6 +31,18 @@ class ShortcutRegistry : public QObject
     Q_OBJECT
     QML_ELEMENT
 
+    // A property rather than only an invokable, because QML has to re-read the
+    // table when a binding changes. `model()` alone is a one-shot call: the
+    // Shortcut repeater and the settings page both evaluated it once and then
+    // never again, so a rebind reached neither until the next launch.
+    Q_PROPERTY(QVariantList model READ model NOTIFY changed)
+
+    // True while the settings page is recording a keystroke. The application's
+    // own Shortcut objects are gated on this: without it, pressing Ctrl+S to
+    // rebind something fires the screenshot action and the capture never sees
+    // the key.
+    Q_PROPERTY(bool capturing READ capturing WRITE setCapturing NOTIFY capturingChanged)
+
 public:
     explicit ShortcutRegistry(QObject *parent = nullptr);
     // Tests pass their own ini file so they never touch real user settings.
@@ -56,7 +68,10 @@ public:
 
     // { id, label, category, sequence, defaultSequence, worksWhileTyping,
     //   isCustom } per action, for QML to repeat over.
-    Q_INVOKABLE QVariantList model() const;
+    QVariantList model() const;
+
+    bool capturing() const { return m_capturing; }
+    void setCapturing(bool capturing);
 
     // The binding in force, which is the override when there is one and the
     // default otherwise. An empty string means deliberately unbound.
@@ -78,8 +93,22 @@ public:
     // will accept and compare -- "ctrl+d" and "Ctrl+D" must not be two bindings.
     Q_INVOKABLE static QString normalise(const QString &sequence);
 
+    // The binding a key press describes, built from the event's key and
+    // modifiers rather than from its text.
+    //
+    // `event.text` cannot express this: with Ctrl held it is the control
+    // character, so Ctrl+A arrived as "Ctrl+\x01" and QKeySequence rendered
+    // that as a dangling "Ctrl+" that no keystroke can ever match; and for the
+    // arrows and the function keys it is empty, so the sequence became the
+    // decimal key code, which parses to nothing and silently unbound the
+    // action. The key code and the modifier flags say exactly what was pressed.
+    //
+    // Empty for a bare modifier, or for anything that does not describe a key.
+    Q_INVOKABLE static QString sequenceFromEvent(int key, int modifiers);
+
 signals:
     void changed();
+    void capturingChanged();
 
 private:
     void load();
@@ -90,4 +119,5 @@ private:
     QSettings *m_settings = nullptr;
     std::unique_ptr<QSettings> m_owned;
     QHash<QString, QString> m_overrides;
+    bool m_capturing = false;
 };

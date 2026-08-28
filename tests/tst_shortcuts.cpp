@@ -3,6 +3,7 @@
 
 #include "ShortcutRegistry.h"
 
+#include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
 #include <QtTest/QtTest>
 
@@ -30,6 +31,10 @@ private slots:
     void spellingDoesNotCreateASecondBinding();
     void unbindingIsDistinctFromResetting();
     void resetAllRestoresEverything();
+    void aKeyPressBecomesItsBinding();
+    void aBareModifierIsNotABinding();
+    void garbageIsNotStoredAsABinding();
+    void garbageAlreadyInTheFileIsDropped();
 
 private:
     QString iniPath() const { return m_dir.filePath(QStringLiteral("test.ini")); }
@@ -208,6 +213,115 @@ void TestShortcuts::resetAllRestoresEverything()
 
     for (const QVariant &entry : registry.model())
         QCOMPARE(entry.toMap().value(QStringLiteral("isCustom")).toBool(), false);
+}
+
+
+// What a key press turns into, which is the whole of the rebinding UI's job.
+//
+// Built from the key code and the modifier flags rather than from the event's
+// text, because the text cannot express it: with Ctrl held it is the control
+// character, and for the arrows and the function keys it is empty. Spelling the
+// sequence from it produced "Ctrl+\x01" and bare decimal key codes, neither of
+// which is a binding any keystroke can match.
+void TestShortcuts::aKeyPressBecomesItsBinding()
+{
+    // The case the old text-based spelling turned into "Ctrl+".
+    QCOMPARE(ShortcutRegistry::sequenceFromEvent(Qt::Key_A, Qt::ControlModifier),
+             QStringLiteral("Ctrl+A"));
+    // The cases it turned into a decimal key code, which parsed to nothing and
+    // silently unbound the action.
+    QCOMPARE(ShortcutRegistry::sequenceFromEvent(Qt::Key_Right, Qt::NoModifier),
+             QStringLiteral("Right"));
+    QCOMPARE(ShortcutRegistry::sequenceFromEvent(Qt::Key_F11, Qt::NoModifier),
+             QStringLiteral("F11"));
+    QCOMPARE(ShortcutRegistry::sequenceFromEvent(Qt::Key_Right,
+                                                 Qt::ControlModifier | Qt::ShiftModifier),
+             QStringLiteral("Ctrl+Shift+Right"));
+    QCOMPARE(ShortcutRegistry::sequenceFromEvent(Qt::Key_Space, Qt::NoModifier),
+             QStringLiteral("Space"));
+
+    // The keypad flag rides along on an ordinary press and must not make a
+    // second binding out of the same key.
+    QCOMPARE(ShortcutRegistry::sequenceFromEvent(Qt::Key_1,
+                                                 Qt::ControlModifier | Qt::KeypadModifier),
+             QStringLiteral("Ctrl+1"));
+
+    // Every default in the table survives the round trip that a capture makes,
+    // so nothing in it is a sequence the UI could not produce.
+    for (const ShortcutRegistry::Action &action : ShortcutRegistry::actions()) {
+        const QString spelled = QString::fromLatin1(action.defaultSequence);
+        QVERIFY2(!ShortcutRegistry::normalise(spelled).isEmpty(),
+                 qPrintable(QStringLiteral("unmatchable default: %1").arg(spelled)));
+    }
+}
+
+void TestShortcuts::aBareModifierIsNotABinding()
+{
+    QVERIFY(ShortcutRegistry::sequenceFromEvent(Qt::Key_Control, Qt::ControlModifier).isEmpty());
+    QVERIFY(ShortcutRegistry::sequenceFromEvent(Qt::Key_Shift, Qt::ShiftModifier).isEmpty());
+    QVERIFY(ShortcutRegistry::sequenceFromEvent(Qt::Key_Alt, Qt::AltModifier).isEmpty());
+    QVERIFY(ShortcutRegistry::sequenceFromEvent(Qt::Key_Meta, Qt::MetaModifier).isEmpty());
+}
+
+// QKeySequence::isEmpty() is not the check it looks like: it accepts text it
+// cannot make a key out of and reports the failure only in the key itself. Both
+// of these were stored as bindings, and neither can ever match a keystroke.
+void TestShortcuts::garbageIsNotStoredAsABinding()
+{
+    // What Ctrl+A used to spell: a control character, rendered as a dangling
+    // "Ctrl+".
+    QVERIFY(ShortcutRegistry::normalise(QStringLiteral("Ctrl+") + QChar(1)).isEmpty());
+    // What an arrow key used to spell: its decimal key code.
+    QVERIFY(ShortcutRegistry::normalise(QStringLiteral("16777236")).isEmpty());
+
+    // Ctrl++ ends in the same character a dangling modifier does and is a real
+    // binding, so the check cannot simply be a trailing "+".
+    QCOMPARE(ShortcutRegistry::normalise(QStringLiteral("Ctrl++")),
+             QStringLiteral("Ctrl++"));
+}
+
+// The write path rejects an unmatchable sequence, but a release went out with
+// the capture field that produced them, so the settings file on a real machine
+// can already hold one. Reading has to refuse it too, or the action stays dead
+// for exactly the people who hit the bug.
+void TestShortcuts::garbageAlreadyInTheFileIsDropped()
+{
+    {
+        QSettings written(iniPath(), QSettings::IniFormat);
+        written.beginGroup(QStringLiteral("hotkeys"));
+        // What Ctrl+A used to spell.
+        written.setValue(QStringLiteral("mute"), QStringLiteral("Ctrl+") + QChar(1));
+        // What an arrow key used to spell.
+        written.setValue(QStringLiteral("fullscreen"), QStringLiteral("16777236"));
+        // A sound override, which must not be touched.
+        written.setValue(QStringLiteral("stop"), QStringLiteral("Ctrl+Q"));
+        // A deliberate unbind, which must not be mistaken for garbage.
+        written.setValue(QStringLiteral("play-pause"), QString());
+        written.endGroup();
+        written.sync();
+    }
+
+    ShortcutRegistry registry(iniPath());
+
+    // The default comes back, rather than a binding no keystroke can match.
+    QCOMPARE(registry.sequenceFor(QStringLiteral("mute")), QStringLiteral("M"));
+    QCOMPARE(registry.sequenceFor(QStringLiteral("fullscreen")), QStringLiteral("F"));
+    // And the row stops claiming the user chose it.
+    for (const QVariant &entry : registry.model()) {
+        const QVariantMap row = entry.toMap();
+        const QString id = row.value(QStringLiteral("id")).toString();
+        if (id == QStringLiteral("mute") || id == QStringLiteral("fullscreen"))
+            QCOMPARE(row.value(QStringLiteral("isCustom")).toBool(), false);
+    }
+
+    // Neither of the two that were never garbage moves.
+    QCOMPARE(registry.sequenceFor(QStringLiteral("stop")), QStringLiteral("Ctrl+Q"));
+    QCOMPARE(registry.sequenceFor(QStringLiteral("play-pause")), QString());
+
+    // A dropped entry does not shadow a later rebinding of the same action.
+    registry.setSequence(QStringLiteral("mute"), QStringLiteral("Ctrl+Shift+M"));
+    ShortcutRegistry reopened(iniPath());
+    QCOMPARE(reopened.sequenceFor(QStringLiteral("mute")), QStringLiteral("Ctrl+Shift+M"));
 }
 
 QTEST_MAIN(TestShortcuts)

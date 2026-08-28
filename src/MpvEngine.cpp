@@ -827,7 +827,7 @@ int MpvEngine::preferredAudioTrack(const QVariantMap &remembered,
     return MpvTrackList::preferredAudioId(m_tracks, remembered, preferences);
 }
 
-int MpvEngine::nextTrackOfType(const QString &type, int id) const
+int MpvEngine::nextTrackOfType(const QString &type, int id, bool includeOff) const
 {
     const QVariantList tracks = MpvTrackList::tracksOfType(m_tracks, type.toUtf8().constData());
     if (tracks.isEmpty())
@@ -842,6 +842,17 @@ int MpvEngine::nextTrackOfType(const QString &type, int id) const
             break;
         }
     }
+
+    // Off sits after the last track, so the rotation reads
+    // track 1 ... track N, off, track 1. `current` is already -1 when off, so
+    // stepping from it lands on the first track without a case of its own.
+    if (includeOff) {
+        const int next = current + 1;
+        if (next >= tracks.size())
+            return -1;
+        return tracks.at(next).toMap().value(QStringLiteral("id")).toInt();
+    }
+
     const int next = (current + 1) % tracks.size();
     return tracks.at(next).toMap().value(QStringLiteral("id")).toInt();
 }

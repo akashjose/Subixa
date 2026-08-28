@@ -441,6 +441,7 @@ ApplicationWindow {
         // Both selections start over, or the outgoing film's answers apply to
         // the incoming one.
         root.subtitleSelectionIsOurs = false
+        root.wantedSubtitleId = -2
         root.audioSelectionApplied = false
 
         mpv.loadFile(path)
@@ -603,6 +604,19 @@ ApplicationWindow {
     // mpv; forcing a fallback would override the track the release flagged.
     property bool subtitleSelectionIsOurs: false
 
+    // A subtitle pick made in mpv's own numbering rather than the browser's --
+    // the cycle key and the transport menu, both of which name a track by sid.
+    // -2 is "no such pick outstanding"; -1 is deliberately off.
+    //
+    // It exists because the two intents cannot share one resync path. mpv
+    // publishes `track-list` before `sid` (they are observed in that order, and
+    // it delivers them in it), so a cycle's track-list change arrives while
+    // `panelUi.tabIndex` still names the *previous* track. applySubtitleSelection
+    // would then re-select that tab and undo the cycle -- measured, not assumed:
+    // every press set the new sid and had it reverted a few milliseconds later,
+    // so the key moved the track exactly once and then appeared dead.
+    property int wantedSubtitleId: -2
+
     // The per-file toggle empties the map rather than skipping the call: the
     // choice must still be made, or the tab inherits the previous film's index.
     function applyPreferredSubtitleTrack() {
@@ -612,6 +626,7 @@ ApplicationWindow {
                          history.preferredTracks("subtitle"))
         panelUi.tabIndex = choice.index
         root.subtitleSelectionIsOurs = choice.matched
+        root.wantedSubtitleId = -2
         if (choice.matched)
             root.applySubtitleSelection()
         else
@@ -628,7 +643,13 @@ ApplicationWindow {
         // than a thing that happens to agree with one.
         panelUi.tabIndex = index
         root.subtitleSelectionIsOurs = true
+        // The tab is the selection again, so the cycle's claim is released.
+        root.wantedSubtitleId = -2
         root.applySubtitleSelection()
+        // Picking a track means wanting to read it. sub-visibility survives the
+        // file it was turned off in, so without this a tab picked after the
+        // hide key selects a track that is never drawn.
+        mpv.setSubtitleVisible(true)
         // A tab click is a statement about this film, so it is worth keeping.
         // Only explicit choices are remembered -- storing what the sync handlers
         // do would overwrite the user's track with mpv's default on every open.
@@ -689,17 +710,30 @@ ApplicationWindow {
     }
 
     function cycleSubtitleTrack() {
-        var id = mpv.nextTrackOfType("sub", mpv.subtitleTrack)
-        if (id < 0) {
+        // Emptiness is asked of the list, not read off a -1 return: with off in
+        // the rotation, -1 is a track the cycle can legitimately land on.
+        if (mpv.subtitleTracks.length === 0) {
             root.osd("No subtitle tracks")
             return
         }
-        var track = mpv.trackById(id)
-        mpv.setSubtitleTrack(id)
-        root.rememberMpvSubtitle(track)
-        // Or the next track-list refresh drags the tab back to what the
-        // preference said.
+
+        var id = mpv.nextTrackOfType("sub", mpv.subtitleTrack, true)
+        // The cycle names a track the way mpv does, so it owns the selection
+        // until the browser or a preference takes it back.
+        root.wantedSubtitleId = id
         root.subtitleSelectionIsOurs = true
+        mpv.setSubtitleTrack(id)
+
+        if (id < 0) {
+            root.osd("Subtitles off")
+            return
+        }
+        // Reaching a track by the cycle means wanting to see it, and
+        // sub-visibility is one flag for the whole session: without this the
+        // track changes under a hidden layer and the key looks dead.
+        mpv.setSubtitleVisible(true)
+        var track = mpv.trackById(id)
+        root.rememberMpvSubtitle(track)
         root.osd("Subtitles: " + root.trackLabel(track))
     }
 
@@ -847,8 +881,10 @@ ApplicationWindow {
         // sub-add lands.
         function onTracksChanged() {
             // When the selection is not ours the arrow points the other way and
-            // the panel follows mpv instead.
-            if (root.subtitleSelectionIsOurs)
+            // the panel follows mpv instead. A pick made in mpv's numbering
+            // points that way too: mpv already holds the track, so there is
+            // nothing to re-assert, and re-asserting the tab would undo it.
+            if (root.subtitleSelectionIsOurs && root.wantedSubtitleId === -2)
                 root.applySubtitleSelection()
             else
                 root.syncPanelToSubtitleTrack()
@@ -1111,7 +1147,10 @@ ApplicationWindow {
                                    && root.activePanel.searchActive
 
     Repeater {
-        model: keys.model()
+        // The property, not the invokable: as a one-shot call this was read
+        // once at startup, so a rebind did not reach the running shortcut until
+        // the next launch.
+        model: keys.model
 
         delegate: Item {
             required property var modelData
@@ -1122,7 +1161,11 @@ ApplicationWindow {
                 // either window state now, and the search box is already covered
                 // because leave-fullscreen does not work while typing, so the
                 // field keeps the key and clears its own text.
+                // `capturing` is the settings page recording a keystroke.
+                // Without that gate, pressing Ctrl+S to rebind something takes
+                // a screenshot and the capture never sees the key.
                 enabled: modelData.sequence !== ""
+                         && !keys.capturing
                          && (!root.typing || modelData.worksWhileTyping)
                 onActivated: root.dispatch(modelData.id)
             }
@@ -1740,10 +1783,17 @@ ApplicationWindow {
             root.rememberAudioChoice(id)
         }
         onSubtitleTrackPicked: (track) => {
+            // Named in mpv's numbering, so this owns the selection the way the
+            // cycle does -- and for the same reason: the tab has not caught up
+            // when the track-list change lands.
+            root.subtitleSelectionIsOurs = true
             if (track === null) {
+                root.wantedSubtitleId = -1
                 root.mpv.setSubtitleTrack(-1)
             } else {
+                root.wantedSubtitleId = track.id
                 root.mpv.setSubtitleTrack(track.id)
+                root.mpv.setSubtitleVisible(true)
                 root.rememberMpvSubtitle(track)
             }
         }

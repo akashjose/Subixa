@@ -191,7 +191,14 @@ public:
     // The track after `id` among this file's tracks of `type` ("audio" or
     // "sub"), wrapping at the end, or -1 when there is nothing to move to.
     // mpv's ids are neither contiguous nor ordered, so this is a search.
-    Q_INVOKABLE int nextTrackOfType(const QString &type, int id) const;
+    // The next track of `type` after `id`, wrapping. With `includeOff` the
+    // rotation passes through -1 -- no track -- between the last and the first,
+    // which is what a subtitle cycle needs: without it there is no way back to
+    // no-subtitles from the key, and on a file with one track the key does
+    // nothing at all. -1 is a real answer when `includeOff`, so callers check
+    // the track list for emptiness rather than reading -1 as "none".
+    Q_INVOKABLE int nextTrackOfType(const QString &type, int id,
+                                    bool includeOff = false) const;
 
     // The track carrying `id`, or an empty map.
     Q_INVOKABLE QVariantMap trackById(int id) const;
