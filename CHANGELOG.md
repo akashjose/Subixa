@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.1](https://github.com/akashjose/Subixa/compare/v0.7.0...v0.7.1) (2026-08-28)
+
+
+### Fixes
+
+* hotkey capture and the subtitle cycle key ([494e7c4](https://github.com/akashjose/Subixa/commit/494e7c4f9716f409513a9da52e2369c818e2272a))
+* **hotkeys:** record the key that was pressed ([305a7fe](https://github.com/akashjose/Subixa/commit/305a7fe4bee9e1bbd56e006e5434a6b184c1d9b9))
+* **subtitles:** let the cycle key reach every track ([06b084e](https://github.com/akashjose/Subixa/commit/06b084ec55fdfe3bbcff69248c6c745bee3c6347))
+
+
+### Documentation
+
+* add status badges and a download section to the readme ([b85d3bf](https://github.com/akashjose/Subixa/commit/b85d3bf26411101f8242ddfa142ba793e0902d44))
+* add status badges to the readme ([fc2486c](https://github.com/akashjose/Subixa/commit/fc2486c120742d2dc4c0ff140518096698590fe1))
+* give the readme a download section ([95faef9](https://github.com/akashjose/Subixa/commit/95faef94a206213e1f36af22dfdb555da0c5204b))
+
 ## [0.7.0](https://github.com/akashjose/Subixa/compare/v0.6.1...v0.7.0) (2026-08-10)
 
 
