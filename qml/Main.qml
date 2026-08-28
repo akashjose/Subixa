@@ -1111,7 +1111,10 @@ ApplicationWindow {
                                    && root.activePanel.searchActive
 
     Repeater {
-        model: keys.model()
+        // The property, not the invokable: as a one-shot call this was read
+        // once at startup, so a rebind did not reach the running shortcut until
+        // the next launch.
+        model: keys.model
 
         delegate: Item {
             required property var modelData
@@ -1122,7 +1125,11 @@ ApplicationWindow {
                 // either window state now, and the search box is already covered
                 // because leave-fullscreen does not work while typing, so the
                 // field keeps the key and clears its own text.
+                // `capturing` is the settings page recording a keystroke.
+                // Without that gate, pressing Ctrl+S to rebind something takes
+                // a screenshot and the capture never sees the key.
                 enabled: modelData.sequence !== ""
+                         && !keys.capturing
                          && (!root.typing || modelData.worksWhileTyping)
                 onActivated: root.dispatch(modelData.id)
             }

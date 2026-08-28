@@ -131,8 +131,28 @@ void ShortcutRegistry::load()
     m_overrides.clear();
     m_settings->beginGroup(QLatin1String(kGroup));
     const QStringList keys = m_settings->childKeys();
-    for (const QString &key : keys)
-        m_overrides.insert(key, m_settings->value(key).toString());
+    for (const QString &key : keys) {
+        const QString stored = m_settings->value(key).toString();
+        // Empty is the deliberate unbind and must survive as it is: normalising
+        // it would erase the difference between "no key" and "the default key".
+        if (stored.isEmpty()) {
+            m_overrides.insert(key, stored);
+            continue;
+        }
+        // The write path normalises, so anything here that does not survive it
+        // was written by an older build -- the capture field spelled the
+        // sequence from the event text and stored "Ctrl+" for Ctrl+A and a bare
+        // decimal key code for the arrows. Those match no keystroke, so the
+        // action was silently dead and the settings row showed the garbage.
+        //
+        // Dropping the entry restores the default. Storing an empty string
+        // would not: that reads as a deliberate unbind, so a binding the user
+        // never asked to lose would stay lost.
+        const QString sequence = normalise(stored);
+        if (sequence.isEmpty())
+            continue;
+        m_overrides.insert(key, sequence);
+    }
     m_settings->endGroup();
 }
 
@@ -143,9 +163,59 @@ QString ShortcutRegistry::normalise(const QString &sequence)
     // Round-tripping through QKeySequence is what makes "ctrl+d" and "Ctrl+D"
     // one binding rather than two that silently shadow each other.
     const QKeySequence parsed(sequence, QKeySequence::PortableText);
-    if (parsed.isEmpty())
+    if (parsed.isEmpty() || parsed.count() != 1)
         return {};
+
+    // isEmpty() is not the check it looks like: QKeySequence accepts text it
+    // cannot make a key out of and reports the failure only in the key itself.
+    // "Ctrl+\x01" comes back as Key 1 and renders as a dangling "Ctrl+", and a
+    // decimal key code comes back as Key_unknown and renders as nothing. Both
+    // were stored as bindings, and both are unmatchable. Qt::Key_Space is the
+    // lowest real key, so anything below it is not one.
+    const int key = parsed[0].key();
+    if (key == Qt::Key_unknown || key < Qt::Key_Space)
+        return {};
+
     return parsed.toString(QKeySequence::PortableText);
+}
+
+QString ShortcutRegistry::sequenceFromEvent(int key, int modifiers)
+{
+    switch (key) {
+    // A modifier on its own is not a binding.
+    case Qt::Key_Control:
+    case Qt::Key_Shift:
+    case Qt::Key_Alt:
+    case Qt::Key_Meta:
+    case Qt::Key_AltGr:
+    case Qt::Key_CapsLock:
+    case Qt::Key_NumLock:
+    case Qt::Key_ScrollLock:
+    case Qt::Key_unknown:
+        return {};
+    default:
+        break;
+    }
+    if (key < Qt::Key_Space)
+        return {};
+
+    // Only the four modifiers a binding can carry. The keypad and group
+    // switches ride along on ordinary presses and would make Ctrl+1 off the
+    // numeric pad a different binding from Ctrl+1 along the top row.
+    const auto wanted = Qt::KeyboardModifiers(modifiers)
+                        & (Qt::ControlModifier | Qt::AltModifier
+                           | Qt::ShiftModifier | Qt::MetaModifier);
+
+    const QKeySequence sequence{QKeyCombination(wanted, Qt::Key(key))};
+    return sequence.toString(QKeySequence::PortableText);
+}
+
+void ShortcutRegistry::setCapturing(bool capturing)
+{
+    if (m_capturing == capturing)
+        return;
+    m_capturing = capturing;
+    emit capturingChanged();
 }
 
 QString ShortcutRegistry::defaultSequenceFor(const QString &id) const

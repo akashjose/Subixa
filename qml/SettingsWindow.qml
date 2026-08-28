@@ -638,7 +638,10 @@ Window {
                         }
 
                         Repeater {
-                            model: win.shortcuts.model()
+                            // The property, not the invokable: this has to be a
+                            // binding so the rows redraw when a rebind or a
+                            // reset changes the table.
+                            model: win.shortcuts.model
 
                             delegate: Rectangle {
                                 required property var modelData
@@ -774,11 +777,29 @@ Window {
                                     function begin(id) {
                                         capture.active = true
                                         capture.conflict = ""
+                                        // Silences the application's own
+                                        // shortcuts, or the key being recorded
+                                        // fires its current action instead of
+                                        // reaching this handler.
+                                        win.shortcuts.capturing = true
                                         capture.forceActiveFocus()
                                     }
                                     function stop() {
                                         capture.active = false
                                         capture.conflict = ""
+                                        win.shortcuts.capturing = false
+                                    }
+
+                                    // The flag lives on the registry, which is
+                                    // the player's and outlives this window, so
+                                    // a capture that ends by the window closing
+                                    // rather than by a key gives it back here.
+                                    // Without this, closing settings mid-rebind
+                                    // leaves every shortcut in the application
+                                    // disabled until the next launch.
+                                    Component.onDestruction: {
+                                        if (capture.active)
+                                            win.shortcuts.capturing = false
                                     }
 
                                     Keys.onPressed: (event) => {
@@ -790,33 +811,36 @@ Window {
                                             return
                                         }
                                         if (event.key === Qt.Key_Backspace) {
-                                            win.shortcuts.setSequence(modelData.id, "")
+                                            var unbindId = modelData.id
                                             capture.stop()
+                                            win.shortcuts.setSequence(unbindId, "")
                                             return
                                         }
-                                        // A modifier on its own is not a binding.
-                                        if (event.key === Qt.Key_Control
-                                            || event.key === Qt.Key_Shift
-                                            || event.key === Qt.Key_Alt
-                                            || event.key === Qt.Key_Meta)
+                                        // Built in C++ from the key code and the
+                                        // modifier flags. Spelling it here from
+                                        // `event.text` cannot work: with Ctrl
+                                        // held that text is the control
+                                        // character, and for the arrows and the
+                                        // function keys it is empty.
+                                        var seq = win.shortcuts.sequenceFromEvent(
+                                                      event.key, event.modifiers)
+                                        // A bare modifier, or a key that does not
+                                        // describe a binding. Keep recording.
+                                        if (seq === "")
                                             return
-
-                                        var seq = ""
-                                        if (event.modifiers & Qt.ControlModifier) seq += "Ctrl+"
-                                        if (event.modifiers & Qt.AltModifier) seq += "Alt+"
-                                        if (event.modifiers & Qt.ShiftModifier) seq += "Shift+"
-                                        if (event.modifiers & Qt.MetaModifier) seq += "Meta+"
-                                        seq += event.text !== "" && event.text.trim() !== ""
-                                               ? event.text.toUpperCase()
-                                               : String(event.key)
 
                                         var clash = win.shortcuts.conflict(seq, modelData.id)
                                         if (clash !== "") {
                                             capture.conflict = clash
                                             return
                                         }
-                                        win.shortcuts.setSequence(modelData.id, seq)
+                                        // Stop first. The write rebuilds the
+                                        // table, and this row with it, so
+                                        // anything said to `capture` after it
+                                        // is said to an object on its way out.
+                                        var targetId = modelData.id
                                         capture.stop()
+                                        win.shortcuts.setSequence(targetId, seq)
                                     }
                                 }
                             }
