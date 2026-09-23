@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.2](https://github.com/akashjose/Subixa/compare/v0.7.1...v0.7.2) (2026-09-23)
+
+
+### Fixes
+
+* **subtitles:** find bracketed sidecars and add dropped subtitle files ([fd30212](https://github.com/akashjose/Subixa/commit/fd30212b5bc18f6541036f4522402fa2ba76d8fb))
+* **subtitles:** find bracketed sidecars and add dropped subtitle files ([7c28986](https://github.com/akashjose/Subixa/commit/7c289869a21dcc0a7036bfc3a41eaa7b59203755)), closes [#16](https://github.com/akashjose/Subixa/issues/16)
+
 ## [0.7.1](https://github.com/akashjose/Subixa/compare/v0.7.0...v0.7.1) (2026-08-28)
 
 
