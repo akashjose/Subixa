@@ -56,6 +56,19 @@ public:
     Q_INVOKABLE void load(const QString &mediaPath);
     Q_INVOKABLE void clear();
 
+    // Subtitle files the user added by hand to the file that is open, from the
+    // dialog or a drop. They are parsed with it until a different file opens,
+    // because findSidecars only sees files named after the video. Re-parses.
+    Q_INVOKABLE void addFiles(const QStringList &paths);
+
+    // The browser track read from `path`, or -1. Paths compare as files, so a
+    // relative and an absolute spelling agree.
+    Q_INVOKABLE int trackForFile(const QString &path) const;
+
+    // Whether `path` names a subtitle file rather than media. Decided by the
+    // extension, because that is all a drop gives.
+    Q_INVOKABLE static bool isSubtitleFile(const QString &path);
+
     // Tests point the cue cache at a temporary directory. Call before load().
     void setCacheDirectory(const QString &directory);
 
@@ -119,7 +132,8 @@ signals:
     void failed(const QString &reason);
 
     // Queued across to the worker thread.
-    void extractRequested(const QString &mediaPath, int requestId);
+    void extractRequested(const QString &mediaPath, const QStringList &addedFiles,
+                          int requestId);
 
 private slots:
     void onExtractFinished(int requestId, const SubtitleTrackList &tracks,
@@ -142,6 +156,9 @@ private:
     // emptied instead of deleted so QML bindings cannot outlive one.
     QVector<SubtitleLineModel *> m_models;
     int m_requestId = 0;
+    // The file last passed to load(), and the files added to it by hand.
+    QString m_mediaPath;
+    QStringList m_addedFiles;
     // How long the open took, logged on completion. The gap between a parse and
     // a cache hit is the whole point of the cache, and it is invisible otherwise.
     QElapsedTimer m_elapsed;

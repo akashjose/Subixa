@@ -66,12 +66,20 @@ inline bool sameLanguage(const QString &a, const QString &b)
 }
 
 // Two paths name the same sidecar even when one is relative and the other is
-// not, so compare resolved paths rather than strings.
+// not, so compare resolved paths rather than strings. The canonical path, when
+// the file exists, also settles case and separators: on Windows "g:\a.srt" and
+// "G:/A.srt" are one file, and a mismatch there added the file to mpv again.
 inline bool sameFile(const QString &a, const QString &b)
 {
     if (a.isEmpty() || b.isEmpty())
         return false;
-    return QFileInfo(a).absoluteFilePath() == QFileInfo(b).absoluteFilePath();
+    const QFileInfo left(a);
+    const QFileInfo right(b);
+    const QString leftCanonical = left.canonicalFilePath();
+    const QString rightCanonical = right.canonicalFilePath();
+    if (!leftCanonical.isEmpty() && !rightCanonical.isEmpty())
+        return leftCanonical == rightCanonical;
+    return left.absoluteFilePath() == right.absoluteFilePath();
 }
 
 // mpv's sid for the embedded track carrying ffmpeg stream `ffIndex`, or -1.

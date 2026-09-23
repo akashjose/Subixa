@@ -37,6 +37,8 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QtEndian>
 
+#include <algorithm>
+
 namespace {
 
 QString fixture(const QString &name)
@@ -51,7 +53,8 @@ QString fixture(const QString &name)
 // and a cached answer would let a parser regression through while also writing
 // into the user's real cache directory. The cache has its own tests, which point
 // it at a temporary directory.
-SubtitleTrackList parse(const QString &path, QString *error = nullptr)
+SubtitleTrackList parse(const QString &path, QString *error = nullptr,
+                        const QStringList &addedFiles = {})
 {
     SubtitleExtractor extractor;
     extractor.setCacheEnabled(false);
@@ -64,7 +67,7 @@ SubtitleTrackList parse(const QString &path, QString *error = nullptr)
                      [&](int, const QString &reason) { failure = reason; });
 
     extractor.setCurrentRequest(1);
-    extractor.extract(path, 1);
+    extractor.extract(path, addedFiles, 1);
 
     if (error)
         *error = failure;
@@ -88,7 +91,7 @@ SubtitleTrackList parseCached(const QString &path, const QString &cacheDir,
                      });
 
     extractor.setCurrentRequest(1);
-    extractor.extract(path, 1);
+    extractor.extract(path, {}, 1);
 
     if (fromCache)
         *fromCache = cached;
@@ -177,6 +180,9 @@ private slots:
     void subtitlesAlreadyAtZeroAreNotRebased();
     void sidecarsAreFoundNextToTheVideo();
     void sidecarNamesSayWhatKindOfTrackTheyAre();
+    void sidecarNamesAreMatchedLiterally();
+    void addedFilesAreReadWithTheVideo();
+    void addedFilesTakeTheirLanguageFromTheirName();
     void nonAsciiFilenamesReachTheDecoder();
 
     void cacheReproducesTheParseExactly();
@@ -428,6 +434,130 @@ void TstSubtitles::sidecarNamesSayWhatKindOfTrackTheyAre()
     QVERIFY(spanishSdh);
     QCOMPARE(spanishSdh->language, QStringLiteral("spa"));
     QVERIFY(spanishSdh->hearingImpaired);
+}
+
+// Release names carry brackets, and a glob reads "[...]" as a character class.
+// Under name filters this film never found its own sidecar, while mpv loaded it.
+void TstSubtitles::sidecarNamesAreMatchedLiterally()
+{
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+
+    const QString video = media.filePath(QStringLiteral("Film.2026-[YTS.GG - YTS.BZ].mkv"));
+    QVERIFY(QFile::copy(fixture(QStringLiteral("subs.mkv")), video));
+
+    const auto writeSrt = [&media](const QString &name) {
+        QFile srt(media.filePath(name));
+        QVERIFY(srt.open(QIODevice::WriteOnly));
+        srt.write("1\n00:00:01,000 --> 00:00:03,000\nA line.\n\n");
+    };
+    writeSrt(QStringLiteral("Film.2026-[YTS.GG - YTS.BZ].srt"));
+    writeSrt(QStringLiteral("Film.2026-[YTS.GG - YTS.BZ].eng.srt"));
+    // What the pattern matched before: one character where the brackets are.
+    writeSrt(QStringLiteral("Film.2026-Y.srt"));
+    // Not a sidecar: the name only starts like the video's.
+    writeSrt(QStringLiteral("Film.2026-[YTS.GG - YTS.BZ]extra.srt"));
+
+    QStringList found;
+    for (const SubtitleTrack &t : parse(video)) {
+        if (t.sidecar)
+            found << QFileInfo(t.sourcePath).fileName();
+    }
+    found.sort();
+    QCOMPARE(found, (QStringList{QStringLiteral("Film.2026-[YTS.GG - YTS.BZ].eng.srt"),
+                                 QStringLiteral("Film.2026-[YTS.GG - YTS.BZ].srt")}));
+}
+
+// A file added by hand is read with the video whatever it is called, and once
+// only when it is also a sidecar the folder already supplies.
+void TstSubtitles::addedFilesAreReadWithTheVideo()
+{
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    QVERIFY(QDir(media.path()).mkdir(QStringLiteral("Subs")));
+
+    const QString video = media.filePath(QStringLiteral("film.mkv"));
+    QVERIFY(QFile::copy(fixture(QStringLiteral("subs.mkv")), video));
+    const QString sidecar = media.filePath(QStringLiteral("film.srt"));
+    const QString elsewhere = media.filePath(QStringLiteral("Subs/English.srt"));
+    for (const QString &path : {sidecar, elsewhere}) {
+        QFile srt(path);
+        QVERIFY(srt.open(QIODevice::WriteOnly));
+        srt.write("1\n00:00:01,000 --> 00:00:03,000\nA line.\n\n");
+    }
+
+    const auto sidecarCount = [](const SubtitleTrackList &tracks) {
+        return std::count_if(tracks.cbegin(), tracks.cend(),
+                             [](const SubtitleTrack &t) { return t.sidecar; });
+    };
+    QCOMPARE(sidecarCount(parse(video)), 1);
+
+    const SubtitleTrackList tracks = parse(video, nullptr, {elsewhere, sidecar});
+    QCOMPARE(sidecarCount(tracks), 2);
+    const auto added = std::find_if(tracks.cbegin(), tracks.cend(), [&](const SubtitleTrack &t) {
+        return t.sidecar && QFileInfo(t.sourcePath).fileName() == QStringLiteral("English.srt");
+    });
+    QVERIFY(added != tracks.cend());
+    QVERIFY(!added->lines.isEmpty());
+}
+
+// A release's Subs folder names files by language, not after the film. Their
+// name is all there is, so it has to give the language, and the rest of it is
+// what tells two tracks in one language apart.
+void TstSubtitles::addedFilesTakeTheirLanguageFromTheirName()
+{
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+
+    const QString video = media.filePath(QStringLiteral("film.mkv"));
+    QVERIFY(QFile::copy(fixture(QStringLiteral("subs.mkv")), video));
+
+    const QStringList names = {
+        QStringLiteral("English.srt"), QStringLiteral("Latin American.spa.srt"),
+        QStringLiteral("SDH.eng.HI.srt"), QStringLiteral("hin.srt"),
+        QStringLiteral("Commentary.srt"),
+    };
+    QStringList added;
+    for (const QString &name : names) {
+        QFile srt(media.filePath(name));
+        QVERIFY(srt.open(QIODevice::WriteOnly));
+        srt.write("1\n00:00:01,000 --> 00:00:03,000\nA line.\n\n");
+        added << srt.fileName();
+    }
+
+    const SubtitleTrackList tracks = parse(video, nullptr, added);
+    const auto named = [&tracks](const QString &file) -> const SubtitleTrack * {
+        for (const SubtitleTrack &t : tracks) {
+            if (t.sidecar && QFileInfo(t.sourcePath).fileName() == file)
+                return &t;
+        }
+        return nullptr;
+    };
+
+    const SubtitleTrack *english = named(QStringLiteral("English.srt"));
+    QVERIFY(english);
+    QCOMPARE(english->language, QStringLiteral("eng"));
+    QCOMPARE(english->title, QString());
+
+    const SubtitleTrack *latin = named(QStringLiteral("Latin American.spa.srt"));
+    QVERIFY(latin);
+    QCOMPARE(latin->language, QStringLiteral("spa"));
+    QCOMPARE(latin->title, QStringLiteral("Latin American"));
+
+    // "SDH" is three letters but no language; "eng" after it is.
+    const SubtitleTrack *sdh = named(QStringLiteral("SDH.eng.HI.srt"));
+    QVERIFY(sdh);
+    QCOMPARE(sdh->language, QStringLiteral("eng"));
+    QVERIFY(sdh->hearingImpaired);
+
+    const SubtitleTrack *hindi = named(QStringLiteral("hin.srt"));
+    QVERIFY(hindi);
+    QCOMPARE(hindi->language, QStringLiteral("hin"));
+
+    const SubtitleTrack *commentary = named(QStringLiteral("Commentary.srt"));
+    QVERIFY(commentary);
+    QCOMPARE(commentary->language, QString());
+    QCOMPARE(commentary->title, QStringLiteral("Commentary"));
 }
 
 // The path handed to avformat_open_input has to be UTF-8 on every platform.

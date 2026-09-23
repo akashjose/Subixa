@@ -35,7 +35,11 @@ constexpr quint32 kMagic = 0x434D5053;
 // Version 4 is layout alone: a track record now carries its forced and
 // hearing-impaired flags, and every track in an entry written before it would
 // read back as plain.
-constexpr quint32 kFormatVersion = 4;
+//
+// Version 5 is content: a sidecar with a name of its own now takes its language
+// and title from that name, so an entry written before it keeps the filename as
+// the tab's label.
+constexpr quint32 kFormatVersion = 5;
 
 // Pinned so a Qt upgrade cannot silently change how the primitives below are
 // encoded and turn every existing entry into garbage.

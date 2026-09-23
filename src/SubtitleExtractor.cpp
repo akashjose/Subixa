@@ -9,6 +9,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
+#include <QtCore/QLocale>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
 #include <QtCore/QStringList>
@@ -168,24 +169,76 @@ QString stripAssTags(const QString &in)
 }
 
 
-// A sidecar named "movie.en.srt" or "movie.forced.eng.srt" carries its language
-// in the filename; it has none of the container metadata embedded tracks have.
-QString languageFromSidecarName(const QString &videoBase, const QFileInfo &sidecar)
+// Whether `stem` is the video's base name, alone or followed by dotted tags.
+// Case is ignored, as findSidecars ignores it.
+bool namedAfterVideo(const QString &videoBase, const QString &stem)
+{
+    return stem.startsWith(videoBase, Qt::CaseInsensitive)
+           && (stem.size() == videoBase.size() || stem.at(videoBase.size()) == QLatin1Char('.'));
+}
+
+// The dotted words of a sidecar's name: those after the video's base name, or
+// the whole stem for a file added by hand under a name of its own, such as
+// "Latin American.spa.srt" from a release's Subs folder.
+QStringList sidecarTags(const QString &videoBase, const QFileInfo &sidecar)
 {
     const QString stem = sidecar.completeBaseName();
-    if (stem.size() <= videoBase.size() + 1 || !stem.startsWith(videoBase))
-        return {};
+    const QString tags = namedAfterVideo(videoBase, stem) ? stem.mid(videoBase.size()) : stem;
+    return tags.split(QLatin1Char('.'), Qt::SkipEmptyParts);
+}
 
-    const QStringList tags =
-        stem.mid(videoBase.size() + 1).split(QLatin1Char('.'), Qt::SkipEmptyParts);
-    for (const QString &tag : tags) {
-        if ((tag.size() == 2 || tag.size() == 3)
-            && std::all_of(tag.cbegin(), tag.cend(),
-                           [](QChar ch) { return ch.isLetter(); })) {
-            return tag.toLower();
+// The language a full English name like "English" names, or AnyLanguage.
+QLocale::Language languageNamed(const QString &word)
+{
+    for (int i = int(QLocale::C) + 1; i <= int(QLocale::LastLanguage); ++i) {
+        const auto language = QLocale::Language(i);
+        if (QLocale::languageToString(language).compare(word, Qt::CaseInsensitive) == 0)
+            return language;
+    }
+    return QLocale::AnyLanguage;
+}
+
+bool isTwoOrThreeLetters(const QString &tag)
+{
+    return (tag.size() == 2 || tag.size() == 3)
+           && std::all_of(tag.cbegin(), tag.cend(), [](QChar ch) { return ch.isLetter(); });
+}
+
+// Which of a sidecar's tags names its language, or -1. A name that follows the
+// video's is a convention -- "movie.en.srt", "movie.forced.eng.srt" -- so its
+// first short tag is the language. A name of its own is anything, so there a
+// tag must be a real ISO 639 code or a language's full name: "SDH.eng.HI" is
+// English, not a language called "SDH".
+qsizetype languageTagIndex(const QString &videoBase, const QFileInfo &sidecar)
+{
+    const bool conventional = namedAfterVideo(videoBase, sidecar.completeBaseName());
+    const QStringList tags = sidecarTags(videoBase, sidecar);
+    for (qsizetype i = 0; i < tags.size(); ++i) {
+        const QString &tag = tags[i];
+        if (isTwoOrThreeLetters(tag)) {
+            if (conventional)
+                return i;
+            if (QLocale::codeToLanguage(tag.toLower(), QLocale::ISO639Part1 | QLocale::ISO639Part2)
+                != QLocale::AnyLanguage)
+                return i;
+        } else if (!conventional && languageNamed(tag) != QLocale::AnyLanguage) {
+            return i;
         }
     }
-    return {};
+    return -1;
+}
+
+// The language code a sidecar's name carries; it has none of the container
+// metadata embedded tracks have.
+QString languageFromSidecarName(const QString &videoBase, const QFileInfo &sidecar)
+{
+    const qsizetype index = languageTagIndex(videoBase, sidecar);
+    if (index < 0)
+        return {};
+    const QString tag = sidecarTags(videoBase, sidecar).at(index);
+    if (isTwoOrThreeLetters(tag))
+        return tag.toLower();
+    return QLocale::languageToCode(languageNamed(tag), QLocale::ISO639Part2);
 }
 
 // Whether a dotted or spaced name carries `tag` as a word of its own. Substring
@@ -221,27 +274,21 @@ bool looksForced(const QString &text)
 // whatever supplied the language. Position is the only thing separating the two
 // readings of "hi" -- Hindi in the language slot, hearing-impaired anywhere
 // else -- so "film.hi.srt" is Hindi and "film.eng.hi.srt" is English SDH.
-QString sidecarFlavourTags(const QString &videoBase, const QFileInfo &sidecar)
+QStringList sidecarFlavourTags(const QString &videoBase, const QFileInfo &sidecar)
 {
-    const QString stem = sidecar.completeBaseName();
-    if (!stem.startsWith(videoBase))
-        return stem;
-
-    QStringList tags =
-        stem.mid(videoBase.size()).split(QLatin1Char('.'), Qt::SkipEmptyParts);
+    QStringList tags = sidecarTags(videoBase, sidecar);
     // The first match only, because that is the one languageFromSidecarName
     // took: "film.es.es.srt" keeps its second tag.
-    const QString language = languageFromSidecarName(videoBase, sidecar);
-    if (!language.isEmpty()) {
-        const auto it = std::find_if(tags.begin(), tags.end(), [&language](const QString &tag) {
-            return tag.compare(language, Qt::CaseInsensitive) == 0;
-        });
-        if (it != tags.end())
-            tags.erase(it);
-    }
-    return tags.join(QLatin1Char('.'));
+    const qsizetype index = languageTagIndex(videoBase, sidecar);
+    if (index >= 0)
+        tags.removeAt(index);
+    return tags;
 }
 
+// Matched as text, not with QDir name filters: those are wildcards, where
+// "[...]" is a character class, so a release named "Film-[YTS.GG].mp4" never
+// found its own "Film-[YTS.GG].srt". mpv's sub-auto compares the text, and the
+// browser has to list what mpv shows.
 QStringList findSidecars(const QString &mediaPath)
 {
     const QFileInfo info(mediaPath);
@@ -250,16 +297,25 @@ QStringList findSidecars(const QString &mediaPath)
     if (base.isEmpty() || !dir.exists())
         return {};
 
-    QStringList patterns;
-    for (const char *ext : kSidecarExtensions) {
-        patterns << QStringLiteral("%1.%2").arg(base, QLatin1String(ext));
-        patterns << QStringLiteral("%1.*.%2").arg(base, QLatin1String(ext));
-    }
-
     QStringList found;
-    const QFileInfoList entries =
-        dir.entryInfoList(patterns, QDir::Files | QDir::Readable, QDir::Name);
+    const QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Readable, QDir::Name);
     for (const QFileInfo &entry : entries) {
+        const QString name = entry.fileName();
+        const QString suffix = entry.suffix();
+        const bool wantedExtension =
+            std::any_of(std::begin(kSidecarExtensions), std::end(kSidecarExtensions),
+                        [&suffix](const char *ext) {
+                            return suffix.compare(QLatin1String(ext), Qt::CaseInsensitive) == 0;
+                        });
+        if (!wantedExtension)
+            continue;
+        // "base.ext", or "base.<tags>.ext" with at least one character of tags.
+        const qsizetype stemLength = name.size() - suffix.size() - 1;
+        const bool exact = stemLength == base.size();
+        const bool tagged = stemLength > base.size() + 1
+                            && name.at(base.size()) == QLatin1Char('.');
+        if (!(exact || tagged) || !name.startsWith(base, Qt::CaseInsensitive))
+            continue;
         const QString path = entry.absoluteFilePath();
         if (path != info.absoluteFilePath() && !found.contains(path))
             found << path;
@@ -304,7 +360,8 @@ SubtitleExtractor::SubtitleExtractor(QObject *parent) : QObject(parent)
     av_log_set_level(AV_LOG_ERROR);
 }
 
-void SubtitleExtractor::extract(const QString &mediaPath, int requestId)
+void SubtitleExtractor::extract(const QString &mediaPath, const QStringList &addedFiles,
+                                int requestId)
 {
     if (cancelled(requestId))
         return;
@@ -312,7 +369,12 @@ void SubtitleExtractor::extract(const QString &mediaPath, int requestId)
     // Every file that will contribute cues, stamped before anything is read: the
     // cache is only valid for exactly this set, so a sidecar dropped next to the
     // film after the last open has to invalidate it.
-    const QStringList sidecars = findSidecars(mediaPath);
+    QStringList sidecars = findSidecars(mediaPath);
+    for (const QString &added : addedFiles) {
+        const QString path = QFileInfo(added).absoluteFilePath();
+        if (!sidecars.contains(path) && path != QFileInfo(mediaPath).absoluteFilePath())
+            sidecars << path;
+    }
     SubtitleSourceStamps sources;
     sources.reserve(sidecars.size() + 1);
     sources.append(SubtitleCache::stampFor(mediaPath));
@@ -445,12 +507,20 @@ bool SubtitleExtractor::readContainer(const QString &path, const QString &videoB
             // A sidecar has no disposition, so its name is all there is. Only
             // the tags after the video's base name count, or a film called
             // "Forced" would mark every sidecar beside it forced.
-            const QString tags = sidecarFlavourTags(videoBase, QFileInfo(path));
-            track.forced = track.forced || looksForced(tags);
-            track.hearingImpaired = track.hearingImpaired || looksHearingImpaired(tags);
+            const QStringList tags = sidecarFlavourTags(videoBase, QFileInfo(path));
+            const QString joined = tags.join(QLatin1Char('.'));
+            track.forced = track.forced || looksForced(joined);
+            track.hearingImpaired = track.hearingImpaired || looksHearingImpaired(joined);
 
-            if (track.title.isEmpty())
-                track.title = shortName;
+            // A file named after the video keeps its filename as the title,
+            // which the label treats as no title. A name of its own says what
+            // the file is -- "Latin American", "Brazilian" -- and a label made
+            // from the filename is wider than the panel.
+            if (track.title.isEmpty()) {
+                track.title = namedAfterVideo(videoBase, QFileInfo(path).completeBaseName())
+                                  ? shortName
+                                  : tags.join(QLatin1Char(' '));
+            }
             if (track.language.isEmpty())
                 track.language = languageFromSidecarName(videoBase, QFileInfo(path));
         }

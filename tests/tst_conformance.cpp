@@ -56,7 +56,7 @@ SubtitleTrackList parse(const QString &path)
                      [&](int, const SubtitleTrackList &tracks) { result = tracks; });
 
     extractor.setCurrentRequest(1);
-    extractor.extract(path, 1);
+    extractor.extract(path, {}, 1);
     return result;
 }
 

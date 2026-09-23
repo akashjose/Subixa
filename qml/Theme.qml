@@ -212,6 +212,9 @@ QtObject {
         readonly property int transportHeight: 48
         readonly property int seekStripHeight: 20
         readonly property int panelHeaderHeight: 40
+        // The widest a track tab's label gets before it elides. A release
+        // name as a label is wider than the whole panel.
+        readonly property int tabLabelMax: 160
     }
 
     // ---- type ----------------------------------------------------------
