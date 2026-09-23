@@ -74,7 +74,7 @@ SubtitleTrackList parse(const QString &path)
     QObject::connect(&extractor, &SubtitleExtractor::finished, &extractor,
                      [&](int, const SubtitleTrackList &tracks) { result = tracks; });
     extractor.setCurrentRequest(1);
-    extractor.extract(path, 1);
+    extractor.extract(path, {}, 1);
     return result;
 }
 
@@ -466,7 +466,7 @@ void TstAssStyles::anOlderCacheEntryIsRefused()
     }
     // magic is a big-endian quint32, then the version: byte 7 is its low octet.
     QVERIFY(bytes.size() > 8);
-    QCOMPARE(quint8(bytes.at(7)), quint8(4));
+    QCOMPARE(quint8(bytes.at(7)), quint8(5));
     bytes[7] = char(2);
     {
         QFile f(entry);

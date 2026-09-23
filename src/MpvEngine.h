@@ -345,6 +345,8 @@ private:
     // SUBIXA_HWDEC was set, so the automatic choice must keep its hands off.
     bool m_hwdecForced = false;
     bool m_endOfFile = false;
+    // Between START_FILE and FILE_LOADED the track list is incomplete.
+    bool m_fileLoaded = false;
     bool m_softwareRendering = false;
     QString m_rendererName;
     bool m_rendererKnown = false;

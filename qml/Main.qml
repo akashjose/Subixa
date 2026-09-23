@@ -308,7 +308,7 @@ ApplicationWindow {
         rowBackground: Theme.color.bgSurface
         // The tab is the whole selection -- currentTrack is derived from it --
         // so there is nothing else to set here.
-        onLoaded: root.applyPreferredSubtitleTrack()
+        onLoaded: root.onSubtitlesParsed()
     }
 
     PlaybackHistory {
@@ -443,6 +443,9 @@ ApplicationWindow {
         root.subtitleSelectionIsOurs = false
         root.wantedSubtitleId = -2
         root.audioSelectionApplied = false
+        root.pendingSubtitlePick = ""
+        root.pendingSubtitleFiles = root.subtitlesForNextOpen
+        root.subtitlesForNextOpen = []
 
         mpv.loadFile(path)
         subs.load(path)
@@ -498,6 +501,17 @@ ApplicationWindow {
             if (root.pendingResume > 0) {
                 mpv.seek(root.pendingResume)
                 root.pendingResume = -1
+            }
+            // A browser pick made while the file was opening was held back
+            // (MpvEngine::selectSubtitleFile), so it is applied now.
+            if (root.subtitleSelectionIsOurs && root.wantedSubtitleId === -2)
+                root.applySubtitleSelection()
+            // Subtitles dropped with the film wait for it: mpv has nowhere to
+            // add a track until the file is loaded.
+            if (root.pendingSubtitleFiles.length > 0) {
+                var files = root.pendingSubtitleFiles
+                root.pendingSubtitleFiles = []
+                root.addSubtitleFiles(files)
             }
         }
 
@@ -616,6 +630,72 @@ ApplicationWindow {
     // every press set the new sid and had it reverted a few milliseconds later,
     // so the key moved the track exactly once and then appeared dead.
     property int wantedSubtitleId: -2
+
+    // ---- added subtitle files ---------------------------------------------
+    // Subtitle files dropped together with media. openFile takes them over as
+    // pendingSubtitleFiles, so files for a drop that opened nothing are not
+    // added to whatever loads next.
+    property var subtitlesForNextOpen: []
+    // Subtitle files for the file being opened, added once mpv has loaded it.
+    property var pendingSubtitleFiles: []
+    // The file the user added last, to become the selected tab once the browser
+    // lists it. Empty when there is none.
+    property string pendingSubtitlePick: ""
+
+    // One way in for the dialog and a drop. Each file goes to mpv and to the
+    // browser, and the last one becomes the selection: adding a file is a pick.
+    function addSubtitleFiles(paths) {
+        if (!paths || paths.length === 0)
+            return
+        if (root.currentFile === "") {
+            root.notify("Open a video before adding subtitles", "error")
+            return
+        }
+        // The panel follows mpv until the browser lists the file. Otherwise the
+        // tracksChanged retry selects the old tab again and undoes the add.
+        root.subtitleSelectionIsOurs = false
+        root.wantedSubtitleId = -2
+        for (var i = 0; i < paths.length; ++i)
+            mpv.addSubtitleFile(paths[i])
+        mpv.setSubtitleVisible(true)
+        root.pendingSubtitlePick = paths[paths.length - 1]
+        subs.addFiles(paths)
+        // A file the browser already lists causes no parse, so no loaded().
+        root.pickAddedSubtitle()
+    }
+
+    // Moves the tab to the added file. False when the browser does not list it
+    // yet.
+    function pickAddedSubtitle() {
+        if (root.pendingSubtitlePick === "")
+            return false
+        var index = subs.trackForFile(root.pendingSubtitlePick)
+        if (index < 0)
+            return false
+        root.pendingSubtitlePick = ""
+        if (subs.tracks[index].browsable) {
+            root.selectTrack(index)
+        } else {
+            // A bitmap file: mpv draws it, and the panel has no rows to show.
+            root.subtitleSelectionIsOurs = false
+            root.syncPanelToSubtitleTrack()
+        }
+        return true
+    }
+
+    function onSubtitlesParsed() {
+        if (root.pendingSubtitlePick === "") {
+            root.applyPreferredSubtitleTrack()
+            return
+        }
+        // The preference is not applied here: it would replace the file the
+        // user just added.
+        if (!root.pickAddedSubtitle()) {
+            root.pendingSubtitlePick = ""
+            root.subtitleSelectionIsOurs = false
+            root.syncPanelToSubtitleTrack()
+        }
+    }
 
     // The per-file toggle empties the map rather than skipping the call: the
     // choice must still be made, or the tab inherits the previous film's index.
@@ -1304,13 +1384,7 @@ ApplicationWindow {
         id: subtitleDialog
         title: "Open subtitle file"
         nameFilters: ["Subtitles (*.srt *.ass *.ssa *.vtt *.sub)", "All files (*)"]
-        onAccepted: {
-            var path = mpv.localFile(selectedFile)
-            mpv.addSubtitleFile(path)
-            // Re-parse so the browser picks the sidecar up as well as mpv.
-            if (root.currentFile !== "")
-                subs.load(root.currentFile)
-        }
+        onAccepted: root.addSubtitleFiles([mpv.localFile(selectedFile)])
     }
 
     FileDialog {
@@ -1466,13 +1540,26 @@ ApplicationWindow {
         onDropped: (drop) => {
             if (!drop.hasUrls || drop.urls.length === 0)
                 return
-            var paths = []
-            for (var i = 0; i < drop.urls.length; ++i)
-                paths.push(mpv.localFile(drop.urls[i]))
+            // Subtitle files are added to the film, not played: mpv opens an
+            // .srt as a file of its own, and that replaced the film.
+            var media = []
+            var subtitles = []
+            for (var i = 0; i < drop.urls.length; ++i) {
+                var path = mpv.localFile(drop.urls[i])
+                if (subs.isSubtitleFile(path))
+                    subtitles.push(path)
+                else
+                    media.push(path)
+            }
+            if (media.length === 0) {
+                root.addSubtitleFiles(subtitles)
+                drop.acceptProposedAction()
+                return
+            }
             // A dropped folder is the media inside it. Expanded here rather than
             // inside openFiles, so a folder holding a single film still arrives
             // as one file to open rather than a queue of one.
-            var expanded = playlist.expand(paths)
+            var expanded = playlist.expand(media)
             if (expanded.length === 0) {
                 // Saying so, because the alternative is a drop that looks like
                 // it missed the window. A folder of subtitles and nothing else
@@ -1481,7 +1568,10 @@ ApplicationWindow {
                 drop.acceptProposedAction()
                 return
             }
+            // Subtitles dropped with a film go to that film once it loads.
+            root.subtitlesForNextOpen = subtitles
             root.openFiles(expanded)
+            root.subtitlesForNextOpen = []
             drop.acceptProposedAction()
         }
     }

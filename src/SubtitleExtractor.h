@@ -5,6 +5,7 @@
 
 #include <QtCore/QAtomicInt>
 #include <QtCore/QObject>
+#include <QtCore/QStringList>
 
 #include "SubtitleCache.h"
 #include "SubtitleTypes.h"
@@ -36,7 +37,9 @@ public:
     void setCacheEnabled(bool enabled) { m_cacheEnabled = enabled; }
 
 public slots:
-    void extract(const QString &mediaPath, int requestId);
+    // `addedFiles` are subtitle files the user added by hand. They are read like
+    // sidecars, but they need not sit next to the video or share its name.
+    void extract(const QString &mediaPath, const QStringList &addedFiles, int requestId);
 
 signals:
     // `fromCache` is true when the cues came off disk rather than out of the

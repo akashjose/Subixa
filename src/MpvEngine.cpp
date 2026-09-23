@@ -8,6 +8,7 @@
 #include <mpv/client.h>
 
 #include <QtCore/QDebug>
+#include <QtCore/QDir>
 #include <QtCore/QMetaObject>
 #include <QtCore/QSet>
 #include <QtCore/QUrl>
@@ -403,7 +404,11 @@ void MpvEngine::handleMpvEvent(void *ev)
         }
         break;
     }
+    case MPV_EVENT_START_FILE:
+        m_fileLoaded = false;
+        break;
     case MPV_EVENT_FILE_LOADED:
+        m_fileLoaded = true;
         emit fileLoaded();
         break;
     case MPV_EVENT_END_FILE: {
@@ -793,17 +798,33 @@ void MpvEngine::selectSubtitleFile(const QString &path)
             setSubtitleTrack(existing);
         return;
     }
+    // Before FILE_LOADED mpv has not auto-loaded the sidecars yet, and it
+    // publishes the video and audio tracks first. A sub-add then was refused
+    // or landed beside mpv's own copy. QML selects again on fileLoaded.
+    if (!m_fileLoaded)
+        return;
 
     // `cached` selects the file if it has already been added and adds it
     // otherwise, so clicking a sidecar tab repeatedly does not stack duplicate
-    // tracks. mpv emits a track-list change once it lands.
-    command({QStringLiteral("sub-add"), path, QStringLiteral("cached")});
+    // tracks. mpv emits a track-list change once it lands. mpv compares the
+    // names as text, so the path goes in the platform's own spelling.
+    command({QStringLiteral("sub-add"), QDir::toNativeSeparators(path),
+             QStringLiteral("cached")});
 }
 
 void MpvEngine::addSubtitleFile(const QString &path)
 {
+    // A file mpv already has is selected, not added again: sub-add adds a new
+    // track on every call, so opening one file twice listed it twice, and a
+    // sidecar mpv had auto-loaded appeared beside its own copy.
+    const int existing = MpvTrackList::subtitleIdForFile(m_tracks, path);
+    if (existing >= 0) {
+        setSubtitleTrack(existing);
+        return;
+    }
     // `select` rather than `cached`: the user just picked this file.
-    command({QStringLiteral("sub-add"), path, QStringLiteral("select")});
+    command({QStringLiteral("sub-add"), QDir::toNativeSeparators(path),
+             QStringLiteral("select")});
 }
 
 int MpvEngine::browserTrackForSubtitle(const QVariantList &browserTracks) const

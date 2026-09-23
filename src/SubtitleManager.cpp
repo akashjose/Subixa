@@ -19,6 +19,8 @@
 #include <QtCore/QVariantMap>
 #include <QtQml/QQmlEngine>
 
+#include <algorithm>
+
 namespace {
 
 QString kindName(SubtitleKind kind)
@@ -80,13 +82,19 @@ QString qualifierFor(const SubtitleTrack &track)
 // Italian tracks printed "ITA" four times.
 QString labelFor(const SubtitleTrack &track)
 {
+    // A sidecar named after the video has its filename as its title, and a
+    // release's filename is wider than the panel. The tooltip names the file,
+    // so the label says what kind of file it is: "External sub (SRT)".
+    const bool titleIsFileName =
+        track.sidecar && track.title == QFileInfo(track.sourcePath).fileName();
     QString base;
     if (!track.language.isEmpty() && track.language != QLatin1String("und"))
         base = track.language.toUpper();
-    else if (!track.title.isEmpty())
+    else if (!track.title.isEmpty() && !titleIsFileName)
         base = track.title;
     else if (track.sidecar)
-        base = QFileInfo(track.sourcePath).fileName();
+        base = QStringLiteral("External sub (%1)")
+                   .arg(QFileInfo(track.sourcePath).suffix().toUpper());
     else
         return QStringLiteral("Track %1").arg(track.id + 1);
 
@@ -147,6 +155,11 @@ void SubtitleManager::load(const QString &mediaPath)
         return;
     }
 
+    // Added files belong to the file they were added to.
+    if (!MpvTrackList::sameFile(mediaPath, m_mediaPath))
+        m_addedFiles.clear();
+    m_mediaPath = mediaPath;
+
     m_tracks.clear();
     m_tracksView.clear();
     rebuildModels();
@@ -160,7 +173,48 @@ void SubtitleManager::load(const QString &mediaPath)
     setStatus(QStringLiteral("parsing subtitles…"));
     setBusy(true);
 
-    emit extractRequested(mediaPath, m_requestId);
+    emit extractRequested(mediaPath, m_addedFiles, m_requestId);
+}
+
+void SubtitleManager::addFiles(const QStringList &paths)
+{
+    if (m_mediaPath.isEmpty())
+        return;
+    bool changed = false;
+    for (const QString &path : paths) {
+        const bool known = std::any_of(m_addedFiles.cbegin(), m_addedFiles.cend(),
+                                       [&path](const QString &added) {
+                                           return MpvTrackList::sameFile(added, path);
+                                       });
+        if (!path.isEmpty() && !known && trackForFile(path) < 0) {
+            m_addedFiles << QFileInfo(path).absoluteFilePath();
+            changed = true;
+        }
+    }
+    // A file that is already listed needs no second parse.
+    if (changed)
+        load(m_mediaPath);
+}
+
+int SubtitleManager::trackForFile(const QString &path) const
+{
+    for (int i = 0; i < m_tracks.size(); ++i) {
+        if (m_tracks[i].sidecar && MpvTrackList::sameFile(m_tracks[i].sourcePath, path))
+            return i;
+    }
+    return -1;
+}
+
+bool SubtitleManager::isSubtitleFile(const QString &path)
+{
+    // The text formats the browser reads, plus the bitmap and MicroDVD ones
+    // mpv can still draw.
+    static const QStringList extensions = {
+        QStringLiteral("srt"), QStringLiteral("ass"), QStringLiteral("ssa"),
+        QStringLiteral("vtt"), QStringLiteral("sub"), QStringLiteral("sup"),
+        QStringLiteral("idx"),
+    };
+    return extensions.contains(QFileInfo(path).suffix(), Qt::CaseInsensitive);
 }
 
 void SubtitleManager::clear()

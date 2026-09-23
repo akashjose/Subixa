@@ -62,8 +62,11 @@ Rectangle {
     // hard minimum width.
     readonly property bool wideRows: width >= 300
     // A strip of 65 tabs is unusable however it is styled. Past a handful the
-    // selector becomes a searchable picker instead.
+    // selector becomes a searchable picker instead. So is a strip that does not
+    // fit: three tracks can still overflow when one label is a release name.
+    // The tabs have explicit widths, so contentWidth is their real total.
     readonly property bool useTabs: panel.manager.tracks.length <= 6 && width >= 320
+                                    && trackTabs.contentWidth <= trackTabs.width
 
     function focusSearch() {
         searchField.forceActiveFocus()
@@ -259,6 +262,11 @@ Rectangle {
                         required property int index
                         enabled: modelData.browsable
                         implicitWidth: Math.max(tabRow.implicitWidth + Theme.space.xl, 72)
+                        // An explicit width, so TabBar keeps it. Left to the
+                        // bar, every tab gets an equal share, and long labels
+                        // drew over their neighbours. Wider than the bar, the
+                        // strip scrolls instead.
+                        width: implicitWidth
                         height: 34
 
                         background: Item {
@@ -285,8 +293,21 @@ Rectangle {
                             anchors.centerIn: parent
                             spacing: Theme.space.sm
 
+                            // Measured apart from the label: a width bound to
+                            // the label's own implicitWidth drew it empty.
+                            TextMetrics {
+                                id: labelMetrics
+                                font: tabLabel.font
+                                text: tabLabel.text
+                            }
+
                             AppText {
+                                id: tabLabel
                                 anchors.verticalCenter: parent.verticalCenter
+                                width: Math.min(Math.ceil(labelMetrics.advanceWidth),
+                                                Theme.size.tabLabelMax)
+                                height: implicitHeight
+                                elide: Text.ElideRight
                                 text: tabButton.modelData.label
                                 textFormat: Text.PlainText
                                 color: !tabButton.enabled ? Theme.color.textDisabled
